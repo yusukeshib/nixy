@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+#
+# nbrew - Homebrew-style wrapper for Nix using flake.nix
+#
+
+set -euo pipefail
+
+# Configuration
+NBREW_CONFIG_DIR="${NBREW_CONFIG_DIR:-$HOME/.config/nix}"
+GLOBAL_FLAKE="$NBREW_CONFIG_DIR/flake.nix"
+LOCAL_FLAKE="./flake.nix"
+NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helpers
+info() { echo -e "${BLUE}==>>${NC} $*"; }
+success() { echo -e "${GREEN}==>>${NC} $*"; }
+warn() { echo -e "${YELLOW}Warning:${NC} $*"; }
+error() { echo -e "${RED}Error:${NC} $*" >&2; }
+die() { error "$@"; exit 1; }
+
+# Check dependencies
+check_deps() {
+    command -v nix >/dev/null 2>&1 || die "nix is not installed"
+    command -v jq >/dev/null 2>&1 || die "jq is not installed (required for JSON parsing)"
+}
+
+# Get the flake.nix path (local takes precedence over global)
+get_flake() {
+    if [[ -f "$LOCAL_FLAKE" ]]; then
+        echo "$LOCAL_FLAKE"
+    elif [[ -f "$GLOBAL_FLAKE" ]]; then
+        echo "$GLOBAL_FLAKE"
+    else
+        echo "$GLOBAL_FLAKE"
+    fi
+}
+
+# Get flake directory
+get_flake_dir() {
+    dirname "$(get_flake)"
+}
+
+# Parse packages from flake.nix (profile packages)
+get_packages_from_flake() {
+    local flake="$1"
+    if [[ -f "$flake" ]]; then
+        # Extract package names from the packages section (format: "name = pkgs.name;")
+        sed -n '/# \[nbrew:packages\]/,/# \[\/nbrew:packages\]/p' "$flake" 2>/dev/null | \
+            grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' | \
+            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/' | \
+            sort -u
+    fi
+}
+
+# Parse dev packages from flake.nix
+get_dev_packages_from_flake() {
+    local flake="$1"
+    if [[ -f "$flake" ]]; then
+        # Extract package names from buildInputs
+        sed -n '/# \[nbrew:devShell\]/,/# \[\/nbrew:devShell\]/p' "$flake" 2>/dev/null | \
+            grep -E '^\s+pkgs\.' | \
+            sed 's/.*pkgs\.\([a-zA-Z0-9_-]*\).*/\1/' | \
+            sort -u
+    fi
+}
+
+# Get list of installed packages from nix profile
+get_installed_packages() {
+    nix "${NIX_FLAGS[@]}" profile list --json 2>/dev/null | \
+        jq -r '.elements | keys[]' 2>/dev/null || true
+}
+
+# Install a package
+cmd_install() {
+    local pkg="$1"
+    [[ -z "$pkg" ]] && die "Usage: nbrew install <package>"
+
+    info "Installing $pkg..."
+    nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
+    success "Installed $pkg"
+}
+
+# Uninstall a package
+cmd_uninstall() {
+    local pkg="$1"
+    [[ -z "$pkg" ]] && die "Usage: nbrew uninstall <package>"
+
+    info "Uninstalling $pkg..."
+
+    # Check if installed
+    local installed
+    installed=$(get_installed_packages)
+    if ! echo "$installed" | grep -qx "$pkg"; then
+        die "Package $pkg is not installed"
+    fi
+
+    nix "${NIX_FLAGS[@]}" profile remove "$pkg"
+    success "Uninstalled $pkg"
+}
+
+# Search for packages
+cmd_search() {
+    local query="$1"
+    [[ -z "$query" ]] && die "Usage: nbrew search <query>"
+
+    info "Searching for $query..."
+    nix "${NIX_FLAGS[@]}" search nixpkgs "$query"
+}
+
+# List installed packages
+cmd_list() {
+    info "Installed packages:"
+    nix "${NIX_FLAGS[@]}" profile list
+}
+
+# Upgrade all packages
+cmd_upgrade() {
+    info "Upgrading all packages..."
+    nix "${NIX_FLAGS[@]}" profile upgrade '.*'
+    success "All packages upgraded"
+}
+
+# Garbage collect old generations
+cmd_gc() {
+    info "Running garbage collection..."
+    nix-collect-garbage -d
+    success "Garbage collection complete"
+}
+
+# Generate flake.nix content
+generate_flake() {
+    local -a packages=("$@")
+    local pkg_entries=""
+    local shell_entries=""
+
+    for pkg in "${packages[@]}"; do
+        [[ -z "$pkg" ]] && continue
+        pkg_entries+="          $pkg = pkgs.$pkg;"$'\n'
+        shell_entries+="              pkgs.$pkg"$'\n'
+    done
+
+    cat << EOF
+{
+  description = "nbrew managed packages";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+    in {
+      # Profile packages (nbrew bundle)
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.\${system};
+        in {
+          # [nbrew:packages]
+${pkg_entries}          # [/nbrew:packages]
+        });
+
+      # Development shell (nbrew shell)
+      devShells = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.\${system};
+        in {
+          default = pkgs.mkShell {
+            buildInputs = [
+              # [nbrew:devShell]
+${shell_entries}              # [/nbrew:devShell]
+            ];
+          };
+        });
+    };
+}
+EOF
+}
+
+# Bundle install - install all packages from flake.nix
+cmd_bundle_install() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake. Run 'nbrew init' first."
+    fi
+
+    info "Installing packages from $flake..."
+
+    local packages
+    packages=$(get_packages_from_flake "$flake")
+
+    if [[ -z "$packages" ]]; then
+        warn "No packages defined in flake.nix"
+        return 0
+    fi
+
+    local installed
+    installed=$(get_installed_packages)
+
+    local to_install=()
+    for pkg in $packages; do
+        if ! echo "$installed" | grep -qx "$pkg"; then
+            to_install+=("$pkg")
+        fi
+    done
+
+    if [[ ${#to_install[@]} -eq 0 ]]; then
+        success "All packages are already installed"
+        return 0
+    fi
+
+    info "Installing ${#to_install[@]} package(s): ${to_install[*]}"
+
+    for pkg in "${to_install[@]}"; do
+        info "Installing $pkg..."
+        nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg" || warn "Failed to install $pkg"
+    done
+
+    success "Bundle install complete"
+}
+
+# Bundle dump - export installed packages to flake.nix
+cmd_bundle_dump() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    info "Dumping installed packages to $flake..."
+
+    # Ensure directory exists
+    mkdir -p "$flake_dir"
+
+    # Get installed packages
+    local -a packages=()
+    while IFS= read -r pkg; do
+        [[ -n "$pkg" ]] && packages+=("$pkg")
+    done < <(get_installed_packages)
+
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        warn "No packages installed"
+    fi
+
+    # Generate and write flake.nix
+    generate_flake "${packages[@]}" > "$flake"
+
+    success "Dumped ${#packages[@]} package(s) to $flake"
+    info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"
+}
+
+# Bundle cleanup - remove packages not in flake.nix
+cmd_bundle_cleanup() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake"
+    fi
+
+    info "Cleaning up packages not in $flake..."
+
+    local declared_packages
+    declared_packages=$(get_packages_from_flake "$flake")
+
+    local installed
+    installed=$(get_installed_packages)
+
+    local -a to_remove=()
+    for pkg in $installed; do
+        if ! echo "$declared_packages" | grep -qx "$pkg"; then
+            to_remove+=("$pkg")
+        fi
+    done
+
+    if [[ ${#to_remove[@]} -eq 0 ]]; then
+        success "No packages to remove"
+        return 0
+    fi
+
+    info "Removing ${#to_remove[@]} package(s):"
+    for pkg in "${to_remove[@]}"; do
+        echo "  - $pkg"
+    done
+
+    echo ""
+    read -rp "Proceed? [y/N] " confirm
+    if [[ "$confirm" != [yY] ]]; then
+        info "Aborted"
+        return 0
+    fi
+
+    for pkg in "${to_remove[@]}"; do
+        info "Removing $pkg..."
+        nix "${NIX_FLAGS[@]}" profile remove "$pkg" || warn "Failed to remove $pkg"
+    done
+
+    success "Cleanup complete"
+}
+
+# Bundle check - verify all flake packages are installed
+cmd_bundle_check() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake"
+    fi
+
+    info "Checking packages from $flake..."
+
+    local packages
+    packages=$(get_packages_from_flake "$flake")
+    local installed
+    installed=$(get_installed_packages)
+
+    local -a missing=()
+    local found=0
+
+    for pkg in $packages; do
+        if echo "$installed" | grep -qx "$pkg"; then
+            ((found++)) || true
+        else
+            missing+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        success "All $found packages are installed"
+        return 0
+    else
+        warn "Missing ${#missing[@]} package(s):"
+        for pkg in "${missing[@]}"; do
+            echo "  - $pkg"
+        done
+        return 1
+    fi
+}
+
+# Update flake.lock
+cmd_bundle_lock() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake"
+    fi
+
+    info "Updating flake.lock..."
+    nix "${NIX_FLAGS[@]}" flake update "$flake_dir"
+    success "flake.lock updated"
+}
+
+# Enter dev shell
+cmd_shell() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake. Run 'nbrew init' first."
+    fi
+
+    info "Entering dev shell..."
+    nix "${NIX_FLAGS[@]}" develop "$flake_dir" --impure
+}
+
+# Initialize a new flake.nix
+cmd_init() {
+    local flake_dir
+    if [[ "${1:-}" == "--local" ]]; then
+        flake_dir="."
+    else
+        flake_dir="$NBREW_CONFIG_DIR"
+    fi
+    local flake="$flake_dir/flake.nix"
+
+    if [[ -f "$flake" ]]; then
+        die "flake.nix already exists at $flake"
+    fi
+
+    mkdir -p "$flake_dir"
+
+    # Create empty flake
+    generate_flake > "$flake"
+
+    success "Created $flake"
+    info "Add packages with 'nbrew install <pkg>', then 'nbrew bundle dump' to save"
+}
+
+# Add package to flake.nix
+cmd_add() {
+    local pkg="$1"
+    [[ -z "$pkg" ]] && die "Usage: nbrew add <package>"
+
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    # Install first
+    cmd_install "$pkg"
+
+    # Then update flake.nix
+    if [[ -f "$flake" ]]; then
+        info "Updating $flake..."
+        cmd_bundle_dump
+    fi
+}
+
+# Show help
+cmd_help() {
+    cat << 'EOF'
+nbrew - Homebrew-style wrapper for Nix (using flake.nix)
+
+USAGE:
+    nbrew <command> [args]
+
+BASIC COMMANDS:
+    install <pkg>     Install a package to profile
+    uninstall <pkg>   Uninstall a package
+    add <pkg>         Install and save to flake.nix
+    search <query>    Search for packages
+    list              List installed packages
+    upgrade           Upgrade all packages
+
+BUNDLE COMMANDS (flake.nix):
+    bundle            Install all packages from flake.nix
+    bundle dump       Export installed packages to flake.nix
+    bundle cleanup    Remove packages not in flake.nix
+    bundle check      Verify all flake packages are installed
+    bundle lock       Update flake.lock
+
+ENVIRONMENT COMMANDS:
+    shell             Enter dev shell from flake.nix
+    gc                Garbage collect old generations
+    init [--local]    Create a new flake.nix
+
+CONFIG FILES:
+    Global: ~/.config/nix/flake.nix
+    Local:  ./flake.nix (takes precedence if exists)
+
+EXAMPLES:
+    nbrew install ripgrep      # Install to profile
+    nbrew add nodejs           # Install and save to flake.nix
+    nbrew bundle dump          # Save all installed to flake.nix
+    nbrew bundle               # Install from flake.nix
+    nbrew shell                # Enter dev shell
+
+EOF
+}
+
+# Main entry point
+main() {
+    check_deps
+
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        install)
+            cmd_install "${1:-}"
+            ;;
+        add)
+            cmd_add "${1:-}"
+            ;;
+        uninstall|remove)
+            cmd_uninstall "${1:-}"
+            ;;
+        search)
+            cmd_search "${1:-}"
+            ;;
+        list|ls)
+            cmd_list
+            ;;
+        upgrade)
+            cmd_upgrade
+            ;;
+        gc)
+            cmd_gc
+            ;;
+        shell|dev)
+            cmd_shell
+            ;;
+        init)
+            cmd_init "${1:-}"
+            ;;
+        bundle)
+            local subcmd="${1:-install}"
+            case "$subcmd" in
+                install|"")
+                    cmd_bundle_install
+                    ;;
+                dump)
+                    cmd_bundle_dump
+                    ;;
+                cleanup|clean)
+                    cmd_bundle_cleanup
+                    ;;
+                check)
+                    cmd_bundle_check
+                    ;;
+                lock|update)
+                    cmd_bundle_lock
+                    ;;
+                *)
+                    die "Unknown bundle command: $subcmd"
+                    ;;
+            esac
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            die "Unknown command: $cmd. Run 'nbrew help' for usage."
+            ;;
+    esac
+}
+
+main "$@"
