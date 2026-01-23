@@ -9,6 +9,7 @@ set -euo pipefail
 NBREW_CONFIG_DIR="${NBREW_CONFIG_DIR:-$HOME/.config/nix}"
 GLOBAL_FLAKE="$NBREW_CONFIG_DIR/flake.nix"
 LOCAL_FLAKE="./flake.nix"
+LOCAL_PACKAGES_DIR="${NBREW_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Colors for output
@@ -42,9 +43,16 @@ get_flake() {
     fi
 }
 
-# Get flake directory
+# Get flake directory (resolves symlinks)
 get_flake_dir() {
-    dirname "$(get_flake)"
+    local flake
+    flake="$(get_flake)"
+    # Resolve symlinks to get real path
+    if [[ -L "$flake" ]]; then
+        dirname "$(readlink "$flake")"
+    else
+        dirname "$flake"
+    fi
 }
 
 # Parse packages from flake.nix (profile packages)
@@ -79,8 +87,23 @@ get_installed_packages() {
 
 # Install a package and track in flake.nix
 cmd_install() {
-    local pkg="$1"
-    [[ -z "$pkg" ]] && die "Usage: nbrew install <package>"
+    local pkg=""
+    local file=""
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --file|-f) file="$2"; shift 2 ;;
+            *) pkg="$1"; shift ;;
+        esac
+    done
+
+    if [[ -n "$file" ]]; then
+        cmd_install_from_file "$file"
+        return
+    fi
+
+    [[ -z "$pkg" ]] && die "Usage: nbrew install <package> or nbrew install --file <path>"
 
     info "Installing $pkg..."
     nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
@@ -88,6 +111,56 @@ cmd_install() {
 
     # Update flake.nix (creates if doesn't exist)
     cmd_bundle_dump
+}
+
+# Parse a local package nix file and extract attributes
+parse_local_package() {
+    local file="$1"
+    local attr="$2"
+    # Extract attribute value from nix file format: name = "value"; or name = value;
+    # First try quoted values, then unquoted
+    local result
+    result=$(grep -E "^[[:space:]]*$attr[[:space:]]*=" "$file" | head -1 | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+    if [[ "$result" == *"="* ]]; then
+        # Fallback for unquoted values
+        result=$(grep -E "^[[:space:]]*$attr[[:space:]]*=" "$file" | head -1 | sed 's/.*=[[:space:]]*\([^;]*\);.*/\1/' | tr -d ' ')
+    fi
+    echo "$result"
+}
+
+# Install a package from a local nix file
+cmd_install_from_file() {
+    local file="$1"
+
+    # Validate file exists
+    [[ ! -f "$file" ]] && die "File not found: $file"
+
+    # Extract package name from file
+    local pkg_name
+    pkg_name=$(parse_local_package "$file" "name")
+    [[ -z "$pkg_name" ]] && die "Could not find 'name' attribute in $file"
+
+    info "Installing local package: $pkg_name from $file"
+
+    # Create packages directory if needed (handle symlinks)
+    local pkg_dir="$LOCAL_PACKAGES_DIR"
+    [[ -L "$pkg_dir" ]] && pkg_dir="$(readlink "$pkg_dir")"
+    mkdir -p "$pkg_dir"
+
+    # Copy file to packages directory
+    local dest="$LOCAL_PACKAGES_DIR/$pkg_name.nix"
+    cp "$file" "$dest"
+    success "Copied package definition to $dest"
+
+    # Regenerate flake.nix with local packages
+    cmd_bundle_dump
+
+    # Install from the regenerated flake
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    info "Installing $pkg_name from flake..."
+    nix "${NIX_FLAGS[@]}" profile install "$flake_dir#$pkg_name"
+    success "Installed $pkg_name"
 }
 
 # Uninstall a package
@@ -106,6 +179,14 @@ cmd_uninstall() {
 
     nix "${NIX_FLAGS[@]}" profile remove "$pkg"
     success "Uninstalled $pkg"
+
+    # Check if this is a local package and remove the nix file
+    local local_pkg_file="$LOCAL_PACKAGES_DIR/$pkg.nix"
+    if [[ -f "$local_pkg_file" ]]; then
+        info "Removing local package definition: $local_pkg_file"
+        rm "$local_pkg_file"
+        success "Removed local package file"
+    fi
 
     # Update flake.nix
     cmd_bundle_dump
@@ -153,17 +234,132 @@ cmd_gc() {
     success "Garbage collection complete"
 }
 
+# Collect local packages info
+# Sets arrays: LOCAL_PKG_NAMES, LOCAL_PKG_INPUTS, LOCAL_PKG_OVERLAYS, LOCAL_PKG_EXPRS
+collect_local_packages() {
+    LOCAL_PKG_NAMES=()
+    LOCAL_PKG_INPUTS=()
+    LOCAL_PKG_OVERLAYS=()
+    LOCAL_PKG_EXPRS=()
+
+    [[ ! -d "$LOCAL_PACKAGES_DIR" ]] && return
+
+    for pkg_file in "$LOCAL_PACKAGES_DIR"/*.nix; do
+        [[ ! -f "$pkg_file" ]] && continue
+
+        local name input_name input_url overlay pkg_expr
+
+        name=$(parse_local_package "$pkg_file" "name")
+        [[ -z "$name" ]] && continue
+
+        # Parse inputs block - extract input name and url (handles multiline)
+        # Format: inputs = { \n  name.url = "url"; \n };
+        # Look for lines containing .url = within the inputs block
+        input_name=$(grep '\.url[[:space:]]*=' "$pkg_file" | head -1 | sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\)\.url.*/\1/')
+        input_url=$(grep '\.url[[:space:]]*=' "$pkg_file" | head -1 | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+
+        overlay=$(parse_local_package "$pkg_file" "overlay")
+        pkg_expr=$(parse_local_package "$pkg_file" "packageExpr")
+
+        LOCAL_PKG_NAMES+=("$name")
+        LOCAL_PKG_INPUTS+=("$input_name|$input_url")
+        LOCAL_PKG_OVERLAYS+=("$overlay")
+        LOCAL_PKG_EXPRS+=("$pkg_expr")
+    done
+}
+
 # Generate flake.nix content
 generate_flake() {
     local -a packages=("$@")
     local pkg_entries=""
     local shell_entries=""
 
+    # Filter out local packages from standard packages list
+    collect_local_packages
+    local -a filtered_packages=()
     for pkg in "${packages[@]}"; do
+        [[ -z "$pkg" ]] && continue
+        local is_local=false
+        for local_name in "${LOCAL_PKG_NAMES[@]}"; do
+            if [[ "$pkg" == "$local_name" ]]; then
+                is_local=true
+                break
+            fi
+        done
+        if [[ "$is_local" == "false" ]]; then
+            filtered_packages+=("$pkg")
+        fi
+    done
+
+    for pkg in "${filtered_packages[@]}"; do
         [[ -z "$pkg" ]] && continue
         pkg_entries+="          $pkg = pkgs.$pkg;"$'\n'
         shell_entries+="              pkgs.$pkg"$'\n'
     done
+
+    # Build local inputs section
+    local local_inputs=""
+    local local_input_params=""
+    local local_overlays=""
+    local local_packages=""
+
+    for i in "${!LOCAL_PKG_NAMES[@]}"; do
+        local name="${LOCAL_PKG_NAMES[$i]}"
+        local input_info="${LOCAL_PKG_INPUTS[$i]}"
+        local overlay="${LOCAL_PKG_OVERLAYS[$i]}"
+        local pkg_expr="${LOCAL_PKG_EXPRS[$i]}"
+
+        local input_name="${input_info%%|*}"
+        local input_url="${input_info##*|}"
+
+        if [[ -n "$input_name" && -n "$input_url" ]]; then
+            local_inputs+="    $input_name.url = \"$input_url\";"$'\n'
+            local_input_params+="$input_name, "
+        fi
+
+        if [[ -n "$overlay" ]]; then
+            local_overlays+="          $overlay"$'\n'
+        fi
+
+        if [[ -n "$pkg_expr" ]]; then
+            local_packages+="          $name = $pkg_expr;"$'\n'
+            shell_entries+="              $pkg_expr"$'\n'
+        fi
+    done
+
+    # Build outputs function parameters
+    local output_params="self, nixpkgs"
+    if [[ -n "$local_input_params" ]]; then
+        output_params="self, nixpkgs, ${local_input_params%, }"
+    fi
+
+    # Build overlays array
+    local overlays_content=""
+    if [[ -n "$local_overlays" ]]; then
+        overlays_content="overlays = [
+          # [nbrew:local-overlays]
+${local_overlays}          # [/nbrew:local-overlays]
+        ];"
+    fi
+
+    # Determine pkgs definition based on whether we have overlays
+    local pkgs_def
+    if [[ -n "$local_overlays" ]]; then
+        pkgs_def="pkgsFor = system: import nixpkgs {
+        inherit system;
+        $overlays_content
+      };
+"
+    else
+        pkgs_def=""
+    fi
+
+    local pkgs_binding
+    if [[ -n "$local_overlays" ]]; then
+        pkgs_binding="let pkgs = pkgsFor system;"
+    else
+        pkgs_binding="let pkgs = nixpkgs.legacyPackages.\${system};"
+    fi
 
     cat << EOF
 {
@@ -171,24 +367,29 @@ generate_flake() {
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # [nbrew:local-inputs]
+${local_inputs}    # [/nbrew:local-inputs]
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { $output_params }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+      $pkgs_def
     in {
       # Profile packages (nbrew bundle)
       packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.\${system};
+        $pkgs_binding
         in {
           # [nbrew:packages]
 ${pkg_entries}          # [/nbrew:packages]
+          # [nbrew:local-packages]
+${local_packages}          # [/nbrew:local-packages]
         });
 
       # Development shell (nbrew shell)
       devShells = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.\${system};
+        $pkgs_binding
         in {
           default = pkgs.mkShell {
             buildInputs = [
@@ -308,27 +509,38 @@ USAGE:
     nbrew <command> [args]
 
 BASIC COMMANDS:
-    install <pkg>     Install a package (tracked in flake.nix)
-    uninstall <pkg>   Uninstall a package
-    search <query>    Search for packages
-    list              List installed packages
-    upgrade           Upgrade all packages
+    install <pkg>           Install a package (tracked in flake.nix)
+    install --file <path>   Install from local nix file
+    uninstall <pkg>         Uninstall a package
+    search <query>          Search for packages
+    list                    List installed packages
+    upgrade                 Upgrade all packages
 
 SYNC COMMANDS:
-    bundle            Sync installed packages with flake.nix
+    bundle                  Sync installed packages with flake.nix
 
 ENVIRONMENT COMMANDS:
-    shell             Enter dev shell from flake.nix
-    gc                Garbage collect old generations
+    shell                   Enter dev shell from flake.nix
+    gc                      Garbage collect old generations
 
 CONFIG FILES:
     Global: ~/.config/nix/flake.nix
     Local:  ./flake.nix (takes precedence if exists)
+    Local packages: ~/.config/nix/packages/
+
+LOCAL PACKAGE FORMAT:
+    {
+      name = "my-package";
+      inputs = { overlay-name.url = "github:user/repo"; };
+      overlay = "overlay-name.overlays.default";
+      packageExpr = "pkgs.my-package";
+    }
 
 EXAMPLES:
-    nbrew install ripgrep      # Install package
-    nbrew bundle               # Install from flake.nix (on new machine)
-    nbrew shell                # Enter dev shell
+    nbrew install ripgrep                # Install package
+    nbrew install --file neovim.nix      # Install from local nix file
+    nbrew bundle                         # Install from flake.nix (on new machine)
+    nbrew shell                          # Enter dev shell
 
 EOF
 }
@@ -342,7 +554,7 @@ main() {
 
     case "$cmd" in
         install|add)
-            cmd_install "${1:-}"
+            cmd_install "$@"
             ;;
         uninstall|remove)
             cmd_uninstall "${1:-}"
