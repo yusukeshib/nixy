@@ -10,12 +10,20 @@ A simple bash wrapper that makes Nix behave like Homebrew, using `flake.nix` for
 ## Installation
 
 ```bash
-# Copy nbrew to your PATH
+curl -fsSL https://raw.githubusercontent.com/yusukeshib/nbrew/main/install.sh | bash
+```
+
+Start using it right away:
+
+```bash
+nbrew install ripgrep
+```
+
+### Manual Installation
+
+```bash
 cp nbrew ~/.local/bin/
 chmod +x ~/.local/bin/nbrew
-
-# Initialize global flake.nix
-nbrew init
 ```
 
 ## Configuration
@@ -61,22 +69,17 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
 
 | Command | Description |
 |---------|-------------|
-| `nbrew install <pkg>` | Install a package to nix profile |
+| `nbrew install <pkg>` | Install a package (tracked in flake.nix) |
 | `nbrew uninstall <pkg>` | Uninstall a package |
-| `nbrew add <pkg>` | Install and save to flake.nix |
 | `nbrew search <query>` | Search for packages |
 | `nbrew list` | List installed packages |
 | `nbrew upgrade` | Upgrade all packages |
 
-### Bundle Commands (for reproducibility)
+### Sync Commands
 
 | Command | Description |
 |---------|-------------|
-| `nbrew bundle` | Install all packages from flake.nix |
-| `nbrew bundle dump` | Export installed packages to flake.nix |
-| `nbrew bundle cleanup` | Remove packages not in flake.nix |
-| `nbrew bundle check` | Verify all flake packages are installed |
-| `nbrew bundle lock` | Update flake.lock |
+| `nbrew bundle` | Sync installed packages with flake.nix |
 
 ### Environment Commands
 
@@ -84,8 +87,6 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
 |---------|-------------|
 | `nbrew shell` | Enter dev shell from flake.nix |
 | `nbrew gc` | Garbage collect old generations |
-| `nbrew init` | Create global flake.nix (~/.config/nix/) |
-| `nbrew init --local` | Create local flake.nix (./flake.nix) |
 
 ## Config Files
 
@@ -99,34 +100,20 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
 # Install a package
 nbrew install ripgrep
 
-# Install and save to flake.nix
-nbrew add nodejs
+# Upgrade all packages (updates nixpkgs too)
+nbrew upgrade
 
-# Export all installed packages to flake.nix
-nbrew bundle dump
-
-# Install from flake.nix (on a new machine)
+# Sync with flake.nix (on a new machine or after manual edits)
 nbrew bundle
 
-# Check if flake.nix matches installed packages
-nbrew bundle check
-
-# Remove packages not in flake.nix
-nbrew bundle cleanup
-
-# Enter dev shell with devShell packages
+# Enter dev shell
 nbrew shell
-
-# Update to latest nixpkgs
-nbrew bundle lock
 ```
 
 ## Workflow
 
-1. **Initial setup**: Run `nbrew init` to create a flake.nix
-2. **Install packages**: Use `nbrew add <pkg>` to install and track packages
-3. **Sync across machines**: Commit flake.nix and flake.lock to git, then run `nbrew bundle` on other machines
-4. **Keep clean**: Run `nbrew bundle cleanup` to remove untracked packages
+1. **Install packages**: Use `nbrew install <pkg>` (automatically tracked in flake.nix)
+2. **Sync across machines**: Commit flake.nix and flake.lock to git, then run `nbrew bundle` on other machines
 
 ## Limitations
 

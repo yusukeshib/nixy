@@ -77,7 +77,7 @@ get_installed_packages() {
         jq -r '.elements | keys[]' 2>/dev/null || true
 }
 
-# Install a package
+# Install a package and track in flake.nix
 cmd_install() {
     local pkg="$1"
     [[ -z "$pkg" ]] && die "Usage: nbrew install <package>"
@@ -85,6 +85,9 @@ cmd_install() {
     info "Installing $pkg..."
     nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
     success "Installed $pkg"
+
+    # Update flake.nix (creates if doesn't exist)
+    cmd_bundle_dump
 }
 
 # Uninstall a package
@@ -103,6 +106,9 @@ cmd_uninstall() {
 
     nix "${NIX_FLAGS[@]}" profile remove "$pkg"
     success "Uninstalled $pkg"
+
+    # Update flake.nix
+    cmd_bundle_dump
 }
 
 # Search for packages
@@ -122,9 +128,22 @@ cmd_list() {
 
 # Upgrade all packages
 cmd_upgrade() {
+    local flake_dir
+    flake_dir=$(get_flake_dir)
+    local flake="$flake_dir/flake.nix"
+
+    # Update flake.lock if flake.nix exists
+    if [[ -f "$flake" ]]; then
+        info "Updating flake.lock..."
+        nix "${NIX_FLAGS[@]}" flake update "$flake_dir"
+    fi
+
     info "Upgrading all packages..."
     nix "${NIX_FLAGS[@]}" profile upgrade '.*'
     success "All packages upgraded"
+
+    # Update flake.nix
+    cmd_bundle_dump
 }
 
 # Garbage collect old generations
@@ -183,29 +202,25 @@ ${shell_entries}              # [/nbrew:devShell]
 EOF
 }
 
-# Bundle install - install all packages from flake.nix
+# Bundle sync - sync installed packages with flake.nix
 cmd_bundle_install() {
     local flake_dir
     flake_dir=$(get_flake_dir)
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake. Run 'nbrew init' first."
+        die "No flake.nix found at $flake. Run 'nbrew install <package>' to create one."
     fi
 
-    info "Installing packages from $flake..."
+    info "Syncing packages with $flake..."
 
     local packages
     packages=$(get_packages_from_flake "$flake")
 
-    if [[ -z "$packages" ]]; then
-        warn "No packages defined in flake.nix"
-        return 0
-    fi
-
     local installed
     installed=$(get_installed_packages)
 
+    # Find packages to install (in flake but not installed)
     local to_install=()
     for pkg in $packages; do
         if ! echo "$installed" | grep -qx "$pkg"; then
@@ -213,19 +228,32 @@ cmd_bundle_install() {
         fi
     done
 
-    if [[ ${#to_install[@]} -eq 0 ]]; then
-        success "All packages are already installed"
+    # Find packages to remove (installed but not in flake)
+    local to_remove=()
+    for pkg in $installed; do
+        if ! echo "$packages" | grep -qx "$pkg"; then
+            to_remove+=("$pkg")
+        fi
+    done
+
+    if [[ ${#to_install[@]} -eq 0 ]] && [[ ${#to_remove[@]} -eq 0 ]]; then
+        success "Already in sync"
         return 0
     fi
 
-    info "Installing ${#to_install[@]} package(s): ${to_install[*]}"
-
+    # Install missing packages
     for pkg in "${to_install[@]}"; do
         info "Installing $pkg..."
         nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg" || warn "Failed to install $pkg"
     done
 
-    success "Bundle install complete"
+    # Remove extra packages
+    for pkg in "${to_remove[@]}"; do
+        info "Removing $pkg..."
+        nix "${NIX_FLAGS[@]}" profile remove "$pkg" || warn "Failed to remove $pkg"
+    done
+
+    success "Sync complete"
 }
 
 # Bundle dump - export installed packages to flake.nix
@@ -256,111 +284,6 @@ cmd_bundle_dump() {
     info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"
 }
 
-# Bundle cleanup - remove packages not in flake.nix
-cmd_bundle_cleanup() {
-    local flake_dir
-    flake_dir=$(get_flake_dir)
-    local flake="$flake_dir/flake.nix"
-
-    if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake"
-    fi
-
-    info "Cleaning up packages not in $flake..."
-
-    local declared_packages
-    declared_packages=$(get_packages_from_flake "$flake")
-
-    local installed
-    installed=$(get_installed_packages)
-
-    local -a to_remove=()
-    for pkg in $installed; do
-        if ! echo "$declared_packages" | grep -qx "$pkg"; then
-            to_remove+=("$pkg")
-        fi
-    done
-
-    if [[ ${#to_remove[@]} -eq 0 ]]; then
-        success "No packages to remove"
-        return 0
-    fi
-
-    info "Removing ${#to_remove[@]} package(s):"
-    for pkg in "${to_remove[@]}"; do
-        echo "  - $pkg"
-    done
-
-    echo ""
-    read -rp "Proceed? [y/N] " confirm
-    if [[ "$confirm" != [yY] ]]; then
-        info "Aborted"
-        return 0
-    fi
-
-    for pkg in "${to_remove[@]}"; do
-        info "Removing $pkg..."
-        nix "${NIX_FLAGS[@]}" profile remove "$pkg" || warn "Failed to remove $pkg"
-    done
-
-    success "Cleanup complete"
-}
-
-# Bundle check - verify all flake packages are installed
-cmd_bundle_check() {
-    local flake_dir
-    flake_dir=$(get_flake_dir)
-    local flake="$flake_dir/flake.nix"
-
-    if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake"
-    fi
-
-    info "Checking packages from $flake..."
-
-    local packages
-    packages=$(get_packages_from_flake "$flake")
-    local installed
-    installed=$(get_installed_packages)
-
-    local -a missing=()
-    local found=0
-
-    for pkg in $packages; do
-        if echo "$installed" | grep -qx "$pkg"; then
-            ((found++)) || true
-        else
-            missing+=("$pkg")
-        fi
-    done
-
-    if [[ ${#missing[@]} -eq 0 ]]; then
-        success "All $found packages are installed"
-        return 0
-    else
-        warn "Missing ${#missing[@]} package(s):"
-        for pkg in "${missing[@]}"; do
-            echo "  - $pkg"
-        done
-        return 1
-    fi
-}
-
-# Update flake.lock
-cmd_bundle_lock() {
-    local flake_dir
-    flake_dir=$(get_flake_dir)
-    local flake="$flake_dir/flake.nix"
-
-    if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake"
-    fi
-
-    info "Updating flake.lock..."
-    nix "${NIX_FLAGS[@]}" flake update "$flake_dir"
-    success "flake.lock updated"
-}
-
 # Enter dev shell
 cmd_shell() {
     local flake_dir
@@ -368,54 +291,13 @@ cmd_shell() {
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake. Run 'nbrew init' first."
+        die "No flake.nix found at $flake. Run 'nbrew add <package>' to create one."
     fi
 
     info "Entering dev shell..."
     nix "${NIX_FLAGS[@]}" develop "$flake_dir" --impure
 }
 
-# Initialize a new flake.nix
-cmd_init() {
-    local flake_dir
-    if [[ "${1:-}" == "--local" ]]; then
-        flake_dir="."
-    else
-        flake_dir="$NBREW_CONFIG_DIR"
-    fi
-    local flake="$flake_dir/flake.nix"
-
-    if [[ -f "$flake" ]]; then
-        die "flake.nix already exists at $flake"
-    fi
-
-    mkdir -p "$flake_dir"
-
-    # Create empty flake
-    generate_flake > "$flake"
-
-    success "Created $flake"
-    info "Add packages with 'nbrew install <pkg>', then 'nbrew bundle dump' to save"
-}
-
-# Add package to flake.nix
-cmd_add() {
-    local pkg="$1"
-    [[ -z "$pkg" ]] && die "Usage: nbrew add <package>"
-
-    local flake_dir
-    flake_dir=$(get_flake_dir)
-    local flake="$flake_dir/flake.nix"
-
-    # Install first
-    cmd_install "$pkg"
-
-    # Then update flake.nix
-    if [[ -f "$flake" ]]; then
-        info "Updating $flake..."
-        cmd_bundle_dump
-    fi
-}
 
 # Show help
 cmd_help() {
@@ -426,34 +308,26 @@ USAGE:
     nbrew <command> [args]
 
 BASIC COMMANDS:
-    install <pkg>     Install a package to profile
+    install <pkg>     Install a package (tracked in flake.nix)
     uninstall <pkg>   Uninstall a package
-    add <pkg>         Install and save to flake.nix
     search <query>    Search for packages
     list              List installed packages
     upgrade           Upgrade all packages
 
-BUNDLE COMMANDS (flake.nix):
-    bundle            Install all packages from flake.nix
-    bundle dump       Export installed packages to flake.nix
-    bundle cleanup    Remove packages not in flake.nix
-    bundle check      Verify all flake packages are installed
-    bundle lock       Update flake.lock
+SYNC COMMANDS:
+    bundle            Sync installed packages with flake.nix
 
 ENVIRONMENT COMMANDS:
     shell             Enter dev shell from flake.nix
     gc                Garbage collect old generations
-    init [--local]    Create a new flake.nix
 
 CONFIG FILES:
     Global: ~/.config/nix/flake.nix
     Local:  ./flake.nix (takes precedence if exists)
 
 EXAMPLES:
-    nbrew install ripgrep      # Install to profile
-    nbrew add nodejs           # Install and save to flake.nix
-    nbrew bundle dump          # Save all installed to flake.nix
-    nbrew bundle               # Install from flake.nix
+    nbrew install ripgrep      # Install package
+    nbrew bundle               # Install from flake.nix (on new machine)
     nbrew shell                # Enter dev shell
 
 EOF
@@ -467,11 +341,8 @@ main() {
     shift || true
 
     case "$cmd" in
-        install)
+        install|add)
             cmd_install "${1:-}"
-            ;;
-        add)
-            cmd_add "${1:-}"
             ;;
         uninstall|remove)
             cmd_uninstall "${1:-}"
@@ -491,31 +362,9 @@ main() {
         shell|dev)
             cmd_shell
             ;;
-        init)
-            cmd_init "${1:-}"
-            ;;
         bundle)
             local subcmd="${1:-install}"
-            case "$subcmd" in
-                install|"")
-                    cmd_bundle_install
-                    ;;
-                dump)
-                    cmd_bundle_dump
-                    ;;
-                cleanup|clean)
-                    cmd_bundle_cleanup
-                    ;;
-                check)
-                    cmd_bundle_check
-                    ;;
-                lock|update)
-                    cmd_bundle_lock
-                    ;;
-                *)
-                    die "Unknown bundle command: $subcmd"
-                    ;;
-            esac
+            cmd_bundle_install
             ;;
         help|--help|-h)
             cmd_help
