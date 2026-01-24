@@ -799,6 +799,8 @@ cmd_self_upgrade() {
     # Compare versions
     if [[ "$NIXY_VERSION" == "$remote_version" ]] && [[ "$force" != "true" ]]; then
         success "Already up to date!"
+        rm -f "$tmp_file"
+        trap - EXIT
         return 0
     fi
 
