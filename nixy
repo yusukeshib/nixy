@@ -133,8 +133,8 @@ cmd_install() {
     nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
     success "Installed $pkg"
 
-    # Update flake.nix (creates if doesn't exist)
-    cmd_bundle_dump "$use_global"
+    # Add package to flake.nix
+    add_package_to_flake "$pkg" "$use_global"
 }
 
 # Parse a local package nix file and extract attributes
@@ -177,12 +177,19 @@ cmd_install_from_file() {
     cp "$file" "$dest"
     success "Copied package definition to $dest"
 
-    # Regenerate flake.nix with local packages
-    cmd_bundle_dump "$use_global"
-
-    # Install from the regenerated flake
+    # Regenerate flake.nix preserving existing packages
     local flake_dir
     flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local flake="$flake_dir/flake.nix"
+
+    local -a packages=()
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && packages+=("$p")
+    done < <(get_packages_from_flake "$flake")
+
+    generate_flake "${packages[@]+"${packages[@]}"}" > "$flake"
+
+    # Install from the regenerated flake
     info "Installing $pkg_name from flake..."
     nix "${NIX_FLAGS[@]}" profile install "$flake_dir#$pkg_name"
     success "Installed $pkg_name"
@@ -223,8 +230,8 @@ cmd_uninstall() {
         success "Removed local package file"
     fi
 
-    # Update flake.nix
-    cmd_bundle_dump "$use_global"
+    # Remove package from flake.nix
+    remove_package_from_flake "$pkg" "$use_global"
 }
 
 # Search for packages
@@ -280,9 +287,6 @@ cmd_upgrade() {
     info "Upgrading all packages..."
     nix "${NIX_FLAGS[@]}" profile upgrade '.*'
     success "All packages upgraded"
-
-    # Update flake.nix
-    cmd_bundle_dump "$use_global"
 }
 
 # Garbage collect old generations
@@ -528,7 +532,58 @@ cmd_sync() {
     success "Sync complete"
 }
 
-# Bundle dump - export installed packages to flake.nix
+# Add a package to flake.nix (reads existing packages and adds the new one)
+add_package_to_flake() {
+    local pkg="$1"
+    local use_global="${2:-false}"
+    local flake_dir
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local flake="$flake_dir/flake.nix"
+
+    # Get existing packages from flake
+    local -a packages=()
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && packages+=("$p")
+    done < <(get_packages_from_flake "$flake")
+
+    # Add the new package if not already present
+    local already_in_flake=false
+    for p in "${packages[@]+"${packages[@]}"}"; do
+        if [[ "$p" == "$pkg" ]]; then
+            already_in_flake=true
+            break
+        fi
+    done
+
+    if [[ "$already_in_flake" == "false" ]]; then
+        packages+=("$pkg")
+    fi
+
+    # Generate and write flake.nix
+    generate_flake "${packages[@]}" > "$flake"
+    success "Added $pkg to $flake"
+}
+
+# Remove a package from flake.nix
+remove_package_from_flake() {
+    local pkg="$1"
+    local use_global="${2:-false}"
+    local flake_dir
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local flake="$flake_dir/flake.nix"
+
+    # Get existing packages from flake, excluding the one to remove
+    local -a packages=()
+    while IFS= read -r p; do
+        [[ -n "$p" && "$p" != "$pkg" ]] && packages+=("$p")
+    done < <(get_packages_from_flake "$flake")
+
+    # Generate and write flake.nix
+    generate_flake "${packages[@]+"${packages[@]}"}" > "$flake"
+    success "Removed $pkg from $flake"
+}
+
+# Bundle dump - export ALL installed packages to flake.nix (use with --global)
 cmd_bundle_dump() {
     local use_global="${1:-false}"
     local flake_dir
