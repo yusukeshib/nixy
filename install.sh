@@ -13,7 +13,7 @@ error() { echo -e "${RED}Error:${NC} $1"; exit 1; }
 
 # Default install directory
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-REPO_URL="https://raw.githubusercontent.com/yusukeshib/nbrew/main/nbrew"
+REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Check dependencies
 check_dependencies() {
@@ -29,7 +29,7 @@ check_dependencies() {
 
     if [ ${#missing[@]} -ne 0 ]; then
         warn "Missing dependencies: ${missing[*]}"
-        echo "  Please install them before using nbrew:"
+        echo "  Please install them before using nixy:"
         echo "  - Nix: https://nixos.org/download.html"
         echo "  - jq: Install via your package manager or 'nix profile install nixpkgs#jq'"
         echo ""
@@ -59,39 +59,39 @@ check_path() {
     fi
 }
 
-# Download and install nbrew
-install_nbrew() {
-    info "Downloading nbrew to $INSTALL_DIR/nbrew"
+# Download and install nixy
+install_nixy() {
+    info "Downloading nixy to $INSTALL_DIR/nixy"
 
     if command -v curl &> /dev/null; then
-        curl -fsSL "$REPO_URL" -o "$INSTALL_DIR/nbrew"
+        curl -fsSL "$REPO_URL" -o "$INSTALL_DIR/nixy"
     elif command -v wget &> /dev/null; then
-        wget -qO "$INSTALL_DIR/nbrew" "$REPO_URL"
+        wget -qO "$INSTALL_DIR/nixy" "$REPO_URL"
     else
         error "Neither curl nor wget found. Please install one of them."
     fi
 
-    chmod +x "$INSTALL_DIR/nbrew"
+    chmod +x "$INSTALL_DIR/nixy"
 }
 
 main() {
     echo ""
-    echo "Installing nbrew - Homebrew-style wrapper for Nix"
+    echo "Installing nixy - Homebrew-style wrapper for Nix"
     echo ""
 
     check_dependencies
     ensure_install_dir
-    install_nbrew
+    install_nixy
     check_path
 
     echo ""
-    info "nbrew installed successfully!"
+    info "nixy installed successfully!"
     echo ""
     echo "  Get started:"
-    echo "    nbrew install <package>   # Install a package"
-    echo "    nbrew search <query>      # Search for packages"
+    echo "    nixy install <package>   # Install a package"
+    echo "    nixy search <query>      # Search for packages"
     echo ""
-    echo "  For more info: https://github.com/yusukeshib/nbrew"
+    echo "  For more info: https://github.com/yusukeshib/nixy"
     echo ""
 }
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# nbrew - Homebrew-style wrapper for Nix using flake.nix
+# nixy - Homebrew-style wrapper for Nix using flake.nix
 #
 
 set -euo pipefail
 
 # Configuration
-NBREW_CONFIG_DIR="${NBREW_CONFIG_DIR:-$HOME/.config/nix}"
-GLOBAL_FLAKE="$NBREW_CONFIG_DIR/flake.nix"
+NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nix}"
+GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_FLAKE="./flake.nix"
-LOCAL_PACKAGES_DIR="${NBREW_CONFIG_DIR}/packages"
+LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Colors for output
@@ -60,7 +60,7 @@ get_packages_from_flake() {
     local flake="$1"
     if [[ -f "$flake" ]]; then
         # Extract package names from the packages section (format: "name = pkgs.name;")
-        sed -n '/# \[nbrew:packages\]/,/# \[\/nbrew:packages\]/p' "$flake" 2>/dev/null | \
+        sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' "$flake" 2>/dev/null | \
             grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' | \
             sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/' | \
             sort -u
@@ -72,7 +72,7 @@ get_dev_packages_from_flake() {
     local flake="$1"
     if [[ -f "$flake" ]]; then
         # Extract package names from buildInputs
-        sed -n '/# \[nbrew:devShell\]/,/# \[\/nbrew:devShell\]/p' "$flake" 2>/dev/null | \
+        sed -n '/# \[nixy:devShell\]/,/# \[\/nixy:devShell\]/p' "$flake" 2>/dev/null | \
             grep -E '^\s+pkgs\.' | \
             sed 's/.*pkgs\.\([a-zA-Z0-9_-]*\).*/\1/' | \
             sort -u
@@ -103,7 +103,7 @@ cmd_install() {
         return
     fi
 
-    [[ -z "$pkg" ]] && die "Usage: nbrew install <package> or nbrew install --file <path>"
+    [[ -z "$pkg" ]] && die "Usage: nixy install <package> or nixy install --file <path>"
 
     info "Installing $pkg..."
     nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
@@ -166,7 +166,7 @@ cmd_install_from_file() {
 # Uninstall a package
 cmd_uninstall() {
     local pkg="$1"
-    [[ -z "$pkg" ]] && die "Usage: nbrew uninstall <package>"
+    [[ -z "$pkg" ]] && die "Usage: nixy uninstall <package>"
 
     info "Uninstalling $pkg..."
 
@@ -195,7 +195,7 @@ cmd_uninstall() {
 # Search for packages
 cmd_search() {
     local query="$1"
-    [[ -z "$query" ]] && die "Usage: nbrew search <query>"
+    [[ -z "$query" ]] && die "Usage: nixy search <query>"
 
     info "Searching for $query..."
     nix "${NIX_FLAGS[@]}" search nixpkgs "$query"
@@ -337,8 +337,8 @@ generate_flake() {
     local overlays_content=""
     if [[ -n "$local_overlays" ]]; then
         overlays_content="overlays = [
-          # [nbrew:local-overlays]
-${local_overlays}          # [/nbrew:local-overlays]
+          # [nixy:local-overlays]
+${local_overlays}          # [/nixy:local-overlays]
         ];"
     fi
 
@@ -363,12 +363,12 @@ ${local_overlays}          # [/nbrew:local-overlays]
 
     cat << EOF
 {
-  description = "nbrew managed packages";
+  description = "nixy managed packages";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # [nbrew:local-inputs]
-${local_inputs}    # [/nbrew:local-inputs]
+    # [nixy:local-inputs]
+${local_inputs}    # [/nixy:local-inputs]
   };
 
   outputs = { $output_params }:
@@ -377,24 +377,24 @@ ${local_inputs}    # [/nbrew:local-inputs]
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
       $pkgs_def
     in {
-      # Profile packages (nbrew bundle)
+      # Profile packages (nixy bundle)
       packages = forAllSystems (system:
         $pkgs_binding
         in {
-          # [nbrew:packages]
-${pkg_entries}          # [/nbrew:packages]
-          # [nbrew:local-packages]
-${local_packages}          # [/nbrew:local-packages]
+          # [nixy:packages]
+${pkg_entries}          # [/nixy:packages]
+          # [nixy:local-packages]
+${local_packages}          # [/nixy:local-packages]
         });
 
-      # Development shell (nbrew shell)
+      # Development shell (nixy shell)
       devShells = forAllSystems (system:
         $pkgs_binding
         in {
           default = pkgs.mkShell {
             buildInputs = [
-              # [nbrew:devShell]
-${shell_entries}              # [/nbrew:devShell]
+              # [nixy:devShell]
+${shell_entries}              # [/nixy:devShell]
             ];
           };
         });
@@ -410,7 +410,7 @@ cmd_bundle_install() {
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake. Run 'nbrew install <package>' to create one."
+        die "No flake.nix found at $flake. Run 'nixy install <package>' to create one."
     fi
 
     info "Syncing packages with $flake..."
@@ -492,7 +492,7 @@ cmd_shell() {
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake. Run 'nbrew add <package>' to create one."
+        die "No flake.nix found at $flake. Run 'nixy add <package>' to create one."
     fi
 
     info "Entering dev shell..."
@@ -503,10 +503,10 @@ cmd_shell() {
 # Show help
 cmd_help() {
     cat << 'EOF'
-nbrew - Homebrew-style wrapper for Nix (using flake.nix)
+nixy - Homebrew-style wrapper for Nix (using flake.nix)
 
 USAGE:
-    nbrew <command> [args]
+    nixy <command> [args]
 
 BASIC COMMANDS:
     install <pkg>           Install a package (tracked in flake.nix)
@@ -537,10 +537,10 @@ LOCAL PACKAGE FORMAT:
     }
 
 EXAMPLES:
-    nbrew install ripgrep                # Install package
-    nbrew install --file neovim.nix      # Install from local nix file
-    nbrew bundle                         # Install from flake.nix (on new machine)
-    nbrew shell                          # Enter dev shell
+    nixy install ripgrep                # Install package
+    nixy install --file neovim.nix      # Install from local nix file
+    nixy bundle                         # Install from flake.nix (on new machine)
+    nixy shell                          # Enter dev shell
 
 EOF
 }
@@ -582,7 +582,7 @@ main() {
             cmd_help
             ;;
         *)
-            die "Unknown command: $cmd. Run 'nbrew help' for usage."
+            die "Unknown command: $cmd. Run 'nixy help' for usage."
             ;;
     esac
 }

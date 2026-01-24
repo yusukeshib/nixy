@@ -1,4 +1,4 @@
-# nbrew - Homebrew-style Wrapper for Nix
+# nixy - Homebrew-style Wrapper for Nix
 
 A simple bash wrapper that makes Nix behave like Homebrew, using `flake.nix` for declarative, reproducible environment configuration.
 
@@ -10,41 +10,41 @@ A simple bash wrapper that makes Nix behave like Homebrew, using `flake.nix` for
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yusukeshib/nbrew/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
 
 Start using it right away:
 
 ```bash
-nbrew install ripgrep
+nixy install ripgrep
 ```
 
 ### Manual Installation
 
 ```bash
-cp nbrew ~/.local/bin/
-chmod +x ~/.local/bin/nbrew
+cp nixy ~/.local/bin/
+chmod +x ~/.local/bin/nixy
 ```
 
 ## Configuration
 
-nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packages:
+nixy uses standard Nix flakes (`flake.nix`) with special markers to track packages:
 
 ```nix
 # ~/.config/nix/flake.nix (or ./flake.nix for local projects)
 {
-  description = "nbrew managed packages";
+  description = "nixy managed packages";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs = { self, nixpkgs }: {
     packages = forAllSystems (system:
       let pkgs = nixpkgs.legacyPackages.${system};
       in {
-        # [nbrew:packages]
+        # [nixy:packages]
         git = pkgs.git;
         ripgrep = pkgs.ripgrep;
         nodejs = pkgs.nodejs;
-        # [/nbrew:packages]
+        # [/nixy:packages]
       });
 
     devShells = forAllSystems (system:
@@ -52,10 +52,10 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
       in {
         default = pkgs.mkShell {
           buildInputs = [
-            # [nbrew:devShell]
+            # [nixy:devShell]
             pkgs.cargo
             pkgs.rustc
-            # [/nbrew:devShell]
+            # [/nixy:devShell]
           ];
         };
       });
@@ -69,25 +69,25 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
 
 | Command | Description |
 |---------|-------------|
-| `nbrew install <pkg>` | Install a package (tracked in flake.nix) |
-| `nbrew install --file <path>` | Install from a local nix file |
-| `nbrew uninstall <pkg>` | Uninstall a package |
-| `nbrew search <query>` | Search for packages |
-| `nbrew list` | List installed packages |
-| `nbrew upgrade` | Upgrade all packages |
+| `nixy install <pkg>` | Install a package (tracked in flake.nix) |
+| `nixy install --file <path>` | Install from a local nix file |
+| `nixy uninstall <pkg>` | Uninstall a package |
+| `nixy search <query>` | Search for packages |
+| `nixy list` | List installed packages |
+| `nixy upgrade` | Upgrade all packages |
 
 ### Sync Commands
 
 | Command | Description |
 |---------|-------------|
-| `nbrew bundle` | Sync installed packages with flake.nix |
+| `nixy bundle` | Sync installed packages with flake.nix |
 
 ### Environment Commands
 
 | Command | Description |
 |---------|-------------|
-| `nbrew shell` | Enter dev shell from flake.nix |
-| `nbrew gc` | Garbage collect old generations |
+| `nixy shell` | Enter dev shell from flake.nix |
+| `nixy gc` | Garbage collect old generations |
 
 ## Config Files
 
@@ -98,7 +98,7 @@ nbrew uses standard Nix flakes (`flake.nix`) with special markers to track packa
 
 ## Local Package Format
 
-You can install packages from custom nix files using `nbrew install --file <path>`. The file should have this format:
+You can install packages from custom nix files using `nixy install --file <path>`. The file should have this format:
 
 ```nix
 {
@@ -115,25 +115,25 @@ The file will be copied to `~/.config/nix/packages/` and integrated into the fla
 
 ```bash
 # Install a package
-nbrew install ripgrep
+nixy install ripgrep
 
 # Install from a local nix file
-nbrew install --file neovim.nix
+nixy install --file neovim.nix
 
 # Upgrade all packages (updates nixpkgs too)
-nbrew upgrade
+nixy upgrade
 
 # Sync with flake.nix (on a new machine or after manual edits)
-nbrew bundle
+nixy bundle
 
 # Enter dev shell
-nbrew shell
+nixy shell
 ```
 
 ## Workflow
 
-1. **Install packages**: Use `nbrew install <pkg>` (automatically tracked in flake.nix)
-2. **Sync across machines**: Commit flake.nix and flake.lock to git, then run `nbrew bundle` on other machines
+1. **Install packages**: Use `nixy install <pkg>` (automatically tracked in flake.nix)
+2. **Sync across machines**: Commit flake.nix and flake.lock to git, then run `nixy bundle` on other machines
 
 ## Limitations
 
@@ -143,4 +143,4 @@ nbrew shell
 
 ## Environment Variables
 
-- `NBREW_CONFIG_DIR`: Override config directory (default: `~/.config/nix`)
+- `NIXY_CONFIG_DIR`: Override config directory (default: `~/.config/nix`)
