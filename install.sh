@@ -61,17 +61,37 @@ check_path() {
 
 # Download and install nixy
 install_nixy() {
-    info "Downloading nixy to $INSTALL_DIR/nixy"
+    local target="$INSTALL_DIR/nixy"
+
+    # Check if nixy is already installed somewhere
+    if command -v nixy &> /dev/null; then
+        local existing=$(command -v nixy)
+        existing=$(realpath "$existing" 2>/dev/null || echo "$existing")
+
+        # If installed elsewhere, update that location instead
+        if [[ "$existing" != "$target" ]]; then
+            info "Found existing nixy at $existing"
+            target="$existing"
+        fi
+    fi
+
+    info "Downloading nixy to $target"
+
+    # Ensure target directory exists
+    local target_dir=$(dirname "$target")
+    if [[ ! -d "$target_dir" ]]; then
+        mkdir -p "$target_dir"
+    fi
 
     if command -v curl &> /dev/null; then
-        curl -fsSL "$REPO_URL" -o "$INSTALL_DIR/nixy"
+        curl -fsSL "$REPO_URL" -o "$target"
     elif command -v wget &> /dev/null; then
-        wget -qO "$INSTALL_DIR/nixy" "$REPO_URL"
+        wget -qO "$target" "$REPO_URL"
     else
         error "Neither curl nor wget found. Please install one of them."
     fi
 
-    chmod +x "$INSTALL_DIR/nixy"
+    chmod +x "$target"
 }
 
 main() {
