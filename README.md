@@ -83,6 +83,8 @@ The `-g` (or `--global`) flag works like Homebrew - packages are installed globa
 | `nixy search <query>` | Search for packages |
 | `nixy upgrade -g` | Upgrade all packages |
 | `nixy gc` | Clean up old package versions |
+| `nixy version` | Show nixy version |
+| `nixy self-upgrade` | Upgrade nixy to the latest version |
 
 ## Sync Across Machines
 
@@ -153,6 +155,9 @@ In the Nix store (`/nix/store/`). nixy just manages which packages are available
 
 **Can I edit the flake.nix manually?**
 Yes. It's standard Nix. nixy will preserve your manual changes outside the `# [nixy:...]` markers.
+
+**How do I update nixy?**
+Run `nixy self-upgrade`. It checks for updates, downloads the latest version, and replaces itself. Use `--force` to reinstall even if already up to date.
 
 **How do I uninstall nixy?**
 Just delete the `nixy` script. Your flake.nix files remain and work with standard `nix` commands.
