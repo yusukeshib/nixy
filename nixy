@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.6"
+NIXY_VERSION="0.1.7"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -134,6 +134,16 @@ get_dev_packages_from_flake() {
     fi
 }
 
+# Validate that a package exists in nixpkgs and is a derivation
+validate_package() {
+    local pkg="$1"
+    # Check if the package attribute exists and is a derivation
+    if ! nix "${NIX_FLAGS[@]}" eval "nixpkgs#$pkg.type" 2>/dev/null | grep -q "derivation"; then
+        return 1
+    fi
+    return 0
+}
+
 # Get list of installed packages from nix profile
 # Extracts package name from "Flake attribute:" line (e.g., "legacyPackages.aarch64-darwin.fzf" -> "fzf")
 # This works for both nixpkgs packages and local flake packages
@@ -166,6 +176,12 @@ cmd_install() {
     fi
 
     [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
+
+    # Validate package exists in nixpkgs
+    info "Validating package $pkg..."
+    if ! validate_package "$pkg"; then
+        die "Package '$pkg' not found in nixpkgs or is not a valid derivation. Use 'nixy search <query>' to find packages."
+    fi
 
     # Check if existing flake.nix is nixy-managed before installing
     local flake_dir

@@ -434,7 +434,8 @@ test_install_fails_on_non_nixy_flake() {
 EOF
 
     local output exit_code
-    output=$("$NIXY" install testpkg 2>&1) && exit_code=0 || exit_code=$?
+    # Use 'hello' which is a valid package (passes validation)
+    output=$("$NIXY" install hello 2>&1) && exit_code=0 || exit_code=$?
 
     # Should fail with error about non-nixy flake
     assert_exit_code 1 "$exit_code" && \
@@ -879,6 +880,89 @@ EOF
 }
 
 # =============================================================================
+# Test: Package validation
+# =============================================================================
+
+test_validate_package_rejects_invalid_package() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" install rust 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should fail with validation error
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not found in nixpkgs"
+}
+
+test_validate_package_rejects_attribute_set() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # 'lib' is an attribute set, not a derivation
+    local output exit_code
+    output=$("$NIXY" install lib 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not found in nixpkgs"
+}
+
+test_validate_package_accepts_valid_package() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # 'hello' is a valid package in nixpkgs
+    local output exit_code
+    output=$("$NIXY" install hello 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should pass validation (may fail later at nix profile add, but validation passed)
+    assert_output_contains "$output" "Validating package hello" && \
+    # Should NOT contain validation error
+    if echo "$output" | grep -q "not found in nixpkgs"; then
+        echo "  ASSERTION FAILED: hello should be a valid package"
+        return 1
+    fi
+    return 0
+}
+
+test_validate_package_suggests_search() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    local output
+    output=$("$NIXY" install invalidpkg123 2>&1 || true)
+
+    # Error message should suggest using search
+    assert_output_contains "$output" "nixy search"
+}
+
+test_validate_skipped_for_file_install() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Create a local package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "local-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should NOT show "Validating package" message (file installs skip nixpkgs validation)
+    if echo "$output" | grep -q "Validating package"; then
+        echo "  ASSERTION FAILED: File installs should skip nixpkgs validation"
+        return 1
+    fi
+    return 0
+}
+
+# =============================================================================
 # Test: Help and basic commands
 # =============================================================================
 
@@ -1054,6 +1138,13 @@ main() {
     run_test "install --file copies to flake dir packages" test_install_file_copies_to_flake_dir_packages || true
     run_test "install --file adds to git in git repo" test_install_file_adds_to_git_in_git_repo || true
     run_test "install --file works without git" test_install_file_works_without_git || true
+
+    # Package validation tests
+    run_test "validate rejects invalid package" test_validate_package_rejects_invalid_package || true
+    run_test "validate rejects attribute set" test_validate_package_rejects_attribute_set || true
+    run_test "validate accepts valid package" test_validate_package_accepts_valid_package || true
+    run_test "validate suggests search on failure" test_validate_package_suggests_search || true
+    run_test "validate skipped for file install" test_validate_skipped_for_file_install || true
 
     # Help tests
     run_test "help shows init command" test_help_shows_init_command || true
