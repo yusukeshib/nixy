@@ -526,6 +526,69 @@ test_sync_preserves_local_packages() {
     return 0
 }
 
+test_sync_without_remove_only_warns() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Sync with empty flake should warn about extra packages (but not fail)
+    # We need to mock the installed packages, but since nix profile is isolated,
+    # this will just test that sync doesn't error with unbound variables
+    local output exit_code
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should succeed
+    assert_exit_code 0 "$exit_code" && \
+    # Output should mention "in sync" or have no removal messages
+    if echo "$output" | grep -q "Removing"; then
+        echo "  ASSERTION FAILED: sync without --remove should NOT remove packages"
+        return 1
+    fi
+    return 0
+}
+
+test_sync_remove_flag_accepted() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Test that --remove flag is accepted (doesn't cause unknown option error)
+    local output exit_code
+    output=$("$NIXY" sync --remove 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should succeed (empty flake, nothing to remove)
+    assert_exit_code 0 "$exit_code" && \
+    # Should not have "Unknown option" error
+    if echo "$output" | grep -q "Unknown option"; then
+        echo "  ASSERTION FAILED: --remove should be a valid option"
+        return 1
+    fi
+    return 0
+}
+
+test_sync_short_remove_flag_accepted() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Test that -r short flag is accepted
+    local output exit_code
+    output=$("$NIXY" sync -r 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should succeed (empty flake, nothing to remove)
+    assert_exit_code 0 "$exit_code" && \
+    # Should not have "Unknown option" error
+    if echo "$output" | grep -q "Unknown option"; then
+        echo "  ASSERTION FAILED: -r should be a valid option"
+        return 1
+    fi
+    return 0
+}
+
+test_help_shows_sync_remove_flag() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "sync" && \
+    assert_output_contains "$output" "--remove"
+}
+
 test_shell_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
@@ -935,6 +998,10 @@ main() {
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "sync preserves local packages" test_sync_preserves_local_packages || true
+    run_test "sync without --remove only warns" test_sync_without_remove_only_warns || true
+    run_test "sync --remove flag accepted" test_sync_remove_flag_accepted || true
+    run_test "sync -r short flag accepted" test_sync_short_remove_flag_accepted || true
+    run_test "help shows sync --remove flag" test_help_shows_sync_remove_flag || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Local package file parsing tests
