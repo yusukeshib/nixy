@@ -68,7 +68,7 @@ get_flake() {
 get_flake_dir() {
     local use_global="${1:-false}"
     local flake
-    flake="$(get_flake "$use_global")"
+    flake="$(get_flake "$use_global")" || exit 1
     # Resolve symlinks to get real path
     if [[ -L "$flake" ]]; then
         dirname "$(readlink "$flake")"
@@ -182,7 +182,7 @@ cmd_install_from_file() {
 
     # Install from the regenerated flake
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global")
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
     info "Installing $pkg_name from flake..."
     nix "${NIX_FLAGS[@]}" profile install "$flake_dir#$pkg_name"
     success "Installed $pkg_name"
@@ -249,7 +249,7 @@ cmd_list() {
     done
 
     # Validate flake exists (to give helpful error message)
-    get_flake "$use_global" >/dev/null
+    get_flake "$use_global" >/dev/null || exit 1
 
     info "Installed packages:"
     nix "${NIX_FLAGS[@]}" profile list
@@ -268,7 +268,7 @@ cmd_upgrade() {
     done
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global")
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Update flake.lock if flake.nix exists
@@ -477,7 +477,7 @@ cmd_sync() {
     done
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global")
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
@@ -532,7 +532,7 @@ cmd_sync() {
 cmd_bundle_dump() {
     local use_global="${1:-false}"
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global")
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
     info "Dumping installed packages to $flake..."
@@ -570,7 +570,7 @@ cmd_shell() {
     done
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global")
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
