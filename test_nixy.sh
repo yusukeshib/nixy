@@ -366,6 +366,118 @@ test_shell_fails_cleanly_without_flake() {
 }
 
 # =============================================================================
+# Test: Local package file parsing (pname/name)
+# =============================================================================
+
+test_parse_pname_from_nixpkgs_style() {
+    cd "$TEST_DIR"
+    # Create a nixpkgs-style package file with pname
+    cat > test-pkg.nix <<'EOF'
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "my-package";
+  version = "1.0.0";
+
+  src = fetchFromGitHub {
+    owner = "test";
+    repo = "test";
+    rev = "v${version}";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+
+  vendorHash = null;
+}
+EOF
+
+    "$NIXY" init >/dev/null 2>&1
+
+    # Install should extract pname correctly
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should find the package name from pname
+    assert_output_contains "$output" "my-package"
+}
+
+test_parse_name_from_simple_style() {
+    cd "$TEST_DIR"
+    # Create a simple package file with name (not pname)
+    cat > test-pkg.nix <<'EOF'
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  name = "simple-package";
+  src = ./.;
+}
+EOF
+
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should find the package name from name attribute
+    assert_output_contains "$output" "simple-package"
+}
+
+test_parse_pname_takes_precedence() {
+    cd "$TEST_DIR"
+    # Create a file with both pname and name (pname should be used)
+    cat > test-pkg.nix <<'EOF'
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  pname = "preferred-name";
+  name = "fallback-name";
+  version = "1.0";
+  src = ./.;
+}
+EOF
+
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should use pname, not name
+    assert_output_contains "$output" "preferred-name"
+}
+
+test_parse_fails_without_name_or_pname() {
+    cd "$TEST_DIR"
+    # Create a file without name or pname
+    cat > test-pkg.nix <<'EOF'
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  src = ./.;
+  buildPhase = "echo hello";
+}
+EOF
+
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should fail with appropriate error message
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Could not find 'name' or 'pname'"
+}
+
+test_install_file_not_found() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" install --file nonexistent.nix 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "File not found"
+}
+
+# =============================================================================
 # Test: Help and basic commands
 # =============================================================================
 
@@ -430,6 +542,13 @@ main() {
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
+
+    # Local package file parsing tests
+    run_test "parse pname from nixpkgs-style file" test_parse_pname_from_nixpkgs_style || true
+    run_test "parse name from simple-style file" test_parse_name_from_simple_style || true
+    run_test "pname takes precedence over name" test_parse_pname_takes_precedence || true
+    run_test "fails without name or pname" test_parse_fails_without_name_or_pname || true
+    run_test "install --file with nonexistent file" test_install_file_not_found || true
 
     # Help tests
     run_test "help shows init command" test_help_shows_init_command || true

@@ -162,10 +162,11 @@ cmd_install_from_file() {
     # Validate file exists
     [[ ! -f "$file" ]] && die "File not found: $file"
 
-    # Extract package name from file
+    # Extract package name from file (try 'pname' first, then 'name' for nixpkgs compatibility)
     local pkg_name
-    pkg_name=$(parse_local_package "$file" "name")
-    [[ -z "$pkg_name" ]] && die "Could not find 'name' attribute in $file"
+    pkg_name=$(parse_local_package "$file" "pname")
+    [[ -z "$pkg_name" ]] && pkg_name=$(parse_local_package "$file" "name")
+    [[ -z "$pkg_name" ]] && die "Could not find 'name' or 'pname' attribute in $file"
 
     info "Installing local package: $pkg_name from $file"
 
