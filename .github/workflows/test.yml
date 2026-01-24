@@ -24,8 +24,5 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Install jq
-        run: nix profile install nixpkgs#jq
-
       - name: Run tests
         run: ./test_nixy.sh

@@ -28,7 +28,6 @@ die() { error "$@"; exit 1; }
 # Check dependencies
 check_deps() {
     command -v nix >/dev/null 2>&1 || die "nix is not installed"
-    command -v jq >/dev/null 2>&1 || die "jq is not installed (required for JSON parsing)"
 }
 
 # Search up directory tree for flake.nix
@@ -103,8 +102,11 @@ get_dev_packages_from_flake() {
 
 # Get list of installed packages from nix profile
 get_installed_packages() {
-    nix "${NIX_FLAGS[@]}" profile list --json 2>/dev/null | \
-        jq -r '.elements | keys[]' 2>/dev/null || true
+    nix "${NIX_FLAGS[@]}" profile list 2>/dev/null | \
+        grep "^Name:" | \
+        sed 's/Name:[[:space:]]*//' | \
+        tr -d '\033' | \
+        sed 's/\[1m//g; s/\[0m//g'
 }
 
 # Install a package and track in flake.nix

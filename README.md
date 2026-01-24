@@ -5,7 +5,6 @@ A simple bash wrapper that makes Nix behave like Homebrew, using `flake.nix` for
 ## Requirements
 
 - Nix (with `nix-command` and `flakes` experimental features enabled)
-- jq (for JSON parsing)
 
 ## Installation
 
