@@ -81,10 +81,15 @@ get_packages_from_flake() {
     local flake="$1"
     if [[ -f "$flake" ]]; then
         # Extract package names from the packages section (format: "name = pkgs.name;")
-        sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' "$flake" 2>/dev/null | \
-            { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
-            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/' | \
-            sort -u
+        {
+            sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' "$flake" 2>/dev/null | \
+                { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
+                sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/'
+            # Also extract local package names (format: "name = <expr>;")
+            sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' "$flake" 2>/dev/null | \
+                { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
+                sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/'
+        } | sort -u
     fi
 }
 

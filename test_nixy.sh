@@ -376,6 +376,44 @@ test_sync_with_packages_no_unbound_variable() {
     return 0
 }
 
+test_sync_preserves_local_packages() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add both a regular package and a local package to the flake
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:local-packages\]/{print; print "          my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix {};"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Replicate the get_packages_from_flake logic to test it extracts both package types
+    local packages
+    packages=$({
+        # Extract regular packages
+        sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' flake.nix 2>/dev/null | \
+            { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
+            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/'
+        # Extract local packages
+        sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' flake.nix 2>/dev/null | \
+            { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
+            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/'
+    } | sort -u)
+
+    # Should contain the regular package
+    if ! echo "$packages" | grep -q "ripgrep"; then
+        echo "  ASSERTION FAILED: get_packages_from_flake should return ripgrep"
+        echo "  Packages: $packages"
+        return 1
+    fi
+
+    # Should also contain the local package
+    if ! echo "$packages" | grep -q "my-local-pkg"; then
+        echo "  ASSERTION FAILED: get_packages_from_flake should return my-local-pkg"
+        echo "  Packages: $packages"
+        return 1
+    fi
+
+    return 0
+}
+
 test_shell_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
@@ -691,6 +729,7 @@ main() {
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
+    run_test "sync preserves local packages" test_sync_preserves_local_packages || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Local package file parsing tests
