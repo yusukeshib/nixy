@@ -723,6 +723,94 @@ test_unknown_command_fails() {
 }
 
 # =============================================================================
+# Test: Version command
+# =============================================================================
+
+test_version_displays_version() {
+    local output
+    output=$("$NIXY" version 2>&1)
+    assert_output_contains "$output" "nixy version"
+}
+
+test_version_flag_works() {
+    local output
+    output=$("$NIXY" --version 2>&1)
+    assert_output_contains "$output" "nixy version"
+}
+
+test_version_short_flag_works() {
+    local output
+    output=$("$NIXY" -v 2>&1)
+    assert_output_contains "$output" "nixy version"
+}
+
+test_version_shows_semver_format() {
+    local output
+    output=$("$NIXY" version 2>&1)
+    # Should match semver pattern like "nixy version X.Y.Z"
+    if echo "$output" | grep -qE "nixy version [0-9]+\.[0-9]+\.[0-9]+"; then
+        return 0
+    else
+        echo "  ASSERTION FAILED: Version should be in semver format"
+        echo "  Output: $output"
+        return 1
+    fi
+}
+
+# =============================================================================
+# Test: Self-upgrade command
+# =============================================================================
+
+test_self_upgrade_rejects_invalid_option() {
+    local output exit_code
+    output=$("$NIXY" self-upgrade --invalid 2>&1) && exit_code=0 || exit_code=$?
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Unknown option"
+}
+
+test_self_upgrade_accepts_force_flag() {
+    # Test that --force is recognized (will fail due to network/permissions, but shouldn't fail on arg parsing)
+    local output
+    output=$("$NIXY" self-upgrade --force 2>&1 || true)
+    # Should NOT contain "Unknown option" error
+    if echo "$output" | grep -q "Unknown option"; then
+        echo "  ASSERTION FAILED: --force should be a valid option"
+        return 1
+    fi
+    return 0
+}
+
+test_self_upgrade_accepts_short_force_flag() {
+    local output
+    output=$("$NIXY" self-upgrade -f 2>&1 || true)
+    if echo "$output" | grep -q "Unknown option"; then
+        echo "  ASSERTION FAILED: -f should be a valid option"
+        return 1
+    fi
+    return 0
+}
+
+test_help_shows_version_command() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "version" && \
+    assert_output_contains "$output" "Show nixy version"
+}
+
+test_help_shows_self_upgrade_command() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "self-upgrade" && \
+    assert_output_contains "$output" "Upgrade nixy to the latest version"
+}
+
+test_help_shows_maintenance_section() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "MAINTENANCE COMMANDS"
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -779,6 +867,20 @@ main() {
     run_test "help shows --global flag" test_help_shows_global_flag || true
     run_test "help exits successfully" test_help_exit_code || true
     run_test "unknown command fails" test_unknown_command_fails || true
+
+    # Version tests
+    run_test "version displays version" test_version_displays_version || true
+    run_test "--version flag works" test_version_flag_works || true
+    run_test "-v short flag works" test_version_short_flag_works || true
+    run_test "version shows semver format" test_version_shows_semver_format || true
+
+    # Self-upgrade tests
+    run_test "self-upgrade rejects invalid option" test_self_upgrade_rejects_invalid_option || true
+    run_test "self-upgrade accepts --force flag" test_self_upgrade_accepts_force_flag || true
+    run_test "self-upgrade accepts -f flag" test_self_upgrade_accepts_short_force_flag || true
+    run_test "help shows version command" test_help_shows_version_command || true
+    run_test "help shows self-upgrade command" test_help_shows_self_upgrade_command || true
+    run_test "help shows MAINTENANCE section" test_help_shows_maintenance_section || true
 
     echo ""
     echo "======================================"

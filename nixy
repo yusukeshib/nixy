@@ -12,6 +12,10 @@ GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
+# Version info
+NIXY_VERSION="0.1.0"
+NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -741,6 +745,98 @@ cmd_init() {
     success "Created $flake"
 }
 
+# Self-upgrade nixy to latest version
+cmd_self_upgrade() {
+    local force=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force|-f) force=true; shift ;;
+            *) die "Unknown option: $1. Usage: nixy self-upgrade [--force]" ;;
+        esac
+    done
+
+    # Get the path to the current script
+    local self_path
+    self_path="$(realpath "${BASH_SOURCE[0]}")"
+    local self_dir
+    self_dir="$(dirname "$self_path")"
+
+    # Check write permissions
+    if [[ ! -w "$self_dir" ]]; then
+        die "No write permission to $self_dir. Try: sudo nixy self-upgrade"
+    fi
+
+    info "Checking for updates..."
+
+    # Download latest version to temp file
+    local tmp_file
+    tmp_file="$(mktemp)"
+    trap 'rm -f "$tmp_file"' EXIT
+
+    if ! curl -fsSL "$NIXY_REPO_URL" -o "$tmp_file" 2>/dev/null; then
+        die "Failed to download latest version. Check your network connection."
+    fi
+
+    # Validate downloaded file (check shebang)
+    local first_line
+    first_line="$(head -n 1 "$tmp_file")"
+    if [[ "$first_line" != "#!/usr/bin/env bash" ]]; then
+        die "Downloaded file is invalid (unexpected content)"
+    fi
+
+    # Extract remote version
+    local remote_version
+    remote_version="$(grep -E '^NIXY_VERSION=' "$tmp_file" | head -1 | sed 's/NIXY_VERSION="\([^"]*\)"/\1/')"
+    if [[ -z "$remote_version" ]]; then
+        die "Could not determine remote version"
+    fi
+
+    info "Current version: $NIXY_VERSION"
+    info "Latest version:  $remote_version"
+
+    # Compare versions
+    if [[ "$NIXY_VERSION" == "$remote_version" ]] && [[ "$force" != "true" ]]; then
+        success "Already up to date!"
+        return 0
+    fi
+
+    if [[ "$force" == "true" ]] && [[ "$NIXY_VERSION" == "$remote_version" ]]; then
+        info "Forcing reinstall of same version..."
+    fi
+
+    # Create backup
+    local backup_path="${self_path}.backup"
+    info "Creating backup at $backup_path..."
+    cp "$self_path" "$backup_path"
+
+    # Get current permissions
+    local perms
+    perms="$(stat -f '%A' "$self_path" 2>/dev/null || stat -c '%a' "$self_path" 2>/dev/null)"
+
+    # Replace executable
+    if ! mv "$tmp_file" "$self_path"; then
+        error "Failed to update nixy"
+        info "Restoring from backup..."
+        mv "$backup_path" "$self_path"
+        die "Update failed. Original version restored."
+    fi
+
+    # Restore permissions
+    chmod "$perms" "$self_path"
+
+    # Clean up backup on success
+    rm -f "$backup_path"
+
+    success "Successfully upgraded to version $remote_version!"
+}
+
+# Show version
+cmd_version() {
+    echo "nixy version $NIXY_VERSION"
+}
+
 # Show help
 cmd_help() {
     cat << 'EOF'
@@ -757,6 +853,7 @@ BASIC COMMANDS:
     search <query>          Search for packages
     list                    List installed packages
     upgrade                 Upgrade all packages
+    version                 Show nixy version
 
 SYNC COMMANDS:
     sync                    Sync installed packages with flake.nix
@@ -764,6 +861,9 @@ SYNC COMMANDS:
 ENVIRONMENT COMMANDS:
     shell                   Enter dev shell from flake.nix
     gc                      Garbage collect old generations
+
+MAINTENANCE COMMANDS:
+    self-upgrade [--force]  Upgrade nixy to the latest version
 
 GLOBAL FLAGS:
     --global, -g            Use global flake (~/.config/nix/flake.nix)
@@ -789,6 +889,8 @@ EXAMPLES:
     nixy install --file neovim.nix      # Install from local nix file
     nixy sync                           # Install from flake.nix (on new machine)
     nixy shell                          # Enter dev shell
+    nixy version                        # Show current version
+    nixy self-upgrade                   # Upgrade to latest version
 
 EOF
 }
@@ -827,6 +929,12 @@ main() {
             ;;
         sync)
             cmd_sync "$@"
+            ;;
+        self-upgrade)
+            cmd_self_upgrade "$@"
+            ;;
+        version|--version|-v)
+            cmd_version
             ;;
         help|--help|-h)
             cmd_help
