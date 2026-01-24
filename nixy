@@ -8,7 +8,6 @@ set -euo pipefail
 # Configuration
 NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nix}"
 GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
-LOCAL_FLAKE="./flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
@@ -32,21 +31,44 @@ check_deps() {
     command -v jq >/dev/null 2>&1 || die "jq is not installed (required for JSON parsing)"
 }
 
+# Search up directory tree for flake.nix
+find_local_flake() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/flake.nix" ]]; then
+            echo "$dir/flake.nix"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
 # Get the flake.nix path (local takes precedence over global)
 get_flake() {
-    if [[ -f "$LOCAL_FLAKE" ]]; then
-        echo "$LOCAL_FLAKE"
-    elif [[ -f "$GLOBAL_FLAKE" ]]; then
+    local use_global="${1:-false}"
+
+    if [[ "$use_global" == "true" ]]; then
         echo "$GLOBAL_FLAKE"
-    else
-        echo "$GLOBAL_FLAKE"
+        return 0
     fi
+
+    # Search up directory tree for local flake
+    local local_flake
+    if local_flake=$(find_local_flake); then
+        echo "$local_flake"
+        return 0
+    fi
+
+    # No local flake found and --global not specified
+    die "No flake.nix found in current directory or parents. Use --global for global flake."
 }
 
 # Get flake directory (resolves symlinks)
 get_flake_dir() {
+    local use_global="${1:-false}"
     local flake
-    flake="$(get_flake)"
+    flake="$(get_flake "$use_global")"
     # Resolve symlinks to get real path
     if [[ -L "$flake" ]]; then
         dirname "$(readlink "$flake")"
@@ -89,28 +111,30 @@ get_installed_packages() {
 cmd_install() {
     local pkg=""
     local file=""
+    local use_global=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --global|-g) use_global=true; shift ;;
             --file|-f) file="$2"; shift 2 ;;
             *) pkg="$1"; shift ;;
         esac
     done
 
     if [[ -n "$file" ]]; then
-        cmd_install_from_file "$file"
+        cmd_install_from_file "$file" "$use_global"
         return
     fi
 
-    [[ -z "$pkg" ]] && die "Usage: nixy install <package> or nixy install --file <path>"
+    [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
 
     info "Installing $pkg..."
     nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
     success "Installed $pkg"
 
     # Update flake.nix (creates if doesn't exist)
-    cmd_bundle_dump
+    cmd_bundle_dump "$use_global"
 }
 
 # Parse a local package nix file and extract attributes
@@ -131,6 +155,7 @@ parse_local_package() {
 # Install a package from a local nix file
 cmd_install_from_file() {
     local file="$1"
+    local use_global="${2:-false}"
 
     # Validate file exists
     [[ ! -f "$file" ]] && die "File not found: $file"
@@ -153,11 +178,11 @@ cmd_install_from_file() {
     success "Copied package definition to $dest"
 
     # Regenerate flake.nix with local packages
-    cmd_bundle_dump
+    cmd_bundle_dump "$use_global"
 
     # Install from the regenerated flake
     local flake_dir
-    flake_dir=$(get_flake_dir)
+    flake_dir=$(get_flake_dir "$use_global")
     info "Installing $pkg_name from flake..."
     nix "${NIX_FLAGS[@]}" profile install "$flake_dir#$pkg_name"
     success "Installed $pkg_name"
@@ -165,8 +190,18 @@ cmd_install_from_file() {
 
 # Uninstall a package
 cmd_uninstall() {
-    local pkg="$1"
-    [[ -z "$pkg" ]] && die "Usage: nixy uninstall <package>"
+    local use_global=false
+    local pkg=""
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global|-g) use_global=true; shift ;;
+            *) pkg="$1"; shift ;;
+        esac
+    done
+
+    [[ -z "$pkg" ]] && die "Usage: nixy uninstall [--global] <package>"
 
     info "Uninstalling $pkg..."
 
@@ -189,7 +224,7 @@ cmd_uninstall() {
     fi
 
     # Update flake.nix
-    cmd_bundle_dump
+    cmd_bundle_dump "$use_global"
 }
 
 # Search for packages
@@ -203,14 +238,37 @@ cmd_search() {
 
 # List installed packages
 cmd_list() {
+    local use_global=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global|-g) use_global=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    # Validate flake exists (to give helpful error message)
+    get_flake "$use_global" >/dev/null
+
     info "Installed packages:"
     nix "${NIX_FLAGS[@]}" profile list
 }
 
 # Upgrade all packages
 cmd_upgrade() {
+    local use_global=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global|-g) use_global=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
     local flake_dir
-    flake_dir=$(get_flake_dir)
+    flake_dir=$(get_flake_dir "$use_global")
     local flake="$flake_dir/flake.nix"
 
     # Update flake.lock if flake.nix exists
@@ -224,7 +282,7 @@ cmd_upgrade() {
     success "All packages upgraded"
 
     # Update flake.nix
-    cmd_bundle_dump
+    cmd_bundle_dump "$use_global"
 }
 
 # Garbage collect old generations
@@ -270,17 +328,18 @@ collect_local_packages() {
 
 # Generate flake.nix content
 generate_flake() {
-    local -a packages=("$@")
+    local -a packages=()
+    [[ $# -gt 0 ]] && packages=("$@")
     local pkg_entries=""
     local shell_entries=""
 
     # Filter out local packages from standard packages list
     collect_local_packages
     local -a filtered_packages=()
-    for pkg in "${packages[@]}"; do
+    for pkg in "${packages[@]+"${packages[@]}"}"; do
         [[ -z "$pkg" ]] && continue
         local is_local=false
-        for local_name in "${LOCAL_PKG_NAMES[@]}"; do
+        for local_name in "${LOCAL_PKG_NAMES[@]+"${LOCAL_PKG_NAMES[@]}"}"; do
             if [[ "$pkg" == "$local_name" ]]; then
                 is_local=true
                 break
@@ -291,7 +350,7 @@ generate_flake() {
         fi
     done
 
-    for pkg in "${filtered_packages[@]}"; do
+    for pkg in "${filtered_packages[@]+"${filtered_packages[@]}"}"; do
         [[ -z "$pkg" ]] && continue
         pkg_entries+="          $pkg = pkgs.$pkg;"$'\n'
         shell_entries+="              pkgs.$pkg"$'\n'
@@ -303,29 +362,31 @@ generate_flake() {
     local local_overlays=""
     local local_packages=""
 
-    for i in "${!LOCAL_PKG_NAMES[@]}"; do
-        local name="${LOCAL_PKG_NAMES[$i]}"
-        local input_info="${LOCAL_PKG_INPUTS[$i]}"
-        local overlay="${LOCAL_PKG_OVERLAYS[$i]}"
-        local pkg_expr="${LOCAL_PKG_EXPRS[$i]}"
+    if [[ ${#LOCAL_PKG_NAMES[@]} -gt 0 ]]; then
+        for i in "${!LOCAL_PKG_NAMES[@]}"; do
+            local name="${LOCAL_PKG_NAMES[$i]}"
+            local input_info="${LOCAL_PKG_INPUTS[$i]}"
+            local overlay="${LOCAL_PKG_OVERLAYS[$i]}"
+            local pkg_expr="${LOCAL_PKG_EXPRS[$i]}"
 
-        local input_name="${input_info%%|*}"
-        local input_url="${input_info##*|}"
+            local input_name="${input_info%%|*}"
+            local input_url="${input_info##*|}"
 
-        if [[ -n "$input_name" && -n "$input_url" ]]; then
-            local_inputs+="    $input_name.url = \"$input_url\";"$'\n'
-            local_input_params+="$input_name, "
-        fi
+            if [[ -n "$input_name" && -n "$input_url" ]]; then
+                local_inputs+="    $input_name.url = \"$input_url\";"$'\n'
+                local_input_params+="$input_name, "
+            fi
 
-        if [[ -n "$overlay" ]]; then
-            local_overlays+="          $overlay"$'\n'
-        fi
+            if [[ -n "$overlay" ]]; then
+                local_overlays+="          $overlay"$'\n'
+            fi
 
-        if [[ -n "$pkg_expr" ]]; then
-            local_packages+="          $name = $pkg_expr;"$'\n'
-            shell_entries+="              $pkg_expr"$'\n'
-        fi
-    done
+            if [[ -n "$pkg_expr" ]]; then
+                local_packages+="          $name = $pkg_expr;"$'\n'
+                shell_entries+="              $pkg_expr"$'\n'
+            fi
+        done
+    fi
 
     # Build outputs function parameters
     local output_params="self, nixpkgs"
@@ -405,8 +466,18 @@ EOF
 
 # Sync installed packages with flake.nix
 cmd_sync() {
+    local use_global=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global|-g) use_global=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
     local flake_dir
-    flake_dir=$(get_flake_dir)
+    flake_dir=$(get_flake_dir "$use_global")
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
@@ -459,8 +530,9 @@ cmd_sync() {
 
 # Bundle dump - export installed packages to flake.nix
 cmd_bundle_dump() {
+    local use_global="${1:-false}"
     local flake_dir
-    flake_dir=$(get_flake_dir)
+    flake_dir=$(get_flake_dir "$use_global")
     local flake="$flake_dir/flake.nix"
 
     info "Dumping installed packages to $flake..."
@@ -487,8 +559,18 @@ cmd_bundle_dump() {
 
 # Enter dev shell
 cmd_shell() {
+    local use_global=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global|-g) use_global=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
     local flake_dir
-    flake_dir=$(get_flake_dir)
+    flake_dir=$(get_flake_dir "$use_global")
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
@@ -499,6 +581,18 @@ cmd_shell() {
     nix "${NIX_FLAGS[@]}" develop "$flake_dir" --impure
 }
 
+# Initialize a local flake.nix
+cmd_init() {
+    local dir="${1:-.}"
+    local flake="$dir/flake.nix"
+
+    [[ -f "$flake" ]] && die "flake.nix already exists at $flake"
+
+    mkdir -p "$dir"
+    info "Initializing flake.nix at $flake..."
+    generate_flake > "$flake"
+    success "Created $flake"
+}
 
 # Show help
 cmd_help() {
@@ -509,6 +603,7 @@ USAGE:
     nixy <command> [args]
 
 BASIC COMMANDS:
+    init [dir]              Initialize a local flake.nix (default: current dir)
     install <pkg>           Install a package (tracked in flake.nix)
     install --file <path>   Install from local nix file
     uninstall <pkg>         Uninstall a package
@@ -523,9 +618,13 @@ ENVIRONMENT COMMANDS:
     shell                   Enter dev shell from flake.nix
     gc                      Garbage collect old generations
 
+GLOBAL FLAGS:
+    --global, -g            Use global flake (~/.config/nix/flake.nix)
+                            instead of searching for local flake.nix
+
 CONFIG FILES:
-    Global: ~/.config/nix/flake.nix
-    Local:  ./flake.nix (takes precedence if exists)
+    Global: ~/.config/nix/flake.nix (use with --global)
+    Local:  ./flake.nix or parent directories (auto-discovered)
     Local packages: ~/.config/nix/packages/
 
 LOCAL PACKAGE FORMAT:
@@ -537,7 +636,9 @@ LOCAL PACKAGE FORMAT:
     }
 
 EXAMPLES:
-    nixy install ripgrep                # Install package
+    nixy init                           # Initialize flake.nix in current dir
+    nixy install ripgrep                # Install package (uses local flake)
+    nixy install --global ripgrep       # Install to global flake
     nixy install --file neovim.nix      # Install from local nix file
     nixy sync                           # Install from flake.nix (on new machine)
     nixy shell                          # Enter dev shell
@@ -553,29 +654,32 @@ main() {
     shift || true
 
     case "$cmd" in
+        init)
+            cmd_init "${1:-.}"
+            ;;
         install|add)
             cmd_install "$@"
             ;;
         uninstall|remove)
-            cmd_uninstall "${1:-}"
+            cmd_uninstall "$@"
             ;;
         search)
             cmd_search "${1:-}"
             ;;
         list|ls)
-            cmd_list
+            cmd_list "$@"
             ;;
         upgrade)
-            cmd_upgrade
+            cmd_upgrade "$@"
             ;;
         gc)
             cmd_gc
             ;;
         shell|dev)
-            cmd_shell
+            cmd_shell "$@"
             ;;
         sync)
-            cmd_sync
+            cmd_sync "$@"
             ;;
         help|--help|-h)
             cmd_help
