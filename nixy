@@ -403,8 +403,8 @@ ${shell_entries}              # [/nixy:devShell]
 EOF
 }
 
-# Bundle sync - sync installed packages with flake.nix
-cmd_bundle_install() {
+# Sync installed packages with flake.nix
+cmd_sync() {
     local flake_dir
     flake_dir=$(get_flake_dir)
     local flake="$flake_dir/flake.nix"
@@ -517,7 +517,7 @@ BASIC COMMANDS:
     upgrade                 Upgrade all packages
 
 SYNC COMMANDS:
-    bundle                  Sync installed packages with flake.nix
+    sync                    Sync installed packages with flake.nix
 
 ENVIRONMENT COMMANDS:
     shell                   Enter dev shell from flake.nix
@@ -539,7 +539,7 @@ LOCAL PACKAGE FORMAT:
 EXAMPLES:
     nixy install ripgrep                # Install package
     nixy install --file neovim.nix      # Install from local nix file
-    nixy bundle                         # Install from flake.nix (on new machine)
+    nixy sync                           # Install from flake.nix (on new machine)
     nixy shell                          # Enter dev shell
 
 EOF
@@ -574,9 +574,8 @@ main() {
         shell|dev)
             cmd_shell
             ;;
-        bundle)
-            local subcmd="${1:-install}"
-            cmd_bundle_install
+        sync)
+            cmd_sync
             ;;
         help|--help|-h)
             cmd_help
