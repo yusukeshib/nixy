@@ -170,27 +170,33 @@ cmd_install_from_file() {
 
     info "Installing local package: $pkg_name from $file"
 
-    # Create packages directory if needed (handle symlinks)
-    local pkg_dir="$LOCAL_PACKAGES_DIR"
-    [[ -L "$pkg_dir" ]] && pkg_dir="$(readlink "$pkg_dir")"
-    mkdir -p "$pkg_dir"
-
-    # Copy file to packages directory
-    local dest="$LOCAL_PACKAGES_DIR/$pkg_name.nix"
-    cp "$file" "$dest"
-    success "Copied package definition to $dest"
-
-    # Regenerate flake.nix preserving existing packages
+    # Get flake directory first (packages must be relative to flake for git tracking)
     local flake_dir
     flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
+    # Create packages directory inside flake directory
+    local pkg_dir
+    pkg_dir=$(get_packages_dir "$flake_dir")
+    mkdir -p "$pkg_dir"
+
+    # Copy file to packages directory
+    local dest="$pkg_dir/$pkg_name.nix"
+    cp "$file" "$dest"
+    success "Copied package definition to $dest"
+
+    # Add the package file to git if the flake directory is a git repo
+    if [[ -d "$flake_dir/.git" ]] || git -C "$flake_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        git -C "$flake_dir" add "packages/$pkg_name.nix" 2>/dev/null || true
+    fi
+
+    # Regenerate flake.nix preserving existing packages
     local -a packages=()
     while IFS= read -r p; do
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
-    generate_flake "${packages[@]+"${packages[@]}"}" > "$flake"
+    generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
 
     # Install from the regenerated flake
     info "Installing $pkg_name from flake..."
@@ -225,11 +231,21 @@ cmd_uninstall() {
     nix "${NIX_FLAGS[@]}" profile remove "$pkg"
     success "Uninstalled $pkg"
 
+    # Get flake directory to find local package files
+    local flake_dir
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local pkg_dir
+    pkg_dir=$(get_packages_dir "$flake_dir")
+
     # Check if this is a local package and remove the nix file
-    local local_pkg_file="$LOCAL_PACKAGES_DIR/$pkg.nix"
+    local local_pkg_file="$pkg_dir/$pkg.nix"
     if [[ -f "$local_pkg_file" ]]; then
         info "Removing local package definition: $local_pkg_file"
         rm "$local_pkg_file"
+        # Remove from git if in a git repo
+        if [[ -d "$flake_dir/.git" ]] || git -C "$flake_dir" rev-parse --git-dir >/dev/null 2>&1; then
+            git -C "$flake_dir" rm --cached "packages/$pkg.nix" 2>/dev/null || true
+        fi
         success "Removed local package file"
     fi
 
@@ -299,17 +315,25 @@ cmd_gc() {
     success "Garbage collection complete"
 }
 
+# Get packages directory for a given flake directory
+get_packages_dir() {
+    local flake_dir="$1"
+    echo "$flake_dir/packages"
+}
+
 # Collect local packages info
 # Sets arrays: LOCAL_PKG_NAMES, LOCAL_PKG_INPUTS, LOCAL_PKG_OVERLAYS, LOCAL_PKG_EXPRS
+# Takes optional packages_dir argument (defaults to LOCAL_PACKAGES_DIR for backwards compat)
 collect_local_packages() {
+    local packages_dir="${1:-$LOCAL_PACKAGES_DIR}"
     LOCAL_PKG_NAMES=()
     LOCAL_PKG_INPUTS=()
     LOCAL_PKG_OVERLAYS=()
     LOCAL_PKG_EXPRS=()
 
-    [[ ! -d "$LOCAL_PACKAGES_DIR" ]] && return
+    [[ ! -d "$packages_dir" ]] && return
 
-    for pkg_file in "$LOCAL_PACKAGES_DIR"/*.nix; do
+    for pkg_file in "$packages_dir"/*.nix; do
         [[ ! -f "$pkg_file" ]] && continue
 
         local name input_name input_url overlay pkg_expr
@@ -341,14 +365,36 @@ collect_local_packages() {
 }
 
 # Generate flake.nix content
+# Usage: generate_flake [--flake-dir <dir>] [package1] [package2] ...
 generate_flake() {
+    local flake_dir=""
     local -a packages=()
-    [[ $# -gt 0 ]] && packages=("$@")
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --flake-dir)
+                flake_dir="$2"
+                shift 2
+                ;;
+            *)
+                packages+=("$1")
+                shift
+                ;;
+        esac
+    done
+
     local pkg_entries=""
     local shell_entries=""
 
+    # Determine packages directory
+    local packages_dir="$LOCAL_PACKAGES_DIR"
+    if [[ -n "$flake_dir" ]]; then
+        packages_dir=$(get_packages_dir "$flake_dir")
+    fi
+
     # Filter out local packages from standard packages list
-    collect_local_packages
+    collect_local_packages "$packages_dir"
     local -a filtered_packages=()
     for pkg in "${packages[@]+"${packages[@]}"}"; do
         [[ -z "$pkg" ]] && continue
@@ -572,7 +618,7 @@ add_package_to_flake() {
     fi
 
     # Generate and write flake.nix
-    generate_flake "${packages[@]}" > "$flake"
+    generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
     success "Added $pkg to $flake"
 }
 
@@ -591,7 +637,7 @@ remove_package_from_flake() {
     done < <(get_packages_from_flake "$flake")
 
     # Generate and write flake.nix
-    generate_flake "${packages[@]+"${packages[@]}"}" > "$flake"
+    generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
     success "Removed $pkg from $flake"
 }
 
@@ -618,7 +664,7 @@ cmd_bundle_dump() {
     fi
 
     # Generate and write flake.nix
-    generate_flake "${packages[@]}" > "$flake"
+    generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
 
     success "Dumped ${#packages[@]} package(s) to $flake"
     info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"
@@ -657,7 +703,7 @@ cmd_init() {
 
     mkdir -p "$dir"
     info "Initializing flake.nix at $flake..."
-    generate_flake > "$flake"
+    generate_flake --flake-dir "$dir" > "$flake"
     success "Created $flake"
 }
 

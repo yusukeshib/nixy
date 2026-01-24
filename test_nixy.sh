@@ -529,6 +529,104 @@ EOF
     assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" "my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix"
 }
 
+test_install_file_copies_to_flake_dir_packages() {
+    cd "$TEST_DIR"
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "flake-dir-test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Create local flake in a subdirectory
+    mkdir -p myproject
+    "$NIXY" init myproject >/dev/null 2>&1
+
+    cd myproject
+
+    # Install the local file (will fail at nix profile add, but package file should be copied)
+    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+
+    # Verify package was copied to the flake directory's packages subdir (not NIXY_CONFIG_DIR)
+    assert_file_exists "./packages/flake-dir-test-pkg.nix" "Package should be in flake dir's packages subdir" && \
+
+    # Verify flake.nix has the local package entry
+    assert_file_contains "./flake.nix" "flake-dir-test-pkg = pkgs.callPackage ./packages/flake-dir-test-pkg.nix"
+}
+
+test_install_file_adds_to_git_in_git_repo() {
+    cd "$TEST_DIR"
+
+    # Create a git repository for the flake
+    mkdir -p myproject
+    cd myproject
+    git init >/dev/null 2>&1
+    git config user.email "test@test.com" >/dev/null 2>&1
+    git config user.name "Test" >/dev/null 2>&1
+
+    # Create flake and commit it
+    "$NIXY" init . >/dev/null 2>&1
+    git add flake.nix >/dev/null 2>&1
+    git commit -m "Initial commit" >/dev/null 2>&1
+
+    # Create a package file
+    cat > ../test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "git-tracked-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the local file (will fail at nix profile add, but package file should be added to git)
+    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+
+    # Verify package file was added to git staging area
+    local git_status
+    git_status=$(git status --porcelain 2>/dev/null)
+
+    if echo "$git_status" | grep -q "A.*packages/git-tracked-pkg.nix"; then
+        return 0
+    else
+        echo "  ASSERTION FAILED: Package file should be staged in git"
+        echo "  Git status: $git_status"
+        return 1
+    fi
+}
+
+test_install_file_works_without_git() {
+    cd "$TEST_DIR"
+
+    # Create flake without git (just a regular directory)
+    mkdir -p myproject
+    "$NIXY" init myproject >/dev/null 2>&1
+
+    cd myproject
+
+    # Create a package file
+    cat > ../test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "no-git-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the local file (will fail at nix profile add, but package file should still be copied)
+    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+
+    # Verify package was copied successfully even without git
+    assert_file_exists "./packages/no-git-pkg.nix" "Package should be copied even without git"
+}
+
 # =============================================================================
 # Test: Help and basic commands
 # =============================================================================
@@ -602,6 +700,9 @@ main() {
     run_test "fails without name or pname" test_parse_fails_without_name_or_pname || true
     run_test "install --file with nonexistent file" test_install_file_not_found || true
     run_test "install --file adds to local-packages section" test_install_file_adds_to_local_packages_section || true
+    run_test "install --file copies to flake dir packages" test_install_file_copies_to_flake_dir_packages || true
+    run_test "install --file adds to git in git repo" test_install_file_adds_to_git_in_git_repo || true
+    run_test "install --file works without git" test_install_file_works_without_git || true
 
     # Help tests
     run_test "help shows init command" test_help_shows_init_command || true
