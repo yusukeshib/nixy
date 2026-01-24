@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.0"
+NIXY_VERSION="0.1.1"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -806,6 +806,8 @@ cmd_self_upgrade() {
     # Compare versions
     if [[ "$NIXY_VERSION" == "$remote_version" ]] && [[ "$force" != "true" ]]; then
         success "Already up to date!"
+        rm -f "$tmp_file"
+        trap - EXIT
         return 0
     fi
 
@@ -835,6 +837,9 @@ cmd_self_upgrade() {
 
     # Clean up backup on success
     rm -f "$backup_path"
+
+    # Clear the trap since tmp_file was moved, not deleted
+    trap - EXIT
 
     success "Successfully upgraded to version $remote_version!"
 }
