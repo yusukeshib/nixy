@@ -314,16 +314,16 @@ collect_local_packages() {
 
         local name input_name input_url overlay pkg_expr
 
-        # Try 'name' first, then 'pname' for nixpkgs-style derivations
-        name=$(parse_local_package "$pkg_file" "name")
-        [[ -z "$name" ]] && name=$(parse_local_package "$pkg_file" "pname")
+        # Try 'pname' first (nixpkgs standard), then fall back to 'name'
+        name=$(parse_local_package "$pkg_file" "pname")
+        [[ -z "$name" ]] && name=$(parse_local_package "$pkg_file" "name")
         [[ -z "$name" ]] && continue
 
         # Parse inputs block - extract input name and url (handles multiline)
         # Format: inputs = { \n  name.url = "url"; \n };
         # Look for lines containing .url = within the inputs block
-        input_name=$(grep '\.url[[:space:]]*=' "$pkg_file" | head -1 | sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\)\.url.*/\1/')
-        input_url=$(grep '\.url[[:space:]]*=' "$pkg_file" | head -1 | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/')
+        input_name=$(grep '\.url[[:space:]]*=' "$pkg_file" 2>/dev/null | head -1 | sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\)\.url.*/\1/' || true)
+        input_url=$(grep '\.url[[:space:]]*=' "$pkg_file" 2>/dev/null | head -1 | sed 's/.*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
 
         overlay=$(parse_local_package "$pkg_file" "overlay")
         pkg_expr=$(parse_local_package "$pkg_file" "packageExpr")

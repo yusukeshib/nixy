@@ -497,6 +497,38 @@ test_install_file_not_found() {
     assert_output_contains "$output" "File not found"
 }
 
+test_install_file_adds_to_local_packages_section() {
+    cd "$TEST_DIR"
+    # Create a nixpkgs-style package file with pname
+    cat > test-pkg.nix <<'EOF'
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "my-local-pkg";
+  version = "1.0.0";
+  src = fetchFromGitHub {
+    owner = "test";
+    repo = "test";
+    rev = "v${version}";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+  vendorHash = null;
+}
+EOF
+
+    # Create global flake (packages are always stored in NIXY_CONFIG_DIR/packages)
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Install the local file with -g flag (will fail at nix profile add, but flake should be generated)
+    "$NIXY" install --file test-pkg.nix -g 2>&1 || true
+
+    # Verify package was copied
+    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-local-pkg.nix" && \
+
+    # Verify flake.nix has the local package entry
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" "my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix"
+}
+
 # =============================================================================
 # Test: Help and basic commands
 # =============================================================================
@@ -569,6 +601,7 @@ main() {
     run_test "pname takes precedence over name" test_parse_pname_takes_precedence || true
     run_test "fails without name or pname" test_parse_fails_without_name_or_pname || true
     run_test "install --file with nonexistent file" test_install_file_not_found || true
+    run_test "install --file adds to local-packages section" test_install_file_adds_to_local_packages_section || true
 
     # Help tests
     run_test "help shows init command" test_help_shows_init_command || true
