@@ -1,5 +1,7 @@
 # nixy - Use Nix Like Homebrew
 
+[日本語版はこちら](README_ja.md)
+
 **No Nix knowledge required.** Install packages with a single command, just like Homebrew.
 
 ```bash
