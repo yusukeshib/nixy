@@ -334,6 +334,28 @@ test_sync_with_empty_flake() {
     return 0
 }
 
+test_sync_with_packages_no_unbound_variable() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add packages to flake (simulating a flake with packages defined)
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Sync should not fail with unbound variable even when to_remove array is empty
+    # (packages in flake but nothing to remove from nix profile)
+    local output exit_code
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should not have unbound variable error regardless of exit code
+    # (exit code may be non-zero if nix commands fail, but that's not what we're testing)
+    if echo "$output" | grep -q "unbound variable"; then
+        echo "  ASSERTION FAILED: sync should not have unbound variable error"
+        echo "  Output: $output"
+        return 1
+    fi
+    return 0
+}
+
 test_shell_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
@@ -406,6 +428,7 @@ main() {
     run_test "upgrade fails cleanly without flake" test_upgrade_fails_cleanly_without_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
+    run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Help tests

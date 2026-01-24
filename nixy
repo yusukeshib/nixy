@@ -499,7 +499,8 @@ cmd_sync() {
     installed=$(get_installed_packages)
 
     # Find packages to install (in flake but not installed)
-    local to_install=()
+    local -a to_install
+    to_install=()
     for pkg in $packages; do
         if ! echo "$installed" | grep -qx "$pkg"; then
             to_install+=("$pkg")
@@ -507,7 +508,8 @@ cmd_sync() {
     done
 
     # Find packages to remove (installed but not in flake)
-    local to_remove=()
+    local -a to_remove
+    to_remove=()
     for pkg in $installed; do
         if ! echo "$packages" | grep -qx "$pkg"; then
             to_remove+=("$pkg")
