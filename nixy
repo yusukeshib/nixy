@@ -748,14 +748,21 @@ cmd_init() {
 # Self-upgrade nixy to latest version
 cmd_self_upgrade() {
     local force=false
+    local dry_run=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force|-f) force=true; shift ;;
+            --dry-run) dry_run=true; shift ;;
             *) die "Unknown option: $1. Usage: nixy self-upgrade [--force]" ;;
         esac
     done
+
+    # Dry run mode - just validate args and exit
+    if [[ "$dry_run" == "true" ]]; then
+        return 0
+    fi
 
     # Get the path to the current script
     local self_path
@@ -799,8 +806,6 @@ cmd_self_upgrade() {
     # Compare versions
     if [[ "$NIXY_VERSION" == "$remote_version" ]] && [[ "$force" != "true" ]]; then
         success "Already up to date!"
-        rm -f "$tmp_file"
-        trap - EXIT
         return 0
     fi
 

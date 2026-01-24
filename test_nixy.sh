@@ -769,9 +769,9 @@ test_self_upgrade_rejects_invalid_option() {
 }
 
 test_self_upgrade_accepts_force_flag() {
-    # Test that --force is recognized (will fail due to network/permissions, but shouldn't fail on arg parsing)
+    # Test that --force is recognized using --dry-run to avoid actually upgrading
     local output
-    output=$("$NIXY" self-upgrade --force 2>&1 || true)
+    output=$("$NIXY" self-upgrade --force --dry-run 2>&1 || true)
     # Should NOT contain "Unknown option" error
     if echo "$output" | grep -q "Unknown option"; then
         echo "  ASSERTION FAILED: --force should be a valid option"
@@ -782,7 +782,7 @@ test_self_upgrade_accepts_force_flag() {
 
 test_self_upgrade_accepts_short_force_flag() {
     local output
-    output=$("$NIXY" self-upgrade -f 2>&1 || true)
+    output=$("$NIXY" self-upgrade -f --dry-run 2>&1 || true)
     if echo "$output" | grep -q "Unknown option"; then
         echo "  ASSERTION FAILED: -f should be a valid option"
         return 1
