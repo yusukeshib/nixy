@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.4"
+NIXY_VERSION="0.1.5"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -86,6 +86,12 @@ get_flake_dir() {
     else
         dirname "$flake"
     fi
+}
+
+# Check if flake.nix is managed by nixy (has markers)
+is_nixy_managed_flake() {
+    local flake="$1"
+    [[ -f "$flake" ]] && grep -q '\[nixy:packages\]' "$flake"
 }
 
 # Parse packages from flake.nix (profile packages)
@@ -161,6 +167,14 @@ cmd_install() {
 
     [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
 
+    # Check if existing flake.nix is nixy-managed before installing
+    local flake_dir
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local flake="$flake_dir/flake.nix"
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
+    fi
+
     info "Installing $pkg..."
     nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "nixpkgs#$pkg"
     success "Installed $pkg"
@@ -204,6 +218,11 @@ cmd_install_from_file() {
     local flake_dir
     flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
+
+    # Check if existing flake.nix is nixy-managed
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
+    fi
 
     # Create packages directory inside flake directory
     local pkg_dir
@@ -252,6 +271,14 @@ cmd_uninstall() {
     done
 
     [[ -z "$pkg" ]] && die "Usage: nixy uninstall [--global] <package>"
+
+    # Check if existing flake.nix is nixy-managed before uninstalling
+    local flake_dir
+    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    local flake="$flake_dir/flake.nix"
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy."
+    fi
 
     info "Uninstalling $pkg..."
 
@@ -664,6 +691,11 @@ add_package_to_flake() {
     flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
+    # Check if existing flake.nix is nixy-managed
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
+    fi
+
     # Get existing packages from flake
     local -a packages=()
     while IFS= read -r p; do
@@ -700,6 +732,11 @@ remove_package_from_flake() {
     flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
 
+    # Check if existing flake.nix is nixy-managed
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy."
+    fi
+
     # Get existing packages from flake, excluding the one to remove
     local -a packages=()
     while IFS= read -r p; do
@@ -721,6 +758,11 @@ cmd_bundle_dump() {
     local flake_dir
     flake_dir=$(get_flake_dir "$use_global") || exit 1
     local flake="$flake_dir/flake.nix"
+
+    # Check if existing flake.nix is nixy-managed
+    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
+    fi
 
     info "Dumping installed packages to $flake..."
 

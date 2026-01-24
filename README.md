@@ -154,7 +154,7 @@ Use `nixy search <keyword>`. Package names sometimes differ from what you expect
 In the Nix store (`/nix/store/`). nixy just manages which packages are available in your PATH.
 
 **Can I edit the flake.nix manually?**
-Yes. It's standard Nix. nixy will preserve your manual changes outside the `# [nixy:...]` markers.
+Yes, but with care. nixy regenerates the entire flake.nix when you install/uninstall packages, preserving only what's inside the `# [nixy:...]` markers. For heavy customization, consider managing flake.nix manually and using `nix` commands directly.
 
 **How do I update nixy?**
 Run `nixy self-upgrade`. It checks for updates, downloads the latest version, and replaces itself. Use `--force` to reinstall even if already up to date.

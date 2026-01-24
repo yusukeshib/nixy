@@ -420,6 +420,44 @@ test_upgrade_fails_cleanly_without_flake() {
     assert_file_not_exists "./flake.nix"
 }
 
+test_install_fails_on_non_nixy_flake() {
+    cd "$TEST_DIR"
+    # Create a non-nixy flake.nix (no markers)
+    cat > flake.nix <<'EOF'
+{
+  description = "A custom flake";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }: {
+    packages = {};
+  };
+}
+EOF
+
+    local output exit_code
+    output=$("$NIXY" install testpkg 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should fail with error about non-nixy flake
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not managed by nixy"
+}
+
+test_uninstall_fails_on_non_nixy_flake() {
+    cd "$TEST_DIR"
+    # Create a non-nixy flake.nix (no markers)
+    cat > flake.nix <<'EOF'
+{
+  description = "A custom flake";
+  outputs = { self }: {};
+}
+EOF
+
+    local output exit_code
+    output=$("$NIXY" uninstall testpkg 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not managed by nixy"
+}
+
 test_sync_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
@@ -994,6 +1032,8 @@ main() {
     run_test "install fails cleanly without flake" test_install_fails_cleanly_without_flake || true
     run_test "uninstall fails cleanly without flake" test_uninstall_fails_cleanly_without_flake || true
     run_test "upgrade fails cleanly without flake" test_upgrade_fails_cleanly_without_flake || true
+    run_test "install fails on non-nixy flake" test_install_fails_on_non_nixy_flake || true
+    run_test "uninstall fails on non-nixy flake" test_uninstall_fails_on_non_nixy_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
