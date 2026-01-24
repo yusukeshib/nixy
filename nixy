@@ -817,7 +817,7 @@ cmd_shell() {
     fi
 
     info "Entering dev shell..."
-    nix "${NIX_FLAGS[@]}" develop "$flake_dir" --impure
+    nix "${NIX_FLAGS[@]}" develop "$flake_dir" --impure --command "$SHELL"
 }
 
 # Initialize a local flake.nix
