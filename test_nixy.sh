@@ -316,6 +316,24 @@ test_sync_fails_cleanly_without_flake() {
     assert_file_not_exists "./flake.nix"
 }
 
+test_sync_with_empty_flake() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Sync with empty flake (no packages) should not fail with unbound variable
+    local output exit_code
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should succeed (already in sync)
+    assert_exit_code 0 "$exit_code" && \
+    # Should not have unbound variable error
+    if echo "$output" | grep -q "unbound variable"; then
+        echo "  ASSERTION FAILED: sync should not have unbound variable error"
+        return 1
+    fi
+    return 0
+}
+
 test_shell_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
@@ -387,6 +405,7 @@ main() {
     run_test "uninstall fails cleanly without flake" test_uninstall_fails_cleanly_without_flake || true
     run_test "upgrade fails cleanly without flake" test_upgrade_fails_cleanly_without_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
+    run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Help tests

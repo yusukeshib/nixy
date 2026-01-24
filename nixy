@@ -82,7 +82,7 @@ get_packages_from_flake() {
     if [[ -f "$flake" ]]; then
         # Extract package names from the packages section (format: "name = pkgs.name;")
         sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' "$flake" 2>/dev/null | \
-            grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' | \
+            { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
             sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/' | \
             sort -u
     fi
@@ -94,7 +94,7 @@ get_dev_packages_from_flake() {
     if [[ -f "$flake" ]]; then
         # Extract package names from buildInputs
         sed -n '/# \[nixy:devShell\]/,/# \[\/nixy:devShell\]/p' "$flake" 2>/dev/null | \
-            grep -E '^\s+pkgs\.' | \
+            { grep -E '^\s+pkgs\.' || true; } | \
             sed 's/.*pkgs\.\([a-zA-Z0-9_-]*\).*/\1/' | \
             sort -u
     fi
@@ -103,7 +103,7 @@ get_dev_packages_from_flake() {
 # Get list of installed packages from nix profile
 get_installed_packages() {
     nix "${NIX_FLAGS[@]}" profile list 2>/dev/null | \
-        grep "^Name:" | \
+        { grep "^Name:" || true; } | \
         sed 's/Name:[[:space:]]*//' | \
         tr -d '\033' | \
         sed 's/\[1m//g; s/\[0m//g'
@@ -520,13 +520,13 @@ cmd_sync() {
     fi
 
     # Install missing packages
-    for pkg in "${to_install[@]}"; do
+    for pkg in "${to_install[@]+"${to_install[@]}"}"; do
         info "Installing $pkg..."
         nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg" || warn "Failed to install $pkg"
     done
 
     # Remove extra packages
-    for pkg in "${to_remove[@]}"; do
+    for pkg in "${to_remove[@]+"${to_remove[@]}"}"; do
         info "Removing $pkg..."
         nix "${NIX_FLAGS[@]}" profile remove "$pkg" || warn "Failed to remove $pkg"
     done
