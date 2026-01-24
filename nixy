@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.1"
+NIXY_VERSION="0.1.2"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -226,7 +226,11 @@ cmd_install_from_file() {
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
-    generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    if [[ "$use_global" == "true" ]]; then
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    fi
 
     # Install from the regenerated flake
     info "Installing $pkg_name from flake..."
@@ -395,9 +399,10 @@ collect_local_packages() {
 }
 
 # Generate flake.nix content
-# Usage: generate_flake [--flake-dir <dir>] [package1] [package2] ...
+# Usage: generate_flake [--flake-dir <dir>] [--global] [package1] [package2] ...
 generate_flake() {
     local flake_dir=""
+    local is_global=false
     local -a packages=()
 
     # Parse arguments
@@ -406,6 +411,10 @@ generate_flake() {
             --flake-dir)
                 flake_dir="$2"
                 shift 2
+                ;;
+            --global)
+                is_global=true
+                shift
                 ;;
             *)
                 packages+=("$1")
@@ -512,6 +521,23 @@ ${local_overlays}          # [/nixy:local-overlays]
         pkgs_binding="let pkgs = nixpkgs.legacyPackages.\${system};"
     fi
 
+    # Build devShells section (only for project flakes, not global)
+    local dev_shells_section=""
+    if [[ "$is_global" != "true" ]]; then
+        dev_shells_section="
+      # Development shell (nixy shell)
+      devShells = forAllSystems (system:
+        $pkgs_binding
+        in {
+          default = pkgs.mkShell {
+            buildInputs = [
+              # [nixy:devShell]
+${shell_entries}              # [/nixy:devShell]
+            ];
+          };
+        });"
+    fi
+
     cat << EOF
 {
   description = "nixy managed packages";
@@ -528,7 +554,7 @@ ${local_inputs}    # [/nixy:local-inputs]
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
       $pkgs_def
     in {
-      # Profile packages (nixy bundle)
+      # Profile packages (nixy install)
       packages = forAllSystems (system:
         $pkgs_binding
         in {
@@ -536,19 +562,7 @@ ${local_inputs}    # [/nixy:local-inputs]
 ${pkg_entries}          # [/nixy:packages]
           # [nixy:local-packages]
 ${local_packages}          # [/nixy:local-packages]
-        });
-
-      # Development shell (nixy shell)
-      devShells = forAllSystems (system:
-        $pkgs_binding
-        in {
-          default = pkgs.mkShell {
-            buildInputs = [
-              # [nixy:devShell]
-${shell_entries}              # [/nixy:devShell]
-            ];
-          };
-        });
+        });$dev_shells_section
     };
 }
 EOF
@@ -656,7 +670,11 @@ add_package_to_flake() {
     fi
 
     # Generate and write flake.nix
-    generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
+    if [[ "$use_global" == "true" ]]; then
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
+    fi
     success "Added $pkg to $flake"
 }
 
@@ -675,7 +693,11 @@ remove_package_from_flake() {
     done < <(get_packages_from_flake "$flake")
 
     # Generate and write flake.nix
-    generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    if [[ "$use_global" == "true" ]]; then
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    fi
     success "Removed $pkg from $flake"
 }
 
@@ -702,7 +724,11 @@ cmd_bundle_dump() {
     fi
 
     # Generate and write flake.nix
-    generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
+    if [[ "$use_global" == "true" ]]; then
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
+    fi
 
     success "Dumped ${#packages[@]} package(s) to $flake"
     info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"

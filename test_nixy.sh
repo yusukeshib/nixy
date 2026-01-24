@@ -258,6 +258,87 @@ test_global_flag_ignores_local_flake() {
 }
 
 # =============================================================================
+# Test: Global vs Local flake structure (devShells)
+# =============================================================================
+
+test_local_flake_has_devshells() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Local/project flakes should have devShells for nixy shell
+    assert_file_contains "./flake.nix" "devShells" && \
+    assert_file_contains "./flake.nix" "# \[nixy:devShell\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:devShell\]"
+}
+
+test_global_flake_has_no_devshells() {
+    cd "$TEST_DIR"
+
+    # Create a global flake by installing a package with -g
+    # First create the global config dir
+    mkdir -p "$NIXY_CONFIG_DIR"
+
+    # Manually add a package to trigger flake generation with --global
+    # We'll simulate this by calling the init on global dir, then checking
+    # that when we add a package with -g, devShells is removed
+
+    # Create initial global flake
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Add a package marker in the packages section (simulating install -g)
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp"
+    mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
+
+    # Now trigger a regeneration via add_package_to_flake by attempting to install
+    # We source nixy to directly test the generate_flake function behavior
+
+    # Test: Use generate_flake directly with --global flag
+    source "$NIXY"
+    local flake_content
+    flake_content=$(generate_flake --flake-dir "$NIXY_CONFIG_DIR" --global ripgrep)
+
+    # Global flakes should NOT have devShells
+    if echo "$flake_content" | grep -q "devShells"; then
+        echo "  ASSERTION FAILED: Global flake should NOT contain devShells"
+        echo "  Content contains: devShells"
+        return 1
+    fi
+
+    # But should still have packages section
+    if ! echo "$flake_content" | grep -q "packages = forAllSystems"; then
+        echo "  ASSERTION FAILED: Global flake should contain packages"
+        return 1
+    fi
+
+    return 0
+}
+
+test_local_flake_generation_has_devshells() {
+    cd "$TEST_DIR"
+
+    # Source nixy to test generate_flake directly
+    source "$NIXY"
+
+    # Generate a local flake (no --global flag)
+    local flake_content
+    flake_content=$(generate_flake --flake-dir "$TEST_DIR" ripgrep)
+
+    # Local flakes SHOULD have devShells
+    if ! echo "$flake_content" | grep -q "devShells"; then
+        echo "  ASSERTION FAILED: Local flake should contain devShells"
+        return 1
+    fi
+
+    # And should have packages section
+    if ! echo "$flake_content" | grep -q "packages = forAllSystems"; then
+        echo "  ASSERTION FAILED: Local flake should contain packages"
+        return 1
+    fi
+
+    return 0
+}
+
+# =============================================================================
 # Test: Install adds only specific package (not global dump)
 # =============================================================================
 
@@ -836,6 +917,11 @@ main() {
     run_test "--global uses global flake" test_global_flag_uses_global_flake || true
     run_test "-g short form works" test_global_flag_short_form || true
     run_test "--global ignores local flake" test_global_flag_ignores_local_flake || true
+
+    # Global vs Local flake structure tests
+    run_test "local flake has devShells" test_local_flake_has_devshells || true
+    run_test "global flake has no devShells" test_global_flake_has_no_devshells || true
+    run_test "local flake generation has devShells" test_local_flake_generation_has_devshells || true
 
     # Package management tests
     run_test "flake has correct structure after init" test_flake_structure_after_init || true
