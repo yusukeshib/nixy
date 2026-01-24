@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.3"
+NIXY_VERSION="0.1.4"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -334,7 +334,7 @@ cmd_upgrade() {
     # Update flake.lock if flake.nix exists
     if [[ -f "$flake" ]]; then
         info "Updating flake.lock..."
-        nix "${NIX_FLAGS[@]}" flake update "$flake_dir"
+        nix "${NIX_FLAGS[@]}" flake update --flake "$flake_dir"
     fi
 
     info "Upgrading all packages..."
