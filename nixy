@@ -93,6 +93,17 @@ get_packages_from_flake() {
     fi
 }
 
+# Parse only local packages from flake.nix (installed via --file)
+get_local_packages_from_flake() {
+    local flake="$1"
+    if [[ -f "$flake" ]]; then
+        sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' "$flake" 2>/dev/null | \
+            { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
+            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/' | \
+            sort -u
+    fi
+}
+
 # Parse dev packages from flake.nix
 get_dev_packages_from_flake() {
     local flake="$1"
@@ -106,12 +117,14 @@ get_dev_packages_from_flake() {
 }
 
 # Get list of installed packages from nix profile
+# Extracts package name from "Flake attribute:" line (e.g., "legacyPackages.aarch64-darwin.fzf" -> "fzf")
+# This works for both nixpkgs packages and local flake packages
 get_installed_packages() {
     nix "${NIX_FLAGS[@]}" profile list 2>/dev/null | \
-        { grep "^Name:" || true; } | \
-        sed 's/Name:[[:space:]]*//' | \
-        tr -d '\033' | \
-        sed 's/\[1m//g; s/\[0m//g'
+        { grep "^Flake attribute:" || true; } | \
+        sed 's/Flake attribute:[[:space:]]*//' | \
+        sed 's/.*\.//' | \
+        sort -u
 }
 
 # Install a package and track in flake.nix
@@ -554,6 +567,9 @@ cmd_sync() {
     local packages
     packages=$(get_packages_from_flake "$flake")
 
+    local local_packages
+    local_packages=$(get_local_packages_from_flake "$flake")
+
     local installed
     installed=$(get_installed_packages)
 
@@ -583,7 +599,12 @@ cmd_sync() {
     # Install missing packages
     for pkg in "${to_install[@]+"${to_install[@]}"}"; do
         info "Installing $pkg..."
-        nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg" || warn "Failed to install $pkg"
+        # Check if this is a local package (needs to be installed from flake)
+        if echo "$local_packages" | grep -qx "$pkg"; then
+            nix "${NIX_FLAGS[@]}" profile add "$flake_dir#$pkg" || warn "Failed to install $pkg"
+        else
+            nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg" || warn "Failed to install $pkg"
+        fi
     done
 
     # Remove extra packages

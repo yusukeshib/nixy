@@ -384,30 +384,49 @@ test_sync_preserves_local_packages() {
     awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
     awk '/# \[nixy:local-packages\]/{print; print "          my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix {};"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
 
-    # Replicate the get_packages_from_flake logic to test it extracts both package types
+    # Test get_packages_from_flake returns both regular and local packages
     local packages
     packages=$({
-        # Extract regular packages
         sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' flake.nix 2>/dev/null | \
             { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
             sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/'
-        # Extract local packages
         sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' flake.nix 2>/dev/null | \
             { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
             sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/'
     } | sort -u)
 
-    # Should contain the regular package
+    # Test get_local_packages_from_flake returns only local packages
+    local local_packages
+    local_packages=$(sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' flake.nix 2>/dev/null | \
+        { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
+        sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/' | \
+        sort -u)
+
+    # Should contain the regular package in all packages
     if ! echo "$packages" | grep -q "ripgrep"; then
         echo "  ASSERTION FAILED: get_packages_from_flake should return ripgrep"
         echo "  Packages: $packages"
         return 1
     fi
 
-    # Should also contain the local package
+    # Should contain the local package in all packages
     if ! echo "$packages" | grep -q "my-local-pkg"; then
         echo "  ASSERTION FAILED: get_packages_from_flake should return my-local-pkg"
         echo "  Packages: $packages"
+        return 1
+    fi
+
+    # Local packages list should contain my-local-pkg
+    if ! echo "$local_packages" | grep -q "my-local-pkg"; then
+        echo "  ASSERTION FAILED: get_local_packages_from_flake should return my-local-pkg"
+        echo "  Local packages: $local_packages"
+        return 1
+    fi
+
+    # Local packages list should NOT contain ripgrep
+    if echo "$local_packages" | grep -q "ripgrep"; then
+        echo "  ASSERTION FAILED: get_local_packages_from_flake should NOT return ripgrep"
+        echo "  Local packages: $local_packages"
         return 1
     fi
 
