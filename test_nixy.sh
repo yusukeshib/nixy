@@ -9,6 +9,8 @@ set -euo pipefail
 
 # Test configuration
 NIXY="$(cd "$(dirname "$0")" && pwd)/nixy"
+ORIGINAL_DIR="$(pwd)"
+ORIGINAL_NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-}"
 TEST_DIR=""
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -28,7 +30,13 @@ setup() {
 }
 
 teardown() {
+    cd "$ORIGINAL_DIR"
     [[ -n "$TEST_DIR" && -d "$TEST_DIR" ]] && rm -rf "$TEST_DIR"
+    if [[ -n "$ORIGINAL_NIXY_CONFIG_DIR" ]]; then
+        export NIXY_CONFIG_DIR="$ORIGINAL_NIXY_CONFIG_DIR"
+    else
+        unset NIXY_CONFIG_DIR
+    fi
 }
 
 assert_file_exists() {
