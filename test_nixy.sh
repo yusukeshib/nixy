@@ -249,8 +249,8 @@ test_install_preserves_existing_packages() {
     cd "$TEST_DIR"
     "$NIXY" init >/dev/null 2>&1
 
-    # Manually add a package to the flake
-    sed -i.bak 's/# \[nixy:packages\]/# [nixy:packages]\n          existing-pkg = pkgs.existing-pkg;/' flake.nix
+    # Manually add a package to the flake (use awk for portability)
+    awk '/# \[nixy:packages\]/{print; print "          existing-pkg = pkgs.existing-pkg;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
 
     # Verify existing-pkg is there
     assert_file_contains "./flake.nix" "existing-pkg"
