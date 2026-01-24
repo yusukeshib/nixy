@@ -1,145 +1,173 @@
-# nixy - Homebrew-style Wrapper for Nix
+# nixy - Use Nix Like Homebrew
 
-A simple bash wrapper that makes Nix behave like Homebrew, using `flake.nix` for declarative, reproducible package management.
+**No Nix knowledge required.** Install packages with a single command, just like Homebrew.
 
-## Requirements
+```bash
+nixy install -g ripgrep    # That's it. No flake.nix, no configuration.
+```
 
-- Nix (with `nix-command` and `flakes` experimental features enabled)
+nixy gives you the power of Nix (reproducible builds, rollbacks, no dependency conflicts) with the simplicity of Homebrew. It's just a thin bash wrapper - no lock-in, no magic.
 
-## Installation
+## Motivation
+
+Nix is powerful but has a steep learning curve. You need to learn Nix language, understand flakes, and write configuration files just to install a package.
+
+nixy removes that barrier. You get all the benefits of Nix:
+- **Reproducibility**: Same packages, same versions, everywhere
+- **No conflicts**: Different projects can use different versions of the same tool
+- **Atomic upgrades**: Updates either fully succeed or nothing changes
+- **Rollbacks**: Instantly revert if an upgrade breaks something
+- **Cross-platform**: Same workflow on macOS and Linux
+
+...without writing a single line of Nix. Just `nixy install -g <package>`.
+
+## How it works
+
+nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup:
+
+- **Global packages (`-g`)**: `flake.nix` + `nix profile` at `~/.config/nix/`
+- **Project packages**: Just a `flake.nix` in your project directory
+
+nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it generates is plain Nix - you can read it, edit it manually, or use `nix` commands directly anytime.
+
+## Homebrew vs nixy
+
+| Homebrew | nixy |
+|----------|------|
+| `brew install ripgrep` | `nixy install -g ripgrep` |
+| `brew uninstall ripgrep` | `nixy uninstall -g ripgrep` |
+| `brew list` | `nixy list -g` |
+| `brew search git` | `nixy search git` |
+| `brew upgrade` | `nixy upgrade -g` |
+
+Same simplicity, but with Nix's reliability underneath. No lock-in - it's just standard Nix.
+
+## Quick Start
+
+### 1. Install Nix (if you haven't)
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+### 2. Install nixy
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
 
-### Manual Installation
+### 3. Start using it like Homebrew
 
 ```bash
-cp nixy ~/.local/bin/
-chmod +x ~/.local/bin/nixy
+nixy install -g ripgrep    # First run auto-creates ~/.config/nix/flake.nix
+nixy install -g nodejs
+nixy install -g git
+
+nixy list -g               # See what's installed
+nixy search python         # Find packages
+nixy uninstall -g nodejs   # Remove a package
+nixy upgrade -g            # Upgrade all packages
 ```
 
-## Quick Start
-
-```bash
-# Initialize a flake.nix in your project
-nixy init
-
-# Install packages
-nixy install ripgrep
-nixy install nodejs
-
-# List installed packages
-nixy list
-```
+The `-g` (or `--global`) flag works like Homebrew - packages are installed globally and available in all terminal sessions.
 
 ## Commands
 
-### Basic Commands
-
 | Command | Description |
 |---------|-------------|
-| `nixy init [dir]` | Initialize a local flake.nix (default: current dir) |
-| `nixy install <pkg>` | Install a package (tracked in flake.nix) |
-| `nixy install --file <path>` | Install from a local nix file |
-| `nixy uninstall <pkg>` | Uninstall a package |
+| `nixy install -g <pkg>` | Install a package globally |
+| `nixy uninstall -g <pkg>` | Uninstall a package |
+| `nixy list -g` | List installed packages |
 | `nixy search <query>` | Search for packages |
-| `nixy list` | List installed packages |
-| `nixy upgrade` | Upgrade all packages (updates flake.lock) |
+| `nixy upgrade -g` | Upgrade all packages |
+| `nixy gc` | Clean up old package versions |
 
-### Sync Commands
+## Sync Across Machines
 
-| Command | Description |
-|---------|-------------|
-| `nixy sync` | Sync installed packages with flake.nix |
-
-### Environment Commands
-
-| Command | Description |
-|---------|-------------|
-| `nixy shell` | Enter dev shell from flake.nix |
-| `nixy gc` | Garbage collect old generations |
-
-### Global Flag
-
-All commands support `--global` (or `-g`) to use the global flake at `~/.config/nix/flake.nix` instead of searching for a local flake:
+Your package list is just a text file (`~/.config/nix/flake.nix`). Back it up, version control it, or sync it with dotfiles:
 
 ```bash
-nixy install --global ripgrep   # Install to global flake
-nixy list -g                    # List using global flake
+# Back up your package list
+cp ~/.config/nix/flake.nix ~/dotfiles/
+
+# On a new machine:
+mkdir -p ~/.config/nix
+cp ~/dotfiles/flake.nix ~/.config/nix/
+nixy sync -g    # Installs everything from flake.nix
 ```
 
-## Flake Discovery
+Same packages, same versions, on every machine.
 
-nixy automatically searches up the directory tree for `flake.nix`, similar to how git finds `.git`:
+---
 
-1. If a `flake.nix` exists in the current directory or any parent, it's used automatically
-2. Use `--global` to explicitly use the global flake at `~/.config/nix/flake.nix`
-3. If no local flake is found and `--global` is not specified, nixy fails with a helpful error
+## Advanced: Per-Project Packages
 
-This allows per-project package management while still supporting a global configuration.
+For developers who want project-specific dependencies (like a `package.json` but for any tools):
 
-## Generated Flake Structure
+```bash
+cd my-project
+nixy init              # Create a flake.nix in this directory
+nixy install nodejs    # Install packages for this project only
+nixy install postgres
 
-When you run `nixy init`, it creates a `flake.nix` with this structure:
-
-```nix
-{
-  description = "nixy managed packages";
-
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # [nixy:local-inputs]
-    # [/nixy:local-inputs]
-  };
-
-  outputs = { self, nixpkgs }:
-    let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
-    in {
-      packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
-          # [nixy:packages]
-          ripgrep = pkgs.ripgrep;
-          nodejs = pkgs.nodejs;
-          # [/nixy:packages]
-          # [nixy:local-packages]
-          # [/nixy:local-packages]
-        });
-
-      devShells = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
-          default = pkgs.mkShell {
-            buildInputs = [
-              # [nixy:devShell]
-              pkgs.ripgrep
-              pkgs.nodejs
-              # [/nixy:devShell]
-            ];
-          };
-        });
-    };
-}
+nixy shell             # Enter a shell with these packages available
 ```
 
-The `# [nixy:...]` markers are used by nixy to track and update packages.
+Without `-g`, nixy automatically finds and uses the nearest `flake.nix` in parent directories (similar to how git finds `.git`).
 
-## Config Files
+### Sharing Project Environment
 
-| Path | Description |
-|------|-------------|
-| `./flake.nix` | Local project flake (auto-discovered in parent dirs) |
-| `~/.config/nix/flake.nix` | Global flake (use with `--global`) |
-| `~/.config/nix/packages/` | Custom package definitions |
-| `flake.lock` | Lock file (auto-generated by Nix) |
+```bash
+# Commit flake.nix to your repo
+git add flake.nix flake.lock
 
-## Local Package Format
+# Teammates can get the same environment:
+git clone my-project && cd my-project
+nixy sync              # Install all project packages
+```
 
-You can install packages from custom nix files using `nixy install --file <path>`:
+### Additional Commands for Projects
 
+| Command | Description |
+|---------|-------------|
+| `nixy init` | Create a flake.nix in current directory |
+| `nixy shell` | Enter dev shell with project packages |
+| `nixy sync` | Install packages from existing flake.nix |
+
+All commands support `-g` or `--global` to use global packages instead of project-local.
+
+---
+
+## FAQ
+
+**Can I use Homebrew and nixy together?**
+Yes. They don't conflict. You can migrate gradually or use both.
+
+**How do I find the right package name?**
+Use `nixy search <keyword>`. Package names sometimes differ from what you expect (e.g., `ripgrep` not `rg`).
+
+**Where are packages actually installed?**
+In the Nix store (`/nix/store/`). nixy just manages which packages are available in your PATH.
+
+**Can I edit the flake.nix manually?**
+Yes. It's standard Nix. nixy will preserve your manual changes outside the `# [nixy:...]` markers.
+
+**How do I uninstall nixy?**
+Just delete the `nixy` script. Your flake.nix files remain and work with standard `nix` commands.
+
+---
+
+## Appendix
+
+### Custom Package Definitions
+
+Install packages from custom nix files:
+
+```bash
+nixy install --file my-package.nix
+```
+
+Format for `my-package.nix`:
 ```nix
 {
   name = "my-package";
@@ -149,52 +177,25 @@ You can install packages from custom nix files using `nixy install --file <path>
 }
 ```
 
-The file will be copied to `~/.config/nix/packages/` and integrated into the flake.
+### Config Locations
 
-## Workflow
+| Path | Description |
+|------|-------------|
+| `~/.config/nix/flake.nix` | Global packages (used with `-g`) |
+| `./flake.nix` | Project-local packages |
+| `~/.config/nix/packages/` | Custom package definitions |
 
-### Per-Project Setup
+### Environment Variables
 
-```bash
-cd my-project
-nixy init                    # Create flake.nix
-nixy install nodejs          # Add packages
-git add flake.nix flake.lock # Track in git
-```
+| Variable | Default |
+|----------|---------|
+| `NIXY_CONFIG_DIR` | `~/.config/nix` |
 
-### On Another Machine
+### Limitations
 
-```bash
-git clone my-project
-cd my-project
-nixy sync                    # Install packages from flake.nix
-```
-
-### Global Setup
-
-```bash
-nixy init ~/.config/nix      # Create global flake
-nixy install --global ripgrep
-nixy install --global nodejs
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NIXY_CONFIG_DIR` | Config directory | `~/.config/nix` |
-
-## Limitations
-
-- Package names must be Nix package names (may differ from Homebrew)
-- No cask equivalent for macOS GUI apps
-- Requires Nix with experimental features enabled
-
-## Running Tests
-
-```bash
-./test_nixy.sh
-```
+- Package names use Nix naming (search with `nixy search` to find exact names)
+- No GUI app support (like Homebrew Cask) yet
+- Requires Nix with flakes enabled (the Determinate installer enables this by default)
 
 ## License
 
