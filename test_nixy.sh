@@ -11,6 +11,7 @@ set -euo pipefail
 NIXY="$(cd "$(dirname "$0")" && pwd)/nixy"
 ORIGINAL_DIR="$(pwd)"
 ORIGINAL_NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-}"
+ORIGINAL_NIXY_PROFILE="${NIXY_PROFILE:-}"
 TEST_DIR=""
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -25,6 +26,11 @@ cleanup_on_exit() {
     else
         unset NIXY_CONFIG_DIR 2>/dev/null || true
     fi
+    if [[ -n "$ORIGINAL_NIXY_PROFILE" ]]; then
+        export NIXY_PROFILE="$ORIGINAL_NIXY_PROFILE"
+    else
+        unset NIXY_PROFILE 2>/dev/null || true
+    fi
 }
 trap cleanup_on_exit EXIT
 
@@ -38,6 +44,7 @@ NC='\033[0m'
 setup() {
     TEST_DIR=$(mktemp -d)
     export NIXY_CONFIG_DIR="$TEST_DIR/config"
+    export NIXY_PROFILE="$TEST_DIR/profile"
     mkdir -p "$NIXY_CONFIG_DIR"
 }
 
@@ -48,6 +55,11 @@ teardown() {
         export NIXY_CONFIG_DIR="$ORIGINAL_NIXY_CONFIG_DIR"
     else
         unset NIXY_CONFIG_DIR
+    fi
+    if [[ -n "$ORIGINAL_NIXY_PROFILE" ]]; then
+        export NIXY_PROFILE="$ORIGINAL_NIXY_PROFILE"
+    else
+        unset NIXY_PROFILE
     fi
 }
 

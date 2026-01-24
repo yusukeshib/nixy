@@ -7,6 +7,7 @@ set -euo pipefail
 
 # Configuration
 NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nix}"
+NIXY_PROFILE="${NIXY_PROFILE:-}"
 GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
@@ -24,6 +25,13 @@ success() { echo -e "${GREEN}==>>${NC} $*"; }
 warn() { echo -e "${YELLOW}Warning:${NC} $*"; }
 error() { echo -e "${RED}Error:${NC} $*" >&2; }
 die() { error "$@"; exit 1; }
+
+# Get profile flags for nix profile commands
+get_profile_flags() {
+    if [[ -n "$NIXY_PROFILE" ]]; then
+        echo "--profile" "$NIXY_PROFILE"
+    fi
+}
 
 # Check dependencies
 check_deps() {
@@ -120,7 +128,7 @@ get_dev_packages_from_flake() {
 # Extracts package name from "Flake attribute:" line (e.g., "legacyPackages.aarch64-darwin.fzf" -> "fzf")
 # This works for both nixpkgs packages and local flake packages
 get_installed_packages() {
-    nix "${NIX_FLAGS[@]}" profile list 2>/dev/null | \
+    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
         { grep "^Flake attribute:" || true; } | \
         sed 's/Flake attribute:[[:space:]]*//' | \
         sed 's/.*\.//' | \
@@ -150,7 +158,7 @@ cmd_install() {
     [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
 
     info "Installing $pkg..."
-    nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg"
+    nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "nixpkgs#$pkg"
     success "Installed $pkg"
 
     # Add package to flake.nix
@@ -218,7 +226,7 @@ cmd_install_from_file() {
 
     # Install from the regenerated flake
     info "Installing $pkg_name from flake..."
-    nix "${NIX_FLAGS[@]}" profile add "$flake_dir#$pkg_name"
+    nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "$flake_dir#$pkg_name"
     success "Installed $pkg_name"
 }
 
@@ -246,7 +254,7 @@ cmd_uninstall() {
         die "Package $pkg is not installed"
     fi
 
-    nix "${NIX_FLAGS[@]}" profile remove "$pkg"
+    nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg"
     success "Uninstalled $pkg"
 
     # Get flake directory to find local package files
@@ -296,7 +304,7 @@ cmd_list() {
     get_flake "$use_global" >/dev/null || exit 1
 
     info "Installed packages:"
-    nix "${NIX_FLAGS[@]}" profile list
+    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags)
 }
 
 # Upgrade all packages
@@ -322,7 +330,7 @@ cmd_upgrade() {
     fi
 
     info "Upgrading all packages..."
-    nix "${NIX_FLAGS[@]}" profile upgrade '.*'
+    nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*'
     success "All packages upgraded"
 }
 
@@ -601,16 +609,16 @@ cmd_sync() {
         info "Installing $pkg..."
         # Check if this is a local package (needs to be installed from flake)
         if echo "$local_packages" | grep -qx "$pkg"; then
-            nix "${NIX_FLAGS[@]}" profile add "$flake_dir#$pkg" || warn "Failed to install $pkg"
+            nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "$flake_dir#$pkg" || warn "Failed to install $pkg"
         else
-            nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg" || warn "Failed to install $pkg"
+            nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "nixpkgs#$pkg" || warn "Failed to install $pkg"
         fi
     done
 
     # Remove extra packages
     for pkg in "${to_remove[@]+"${to_remove[@]}"}"; do
         info "Removing $pkg..."
-        nix "${NIX_FLAGS[@]}" profile remove "$pkg" || warn "Failed to remove $pkg"
+        nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg" || warn "Failed to remove $pkg"
     done
 
     success "Sync complete"
