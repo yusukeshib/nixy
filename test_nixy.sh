@@ -16,6 +16,18 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Ensure cleanup on exit (including Ctrl+C, errors, etc.)
+cleanup_on_exit() {
+    cd "$ORIGINAL_DIR" 2>/dev/null || true
+    [[ -n "$TEST_DIR" && -d "$TEST_DIR" ]] && rm -rf "$TEST_DIR"
+    if [[ -n "$ORIGINAL_NIXY_CONFIG_DIR" ]]; then
+        export NIXY_CONFIG_DIR="$ORIGINAL_NIXY_CONFIG_DIR"
+    else
+        unset NIXY_CONFIG_DIR 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

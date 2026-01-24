@@ -314,7 +314,9 @@ collect_local_packages() {
 
         local name input_name input_url overlay pkg_expr
 
+        # Try 'name' first, then 'pname' for nixpkgs-style derivations
         name=$(parse_local_package "$pkg_file" "name")
+        [[ -z "$name" ]] && name=$(parse_local_package "$pkg_file" "pname")
         [[ -z "$name" ]] && continue
 
         # Parse inputs block - extract input name and url (handles multiline)
@@ -325,6 +327,11 @@ collect_local_packages() {
 
         overlay=$(parse_local_package "$pkg_file" "overlay")
         pkg_expr=$(parse_local_package "$pkg_file" "packageExpr")
+
+        # If no packageExpr, assume nixpkgs-style derivation and use callPackage
+        if [[ -z "$pkg_expr" ]]; then
+            pkg_expr="pkgs.callPackage ./packages/$name.nix {}"
+        fi
 
         LOCAL_PKG_NAMES+=("$name")
         LOCAL_PKG_INPUTS+=("$input_name|$input_url")
