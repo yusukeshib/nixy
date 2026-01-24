@@ -2,26 +2,26 @@
 
 [日本語版はこちら](README_ja.md)
 
-**No Nix knowledge required.** Install packages with a single command, just like Homebrew.
+**Start using Nix today, learn as you go.** Install packages with a single command, just like Homebrew.
 
 ```bash
-nixy install -g ripgrep    # That's it. No flake.nix, no configuration.
+nixy install -g ripgrep    # That's it. Nix made simple.
 ```
 
 nixy gives you the power of Nix (reproducible builds, rollbacks, no dependency conflicts) with the simplicity of Homebrew. It's just a thin bash wrapper - no lock-in, no magic.
 
 ## Motivation
 
-Nix is powerful but has a steep learning curve. You need to learn Nix language, understand flakes, and write configuration files just to install a package.
+Nix is powerful, but the learning curve is steep. You want to learn Nix, but writing flake.nix just to install a package feels overwhelming at first.
 
-nixy removes that barrier. You get all the benefits of Nix:
+nixy makes the transition easier. Start with simple commands, and the generated `flake.nix` teaches you Nix patterns along the way. You get all the benefits of Nix:
 - **Reproducibility**: Same packages, same versions, everywhere
 - **No conflicts**: Different projects can use different versions of the same tool
 - **Atomic upgrades**: Updates either fully succeed or nothing changes
 - **Rollbacks**: Instantly revert if an upgrade breaks something
 - **Cross-platform**: Same workflow on macOS and Linux
 
-...without writing a single line of Nix. Just `nixy install -g <package>`.
+Start with `nixy install -g <package>`, then read the generated flake.nix when you're ready to learn more.
 
 ## How it works
 
