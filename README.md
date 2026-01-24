@@ -113,13 +113,15 @@ For developers who want project-specific dependencies (like a `package.json` but
 ```bash
 cd my-project
 nixy init              # Create a flake.nix in this directory
-nixy install nodejs    # Install packages for this project only
+nixy install nodejs    # Add packages to flake.nix
 nixy install postgres
 
 nixy shell             # Enter a shell with these packages available
 ```
 
-Without `-g`, nixy automatically finds and uses the nearest `flake.nix` in parent directories (similar to how git finds `.git`).
+Without `-g`, packages are added to `flake.nix` but not installed to your profile. Use `nixy shell` to enter a development shell with all project packages available. This keeps project dependencies isolated from your global environment.
+
+nixy automatically finds and uses the nearest `flake.nix` in parent directories (similar to how git finds `.git`).
 
 ### Sharing Project Environment
 
@@ -129,7 +131,7 @@ git add flake.nix flake.lock
 
 # Teammates can get the same environment:
 git clone my-project && cd my-project
-nixy sync              # Install all project packages
+nixy shell             # Enter dev shell with all project packages
 ```
 
 ### Additional Commands for Projects
@@ -138,7 +140,7 @@ nixy sync              # Install all project packages
 |---------|-------------|
 | `nixy init` | Create a flake.nix in current directory |
 | `nixy shell` | Enter dev shell with project packages |
-| `nixy sync` | Install packages from existing flake.nix |
+| `nixy sync -g` | Sync global profile with flake.nix |
 
 All commands support `-g` or `--global` to use global packages instead of project-local.
 

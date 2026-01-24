@@ -175,12 +175,16 @@ cmd_install() {
         die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
     fi
 
-    info "Installing $pkg..."
-    nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "nixpkgs#$pkg"
-    success "Installed $pkg"
-
     # Add package to flake.nix
     add_package_to_flake "$pkg" "$use_global"
+
+    # Only sync for global installs (local packages are used via nixy shell)
+    if [[ "$use_global" == "true" ]]; then
+        info "Installing $pkg..."
+        cmd_sync --global
+    else
+        info "Added $pkg to flake.nix (use 'nixy shell' to enter dev environment)"
+    fi
 }
 
 # Parse a local package nix file and extract attributes
@@ -251,10 +255,13 @@ cmd_install_from_file() {
         generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
     fi
 
-    # Install from the regenerated flake
-    info "Installing $pkg_name from flake..."
-    nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "$flake_dir#$pkg_name"
-    success "Installed $pkg_name"
+    # Only sync for global installs (local packages are used via nixy shell)
+    if [[ "$use_global" == "true" ]]; then
+        info "Installing $pkg_name..."
+        cmd_sync --global
+    else
+        info "Added $pkg_name to flake.nix (use 'nixy shell' to enter dev environment)"
+    fi
 }
 
 # Uninstall a package
@@ -282,36 +289,34 @@ cmd_uninstall() {
 
     info "Uninstalling $pkg..."
 
-    # Check if installed
-    local installed
-    installed=$(get_installed_packages)
-    if ! echo "$installed" | grep -qx "$pkg"; then
-        die "Package $pkg is not installed"
-    fi
-
-    nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg"
-    success "Uninstalled $pkg"
-
-    # Get flake directory to find local package files
-    local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    # Remove local package file (if exists)
     local pkg_dir
     pkg_dir=$(get_packages_dir "$flake_dir")
-
-    # Check if this is a local package and remove the nix file
     local local_pkg_file="$pkg_dir/$pkg.nix"
     if [[ -f "$local_pkg_file" ]]; then
         info "Removing local package definition: $local_pkg_file"
         rm "$local_pkg_file"
-        # Remove from git if in a git repo
         if [[ -d "$flake_dir/.git" ]] || git -C "$flake_dir" rev-parse --git-dir >/dev/null 2>&1; then
             git -C "$flake_dir" rm --cached "packages/$pkg.nix" 2>/dev/null || true
         fi
-        success "Removed local package file"
     fi
 
-    # Remove package from flake.nix
+    # Remove from flake.nix (source of truth)
     remove_package_from_flake "$pkg" "$use_global"
+
+    # Only remove from profile for global uninstalls
+    if [[ "$use_global" == "true" ]]; then
+        # Check if installed
+        local installed
+        installed=$(get_installed_packages)
+        if ! echo "$installed" | grep -qx "$pkg"; then
+            die "Package $pkg is not installed"
+        fi
+        nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg"
+        success "Uninstalled $pkg"
+    else
+        success "Removed $pkg from flake.nix"
+    fi
 }
 
 # Search for packages

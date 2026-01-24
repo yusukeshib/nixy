@@ -109,13 +109,15 @@ nixy sync -g    # flake.nix からすべてをインストール
 ```bash
 cd my-project
 nixy init              # このディレクトリに flake.nix を作成
-nixy install nodejs    # このプロジェクト専用にパッケージをインストール
+nixy install nodejs    # flake.nix にパッケージを追加
 nixy install postgres
 
 nixy shell             # これらのパッケージが使えるシェルに入る
 ```
 
-`-g` なしの場合、nixy は親ディレクトリを遡って最も近い `flake.nix` を自動的に探して使用します（git が `.git` を探すのと同様）。
+`-g` なしの場合、パッケージは `flake.nix` に追加されますが、プロファイルにはインストールされません。`nixy shell` で全プロジェクトパッケージが利用可能な開発シェルに入れます。これにより、プロジェクトの依存関係をグローバル環境から分離できます。
+
+nixy は親ディレクトリを遡って最も近い `flake.nix` を自動的に探して使用します（git が `.git` を探すのと同様）。
 
 ### プロジェクト環境の共有
 
@@ -125,7 +127,7 @@ git add flake.nix flake.lock
 
 # チームメイトも同じ環境を取得：
 git clone my-project && cd my-project
-nixy sync              # プロジェクトの全パッケージをインストール
+nixy shell             # 全プロジェクトパッケージ入りの開発シェルに入る
 ```
 
 ### プロジェクト用の追加コマンド
@@ -134,7 +136,7 @@ nixy sync              # プロジェクトの全パッケージをインスト�
 |---------|------|
 | `nixy init` | カレントディレクトリに flake.nix を作成 |
 | `nixy shell` | プロジェクトパッケージ入りの開発シェルに入る |
-| `nixy sync` | 既存の flake.nix からパッケージをインストール |
+| `nixy sync -g` | グローバルプロファイルを flake.nix と同期 |
 
 すべてのコマンドで `-g` または `--global` を付けるとグローバルパッケージを操作します。
 
