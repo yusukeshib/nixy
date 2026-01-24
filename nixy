@@ -716,6 +716,7 @@ add_package_to_flake() {
     fi
 
     # Generate and write flake.nix
+    mkdir -p "$flake_dir"
     if [[ "$use_global" == "true" ]]; then
         generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
     else

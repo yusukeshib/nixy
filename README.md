@@ -2,6 +2,8 @@
 
 [日本語版はこちら](README_ja.md)
 
+![nixy demo](demo.gif)
+
 **Start using Nix today, learn as you go.** Install packages with a single command, just like Homebrew.
 
 ```bash
