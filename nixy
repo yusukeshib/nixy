@@ -132,7 +132,7 @@ cmd_install() {
     [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
 
     info "Installing $pkg..."
-    nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg"
+    nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg"
     success "Installed $pkg"
 
     # Add package to flake.nix
@@ -194,7 +194,7 @@ cmd_install_from_file() {
 
     # Install from the regenerated flake
     info "Installing $pkg_name from flake..."
-    nix "${NIX_FLAGS[@]}" profile install "$flake_dir#$pkg_name"
+    nix "${NIX_FLAGS[@]}" profile add "$flake_dir#$pkg_name"
     success "Installed $pkg_name"
 }
 
@@ -525,7 +525,7 @@ cmd_sync() {
     # Install missing packages
     for pkg in "${to_install[@]+"${to_install[@]}"}"; do
         info "Installing $pkg..."
-        nix "${NIX_FLAGS[@]}" profile install "nixpkgs#$pkg" || warn "Failed to install $pkg"
+        nix "${NIX_FLAGS[@]}" profile add "nixpkgs#$pkg" || warn "Failed to install $pkg"
     done
 
     # Remove extra packages
