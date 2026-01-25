@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.22"
+NIXY_VERSION="0.1.23"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -132,7 +132,7 @@ remove_line_from_section() {
         $0 ~ end { in_section=0 }
         in_section && $0 ~ pat { next }
         { print }
-    ' "$file" > "$tmp_file" && mv "$tmp_file" "$file"
+    ' "$file" > "$tmp_file" && command mv "$tmp_file" "$file"
 }
 
 # Parse packages from flake.nix (profile packages)
@@ -1066,10 +1066,10 @@ cmd_self_upgrade() {
     perms="$(stat -f '%A' "$self_path" 2>/dev/null || stat -c '%a' "$self_path" 2>/dev/null)"
 
     # Replace executable
-    if ! mv "$tmp_file" "$self_path"; then
+    if ! command mv "$tmp_file" "$self_path"; then
         error "Failed to update nixy"
         info "Restoring from backup..."
-        mv "$backup_path" "$self_path"
+        command mv "$backup_path" "$self_path"
         die "Update failed. Original version restored."
     fi
 
