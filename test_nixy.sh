@@ -157,120 +157,32 @@ run_test() {
 }
 
 # =============================================================================
-# Test: nixy init
-# =============================================================================
-
-test_init_creates_flake() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-    assert_file_exists "./flake.nix" && \
-    assert_file_contains "./flake.nix" "nixy managed packages"
-}
-
-test_init_fails_if_flake_exists() {
-    cd "$TEST_DIR"
-    touch flake.nix
-    local output
-    output=$("$NIXY" init 2>&1 || true)
-    assert_output_contains "$output" "already exists"
-}
-
-test_init_with_directory() {
-    cd "$TEST_DIR"
-    "$NIXY" init myproject >/dev/null 2>&1
-    assert_file_exists "myproject/flake.nix"
-}
-
-test_init_creates_empty_packages_section() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-    # Should have empty packages section (no packages between markers)
-    local pkg_count
-    pkg_count=$(sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' flake.nix | grep -c "pkgs\." 2>/dev/null || true)
-    [[ -z "$pkg_count" || "$pkg_count" -eq 0 ]]
-}
-
-# =============================================================================
-# Test: Local flake discovery (--local flag)
-# =============================================================================
-
-test_local_flag_finds_flake_in_current_dir() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-    # list --local should find local flake
-    "$NIXY" list --local >/dev/null 2>&1
-}
-
-test_local_flag_finds_flake_in_parent_dir() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-    mkdir -p subdir/deep/nested
-    cd subdir/deep/nested
-    # Should find flake.nix in $TEST_DIR with --local
-    "$NIXY" list --local >/dev/null 2>&1
-}
-
-test_local_flag_fails_when_no_flake_found() {
-    cd "$TEST_DIR"
-    # No flake.nix exists, --local should fail
-    local output exit_code
-    output=$("$NIXY" list --local 2>&1) && exit_code=0 || exit_code=$?
-    assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "No flake.nix found"
-}
-
-test_error_message_suggests_init() {
-    cd "$TEST_DIR"
-    local output
-    output=$("$NIXY" list --local 2>&1 || true)
-    assert_output_contains "$output" "nixy init"
-}
-
-# =============================================================================
-# Test: Global is default behavior
+# Test: Global flake behavior
 # =============================================================================
 
 test_default_uses_global_flake() {
     cd "$TEST_DIR"
-    # Create global flake
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    # Create global flake via profile
+    "$NIXY" profile create default >/dev/null 2>&1 || true
     # Should work by default (no flags needed)
     "$NIXY" list >/dev/null 2>&1
 }
 
-test_local_short_form() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-    # -l short form for --local
-    "$NIXY" list -l >/dev/null 2>&1
-}
-
-test_default_ignores_local_flake() {
-    cd "$TEST_DIR"
-    # Create both local and global flakes
-    "$NIXY" init >/dev/null 2>&1
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
-
-    # Add marker to local flake to distinguish
-    echo "# LOCAL_MARKER" >> flake.nix
-
-    # Default (global) should use global flake (no LOCAL_MARKER)
-    assert_file_not_contains "$NIXY_CONFIG_DIR/flake.nix" "LOCAL_MARKER"
-}
-
 test_list_shows_flake_packages() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Add some packages to the flake (both packages and env-paths sections)
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
-    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' "$profile_dir/flake.nix" > "$profile_dir/flake.nix.tmp" && command mv "$profile_dir/flake.nix.tmp" "$profile_dir/flake.nix"
+    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' "$profile_dir/flake.nix" > "$profile_dir/flake.nix.tmp" && command mv "$profile_dir/flake.nix.tmp" "$profile_dir/flake.nix"
 
     # Create flake.lock (required for nix eval to work)
-    nix --extra-experimental-features nix-command --extra-experimental-features flakes flake update >/dev/null 2>&1
+    nix --extra-experimental-features nix-command --extra-experimental-features flakes flake update --flake "$profile_dir" >/dev/null 2>&1
 
     local output
-    output=$("$NIXY" list --local 2>&1)
+    output=$("$NIXY" list 2>&1)
 
     # Should show packages from flake
     assert_output_contains "$output" "ripgrep" && \
@@ -280,101 +192,34 @@ test_list_shows_flake_packages() {
 
 test_list_shows_none_for_empty_flake() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output
-    output=$("$NIXY" list --local 2>&1)
+    output=$("$NIXY" list 2>&1)
 
     # Should show (none) for empty flake
     assert_output_contains "$output" "(none)"
 }
 
-test_init_global_shows_path_hint() {
-    cd "$TEST_DIR"
-
-    local output
-    output=$("$NIXY" init "$NIXY_CONFIG_DIR" 2>&1)
-
-    # Should show PATH setup hint with eval syntax
-    assert_output_contains "$output" "Add to your shell config" && \
-    assert_output_contains "$output" 'eval "$(nixy config zsh)"'
-}
-
-# =============================================================================
-# Test: Global vs Local flake structure (devShells)
-# =============================================================================
-
-test_local_flake_has_devshells() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-
-    # Local/project flakes should have devShells for nixy shell
-    assert_file_contains "./flake.nix" "devShells" && \
-    assert_file_contains "./flake.nix" "# \[nixy:devShell\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:devShell\]"
-}
-
-test_global_flake_has_no_devshells() {
-    cd "$TEST_DIR"
-
-    # Create a global flake by installing a package with -g
-    # First create the global config dir
-    mkdir -p "$NIXY_CONFIG_DIR"
-
-    # Manually add a package to trigger flake generation with --global
-    # We'll simulate this by calling the init on global dir, then checking
-    # that when we add a package with -g, devShells is removed
-
-    # Create initial global flake
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
-
-    # Add a package marker in the packages section (simulating install -g)
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp"
-    mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
-
-    # Now trigger a regeneration via add_package_to_flake by attempting to install
-    # We source nixy to directly test the generate_flake function behavior
-
-    # Test: Use generate_flake directly with --global flag
-    source "$NIXY"
-    local flake_content
-    flake_content=$(generate_flake --flake-dir "$NIXY_CONFIG_DIR" --global ripgrep)
-
-    # Global flakes should NOT have devShells
-    if echo "$flake_content" | grep -q "devShells"; then
-        echo "  ASSERTION FAILED: Global flake should NOT contain devShells"
-        echo "  Content contains: devShells"
-        return 1
-    fi
-
-    # But should still have packages section
-    if ! echo "$flake_content" | grep -q "packages = forAllSystems"; then
-        echo "  ASSERTION FAILED: Global flake should contain packages"
-        return 1
-    fi
-
-    return 0
-}
-
-test_local_flake_generation_has_devshells() {
+test_flake_has_no_devshells() {
     cd "$TEST_DIR"
 
     # Source nixy to test generate_flake directly
     source "$NIXY"
 
-    # Generate a local flake (no --global flag)
+    # Generate a flake
     local flake_content
     flake_content=$(generate_flake --flake-dir "$TEST_DIR" ripgrep)
 
-    # Local flakes SHOULD have devShells
-    if ! echo "$flake_content" | grep -q "devShells"; then
-        echo "  ASSERTION FAILED: Local flake should contain devShells"
+    # Flakes should NOT have devShells
+    if echo "$flake_content" | grep -q "devShells"; then
+        echo "  ASSERTION FAILED: Flake should NOT contain devShells"
         return 1
     fi
 
-    # And should have packages section
+    # But should have packages section
     if ! echo "$flake_content" | grep -q "packages = forAllSystems"; then
-        echo "  ASSERTION FAILED: Local flake should contain packages"
+        echo "  ASSERTION FAILED: Flake should contain packages"
         return 1
     fi
 
@@ -387,46 +232,43 @@ test_local_flake_generation_has_devshells() {
 
 test_install_adds_single_package() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install a package (we'll mock this by calling add_package_to_flake directly via source)
-    # Since we can't easily mock nix, we'll test the flake modification directly
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
-    # Source the script to get access to functions
-    source "$NIXY" --source-only 2>/dev/null || true
-
-    # Manually test add_package_to_flake by checking flake content
-    # For now, just verify the flake structure is correct after init
-    assert_file_contains "./flake.nix" "# \[nixy:packages\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:packages\]"
+    # Verify the flake structure is correct
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:packages\]"
 }
 
 test_install_preserves_existing_packages() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Manually add a package to the flake (use awk for portability)
-    awk '/# \[nixy:packages\]/{print; print "          existing-pkg = pkgs.existing-pkg;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          existing-pkg = pkgs.existing-pkg;"; next}1' "$profile_dir/flake.nix" > "$profile_dir/flake.nix.tmp" && command mv "$profile_dir/flake.nix.tmp" "$profile_dir/flake.nix"
 
     # Verify existing-pkg is there
-    assert_file_contains "./flake.nix" "existing-pkg"
+    assert_file_contains "$profile_dir/flake.nix" "existing-pkg"
 }
 
 # =============================================================================
-# Test: Uninstall removes only specific package
+# Test: Flake structure
 # =============================================================================
 
-test_flake_structure_after_init() {
+test_flake_structure_has_markers() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Verify all required sections exist
-    assert_file_contains "./flake.nix" "# \[nixy:packages\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:packages\]" && \
-    assert_file_contains "./flake.nix" "# \[nixy:devShell\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:devShell\]" && \
-    assert_file_contains "./flake.nix" "# \[nixy:local-packages\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:local-packages\]"
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:local-packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:local-packages\]"
 }
 
 # =============================================================================
@@ -440,29 +282,7 @@ test_install_fails_cleanly_without_flake() {
     output=$("$NIXY" install testpkg 2>&1) && exit_code=0 || exit_code=$?
 
     # Should fail
-    assert_exit_code 1 "$exit_code" && \
-    # Should NOT create flake.nix
-    assert_file_not_exists "./flake.nix" "flake.nix should not be created on failure"
-}
-
-test_uninstall_fails_cleanly_without_local_flake() {
-    cd "$TEST_DIR"
-    local output exit_code
-    output=$("$NIXY" uninstall --local testpkg 2>&1) && exit_code=0 || exit_code=$?
-
-    assert_exit_code 1 "$exit_code" && \
-    assert_file_not_exists "./flake.nix"
-}
-
-test_upgrade_rejects_local_flag() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-
-    local output exit_code
-    output=$("$NIXY" upgrade --local 2>&1) && exit_code=0 || exit_code=$?
-
-    assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "upgrade only works with global flake"
+    assert_exit_code 1 "$exit_code"
 }
 
 test_upgrade_shows_help() {
@@ -476,7 +296,7 @@ test_upgrade_shows_help() {
 
 test_upgrade_rejects_unknown_option() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" upgrade --foo 2>&1) && exit_code=0 || exit_code=$?
@@ -487,7 +307,7 @@ test_upgrade_rejects_unknown_option() {
 
 test_upgrade_validates_input_name() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Create flake.lock by running sync
     "$NIXY" sync >/dev/null 2>&1 || true
@@ -501,7 +321,7 @@ test_upgrade_validates_input_name() {
 
 test_upgrade_shows_available_inputs_on_error() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Create flake.lock by running sync
     "$NIXY" sync >/dev/null 2>&1 || true
@@ -516,7 +336,7 @@ test_upgrade_shows_available_inputs_on_error() {
 
 test_upgrade_requires_lock_file_for_specific_input() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Don't create flake.lock (no sync)
 
@@ -530,10 +350,12 @@ test_upgrade_requires_lock_file_for_specific_input() {
 
 test_upgrade_handles_corrupted_lock_file() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Create a corrupted flake.lock
-    echo "not valid json" > "$NIXY_CONFIG_DIR/flake.lock"
+    echo "not valid json" > "$profile_dir/flake.lock"
 
     local output exit_code
     output=$("$NIXY" upgrade nixpkgs 2>&1) && exit_code=0 || exit_code=$?
@@ -542,68 +364,30 @@ test_upgrade_handles_corrupted_lock_file() {
     assert_output_contains "$output" "Failed to parse flake.lock"
 }
 
-test_install_fails_on_non_nixy_local_flake() {
-    cd "$TEST_DIR"
-    # Create a non-nixy flake.nix (no markers)
-    cat > flake.nix <<'EOF'
-{
-  description = "A custom flake";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }: {
-    packages = {};
-  };
-}
-EOF
-
-    local output exit_code
-    # Use 'hello' which is a valid package (passes validation)
-    output=$("$NIXY" install --local hello 2>&1) && exit_code=0 || exit_code=$?
-
-    # Should fail with error about non-nixy flake
-    assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "not managed by nixy"
-}
-
-test_uninstall_fails_on_non_nixy_local_flake() {
-    cd "$TEST_DIR"
-    # Create a non-nixy flake.nix (no markers)
-    cat > flake.nix <<'EOF'
-{
-  description = "A custom flake";
-  outputs = { self }: {};
-}
-EOF
-
-    local output exit_code
-    output=$("$NIXY" uninstall --local testpkg 2>&1) && exit_code=0 || exit_code=$?
-
-    assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "not managed by nixy"
-}
-
 test_sync_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
     output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
-    assert_exit_code 1 "$exit_code" && \
-    assert_file_not_exists "$NIXY_CONFIG_DIR/flake.nix"
+    assert_exit_code 1 "$exit_code"
 }
 
-test_sync_rejects_local_flag() {
+test_sync_rejects_unknown_option() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
-    output=$("$NIXY" sync --local 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --foo 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "sync only works with global flake"
+    assert_output_contains "$output" "Unknown option"
 }
 
 test_sync_with_empty_flake() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Sync with empty flake (no packages) should not fail with unbound variable
     local output exit_code
@@ -621,11 +405,13 @@ test_sync_with_empty_flake() {
 
 test_sync_with_packages_no_unbound_variable() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Add packages to flake (simulating a flake with packages defined)
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp" && mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
-    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp" && mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' "$profile_dir/flake.nix" > "$profile_dir/flake.nix.tmp" && mv "$profile_dir/flake.nix.tmp" "$profile_dir/flake.nix"
+    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' "$profile_dir/flake.nix" > "$profile_dir/flake.nix.tmp" && mv "$profile_dir/flake.nix.tmp" "$profile_dir/flake.nix"
 
     # Sync should not fail with unbound variable
     local output exit_code
@@ -641,66 +427,9 @@ test_sync_with_packages_no_unbound_variable() {
     return 0
 }
 
-test_sync_preserves_local_packages() {
-    cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
-
-    # Add both a regular package and a local package to the flake
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
-    awk '/# \[nixy:local-packages\]/{print; print "          my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix {};"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
-
-    # Test get_packages_from_flake returns both regular and local packages
-    local packages
-    packages=$({
-        sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' flake.nix 2>/dev/null | \
-            { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
-            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/'
-        sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' flake.nix 2>/dev/null | \
-            { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
-            sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/'
-    } | sort -u)
-
-    # Test get_local_packages_from_flake returns only local packages
-    local local_packages
-    local_packages=$(sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' flake.nix 2>/dev/null | \
-        { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
-        sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/' | \
-        sort -u)
-
-    # Should contain the regular package in all packages
-    if ! echo "$packages" | grep -q "ripgrep"; then
-        echo "  ASSERTION FAILED: get_packages_from_flake should return ripgrep"
-        echo "  Packages: $packages"
-        return 1
-    fi
-
-    # Should contain the local package in all packages
-    if ! echo "$packages" | grep -q "my-local-pkg"; then
-        echo "  ASSERTION FAILED: get_packages_from_flake should return my-local-pkg"
-        echo "  Packages: $packages"
-        return 1
-    fi
-
-    # Local packages list should contain my-local-pkg
-    if ! echo "$local_packages" | grep -q "my-local-pkg"; then
-        echo "  ASSERTION FAILED: get_local_packages_from_flake should return my-local-pkg"
-        echo "  Local packages: $local_packages"
-        return 1
-    fi
-
-    # Local packages list should NOT contain ripgrep
-    if echo "$local_packages" | grep -q "ripgrep"; then
-        echo "  ASSERTION FAILED: get_local_packages_from_flake should NOT return ripgrep"
-        echo "  Local packages: $local_packages"
-        return 1
-    fi
-
-    return 0
-}
-
 test_sync_builds_environment() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Sync should attempt to build environment
     local output exit_code
@@ -717,10 +446,12 @@ test_sync_builds_environment() {
 
 test_sync_creates_lock_file() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Verify no lock file exists before sync
-    if [[ -f "$NIXY_CONFIG_DIR/flake.lock" ]]; then
+    if [[ -f "$profile_dir/flake.lock" ]]; then
         echo "  ASSERTION FAILED: flake.lock should not exist before sync"
         return 1
     fi
@@ -729,12 +460,12 @@ test_sync_creates_lock_file() {
     "$NIXY" sync >/dev/null 2>&1 || true
 
     # Verify lock file is created
-    assert_file_exists "$NIXY_CONFIG_DIR/flake.lock" "flake.lock should be created after sync"
+    assert_file_exists "$profile_dir/flake.lock" "flake.lock should be created after sync"
 }
 
 test_sync_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Test that --remove flag is accepted (backward compat, no-op)
     local output exit_code
@@ -750,7 +481,7 @@ test_sync_remove_flag_accepted() {
 
 test_sync_short_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Test that -r short flag is accepted (backward compat, no-op)
     local output exit_code
@@ -769,15 +500,6 @@ test_help_shows_sync_command() {
     output=$("$NIXY" help 2>&1)
     assert_output_contains "$output" "sync" && \
     assert_output_contains "$output" "Build environment from flake.nix"
-}
-
-test_shell_fails_cleanly_without_flake() {
-    cd "$TEST_DIR"
-    local output exit_code
-    output=$("$NIXY" shell 2>&1) && exit_code=0 || exit_code=$?
-
-    assert_exit_code 1 "$exit_code" && \
-    assert_file_not_exists "./flake.nix"
 }
 
 # =============================================================================
@@ -805,7 +527,7 @@ buildGoModule rec {
 }
 EOF
 
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Install should extract pname correctly
     local output exit_code
@@ -827,7 +549,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -850,7 +572,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -871,7 +593,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -883,7 +605,7 @@ EOF
 
 test_install_file_not_found() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file nonexistent.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -911,145 +633,19 @@ buildGoModule rec {
 }
 EOF
 
-    # Create global flake (packages are always stored in NIXY_CONFIG_DIR/packages)
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    # Create global flake
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install the local file (default is global, will fail at nix profile add, but flake should be generated)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install the local file
     "$NIXY" install --file test-pkg.nix 2>&1 || true
 
     # Verify package was copied
-    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-local-pkg.nix" && \
+    assert_file_exists "$profile_dir/packages/my-local-pkg.nix" && \
 
     # Verify flake.nix has the local package entry
-    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" "my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix"
-}
-
-test_install_file_copies_to_flake_dir_packages() {
-    cd "$TEST_DIR"
-    # Create a package file
-    cat > test-pkg.nix <<'EOF'
-{ lib, stdenv }:
-
-stdenv.mkDerivation {
-  pname = "flake-dir-test-pkg";
-  version = "1.0.0";
-  src = ./.;
-}
-EOF
-
-    # Create local flake in a subdirectory
-    mkdir -p myproject
-    "$NIXY" init myproject >/dev/null 2>&1
-
-    cd myproject
-
-    # Install the local file with --local flag (will fail at shell, but package file should be copied)
-    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
-
-    # Verify package was copied to the flake directory's packages subdir (not NIXY_CONFIG_DIR)
-    assert_file_exists "./packages/flake-dir-test-pkg.nix" "Package should be in flake dir's packages subdir" && \
-
-    # Verify flake.nix has the local package entry
-    assert_file_contains "./flake.nix" "flake-dir-test-pkg = pkgs.callPackage ./packages/flake-dir-test-pkg.nix"
-}
-
-test_install_file_adds_to_git_in_git_repo() {
-    cd "$TEST_DIR"
-
-    # Create a git repository for the flake
-    mkdir -p myproject
-    cd myproject
-    git init >/dev/null 2>&1
-    git config user.email "test@test.com" >/dev/null 2>&1
-    git config user.name "Test" >/dev/null 2>&1
-
-    # Create flake and commit it
-    "$NIXY" init . >/dev/null 2>&1
-    git add flake.nix >/dev/null 2>&1
-    git commit -m "Initial commit" >/dev/null 2>&1
-
-    # Create a package file
-    cat > ../test-pkg.nix <<'EOF'
-{ lib, stdenv }:
-
-stdenv.mkDerivation {
-  pname = "git-tracked-pkg";
-  version = "1.0.0";
-  src = ./.;
-}
-EOF
-
-    # Install the local file with --local (will fail at shell, but package file should be added to git)
-    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
-
-    # Verify package file was added to git staging area
-    local git_status
-    git_status=$(git status --porcelain 2>/dev/null)
-
-    if echo "$git_status" | grep -q "A.*packages/git-tracked-pkg.nix"; then
-        return 0
-    else
-        echo "  ASSERTION FAILED: Package file should be staged in git"
-        echo "  Git status: $git_status"
-        return 1
-    fi
-}
-
-test_install_file_works_without_git() {
-    cd "$TEST_DIR"
-
-    # Create flake without git (just a regular directory)
-    mkdir -p myproject
-    "$NIXY" init myproject >/dev/null 2>&1
-
-    cd myproject
-
-    # Create a package file
-    cat > ../test-pkg.nix <<'EOF'
-{ lib, stdenv }:
-
-stdenv.mkDerivation {
-  pname = "no-git-pkg";
-  version = "1.0.0";
-  src = ./.;
-}
-EOF
-
-    # Install the local file with --local (will fail at shell, but package file should still be copied)
-    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
-
-    # Verify package was copied successfully even without git
-    assert_file_exists "./packages/no-git-pkg.nix" "Package should be copied even without git"
-}
-
-test_install_file_with_symlinked_flake() {
-    cd "$TEST_DIR"
-
-    # Create the actual config directory in a subdirectory
-    mkdir -p real-config
-    "$NIXY" init real-config >/dev/null 2>&1
-
-    # Create a symlink with a relative path to the flake
-    mkdir -p symlink-dir
-    ln -s ../real-config/flake.nix symlink-dir/flake.nix
-
-    # Create a package file
-    cat > test-pkg.nix <<'EOF'
-{ lib, stdenv }:
-
-stdenv.mkDerivation {
-  pname = "symlink-test-pkg";
-  version = "1.0.0";
-  src = ./.;
-}
-EOF
-
-    # Install the file from the directory with the symlinked flake using --local
-    cd symlink-dir
-    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
-
-    # The package should be copied to the REAL config directory, not relative to symlink
-    assert_file_exists "$TEST_DIR/real-config/packages/symlink-test-pkg.nix" "Package should be in real flake dir, not relative path"
+    assert_file_contains "$profile_dir/flake.nix" "my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix"
 }
 
 test_install_flake_file_creates_directory() {
@@ -1077,13 +673,15 @@ test_install_flake_file_creates_directory() {
 EOF
 
     # Create global flake
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install the flake file (default is global)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install the flake file
     "$NIXY" install --file my-flake.nix 2>&1 || true
 
     # Verify flake was copied to a subdirectory
-    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" "Flake should be in subdirectory"
+    assert_file_exists "$profile_dir/packages/my-flake/flake.nix" "Flake should be in subdirectory"
 }
 
 test_install_flake_file_adds_input() {
@@ -1111,16 +709,18 @@ test_install_flake_file_adds_input() {
 EOF
 
     # Create global flake
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install the flake file (default is global)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install the flake file
     "$NIXY" install --file gke-plugin.nix 2>&1 || true
 
     # Verify flake.nix has the input
-    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin.url = "path:./packages/gke-plugin"' && \
+    assert_file_contains "$profile_dir/flake.nix" 'gke-plugin.url = "path:./packages/gke-plugin"' && \
 
     # Verify flake.nix has the package expression
-    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin = inputs.gke-plugin.packages'
+    assert_file_contains "$profile_dir/flake.nix" 'gke-plugin = inputs.gke-plugin.packages'
 }
 
 test_install_flake_file_detected_correctly() {
@@ -1150,19 +750,21 @@ EOF
 }
 EOF
 
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install regular package (default is global)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install regular package
     "$NIXY" install --file regular-pkg.nix 2>&1 || true
 
-    # Install flake package (default is global)
+    # Install flake package
     "$NIXY" install --file flake-pkg.nix 2>&1 || true
 
     # Regular package should be a .nix file
-    assert_file_exists "$NIXY_CONFIG_DIR/packages/regular-pkg.nix" && \
+    assert_file_exists "$profile_dir/packages/regular-pkg.nix" && \
 
     # Flake package should be in a subdirectory
-    assert_file_exists "$NIXY_CONFIG_DIR/packages/flake-pkg/flake.nix"
+    assert_file_exists "$profile_dir/packages/flake-pkg/flake.nix"
 }
 
 test_uninstall_flake_package() {
@@ -1181,19 +783,21 @@ test_uninstall_flake_package() {
 }
 EOF
 
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
-    # Install the flake (default is global)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install the flake
     "$NIXY" install --file my-flake.nix 2>&1 || true
 
     # Verify it was installed
-    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" || return 1
+    assert_file_exists "$profile_dir/packages/my-flake/flake.nix" || return 1
 
-    # Uninstall it (default is global)
+    # Uninstall it
     "$NIXY" uninstall my-flake 2>&1 || true
 
     # Verify directory was removed
-    if [[ -d "$NIXY_CONFIG_DIR/packages/my-flake" ]]; then
+    if [[ -d "$profile_dir/packages/my-flake" ]]; then
         echo "  ASSERTION FAILED: Flake directory should be removed after uninstall"
         return 1
     fi
@@ -1206,7 +810,7 @@ EOF
 
 test_validate_package_rejects_invalid_package() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install rust 2>&1) && exit_code=0 || exit_code=$?
@@ -1218,7 +822,7 @@ test_validate_package_rejects_invalid_package() {
 
 test_validate_package_rejects_attribute_set() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # 'lib' is an attribute set, not a derivation
     local output exit_code
@@ -1230,7 +834,7 @@ test_validate_package_rejects_attribute_set() {
 
 test_validate_package_accepts_valid_package() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # 'hello' is a valid package in nixpkgs
     local output exit_code
@@ -1248,7 +852,7 @@ test_validate_package_accepts_valid_package() {
 
 test_validate_package_suggests_search() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     local output
     output=$("$NIXY" install invalidpkg123 2>&1 || true)
@@ -1259,7 +863,7 @@ test_validate_package_suggests_search() {
 
 test_validate_skipped_for_file_install() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1 || true
 
     # Create a local package file
     cat > test-pkg.nix <<'EOF'
@@ -1286,18 +890,6 @@ EOF
 # =============================================================================
 # Test: Help and basic commands
 # =============================================================================
-
-test_help_shows_init_command() {
-    local output
-    output=$("$NIXY" help 2>&1)
-    assert_output_contains "$output" "init"
-}
-
-test_help_shows_local_flag() {
-    local output
-    output=$("$NIXY" help 2>&1)
-    assert_output_contains "$output" "--local"
-}
 
 test_help_exit_code() {
     "$NIXY" help >/dev/null 2>&1
@@ -1448,13 +1040,15 @@ test_help_shows_config_command() {
 
 test_flake_has_buildenv_default() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Generated flake should have buildEnv default output
-    assert_file_contains "./flake.nix" "default = pkgs.buildEnv" && \
-    assert_file_contains "./flake.nix" 'name = "nixy-env"' && \
-    assert_file_contains "./flake.nix" "# \[nixy:env-paths\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:env-paths\]"
+    assert_file_contains "$profile_dir/flake.nix" "default = pkgs.buildEnv" && \
+    assert_file_contains "$profile_dir/flake.nix" 'name = "nixy-env"' && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:env-paths\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:env-paths\]"
 }
 
 test_buildenv_contains_all_packages() {
@@ -1509,29 +1103,35 @@ test_individual_packages_still_accessible() {
 
 test_empty_flake_has_empty_buildenv() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Empty flake should have buildEnv structure with empty paths
-    assert_file_contains "./flake.nix" "default = pkgs.buildEnv" && \
-    assert_file_contains "./flake.nix" "paths = \[" && \
-    assert_file_contains "./flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
+    assert_file_contains "$profile_dir/flake.nix" "default = pkgs.buildEnv" && \
+    assert_file_contains "$profile_dir/flake.nix" "paths = \[" && \
+    assert_file_contains "$profile_dir/flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
 }
 
 test_buildenv_has_extra_outputs() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # buildEnv should include man, doc, and info outputs
-    assert_file_contains "./flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
+    assert_file_contains "$profile_dir/flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
 }
 
 test_flake_structure_has_env_paths_markers() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Verify env-paths section markers exist
-    assert_file_contains "./flake.nix" "# \[nixy:env-paths\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:env-paths\]"
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:env-paths\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:env-paths\]"
 }
 
 test_sync_upgrades_old_flake_without_buildenv() {
@@ -1589,49 +1189,53 @@ EOF
 
 test_add_preserves_user_customizations() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add custom content outside of markers (user customization)
     # Insert a custom input before [nixy:local-inputs]
     awk '
         /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Add a custom nixConfig section after inputs (user customization)
     awk '
         /^  inputs = \{/ { in_inputs=1 }
         in_inputs && /^  \};/ { print; print ""; print "  nixConfig = {"; print "    extra-substituters = [ \"https://my-cache.cachix.org\" ];"; print "  };"; in_inputs=0; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Verify customizations exist before adding package
-    assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
-    assert_file_contains "./flake.nix" "nixConfig" || return 1
-    assert_file_contains "./flake.nix" "extra-substituters" || return 1
+    assert_file_contains "$flake_nix" "my-custom-input.url" || return 1
+    assert_file_contains "$flake_nix" "nixConfig" || return 1
+    assert_file_contains "$flake_nix" "extra-substituters" || return 1
 
     # Use add_package_to_flake directly (source the script)
     source "$NIXY"
-    add_package_to_flake "ripgrep" "true" >/dev/null
+    cd "$profile_dir"
+    add_package_to_flake "ripgrep" >/dev/null
 
     # Verify customizations are still present after adding package
-    if ! grep -q "my-custom-input.url" "./flake.nix"; then
+    if ! grep -q "my-custom-input.url" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom input should be preserved after add"
         return 1
     fi
 
-    if ! grep -q "nixConfig" "./flake.nix"; then
+    if ! grep -q "nixConfig" "$flake_nix"; then
         echo "  ASSERTION FAILED: nixConfig should be preserved after add"
         return 1
     fi
 
-    if ! grep -q "extra-substituters" "./flake.nix"; then
+    if ! grep -q "extra-substituters" "$flake_nix"; then
         echo "  ASSERTION FAILED: extra-substituters should be preserved after add"
         return 1
     fi
 
     # Verify package was added
-    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "$flake_nix"; then
         echo "  ASSERTION FAILED: ripgrep should be added to packages section"
         return 1
     fi
@@ -1641,45 +1245,49 @@ test_add_preserves_user_customizations() {
 
 test_remove_preserves_user_customizations() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add a package first
     source "$NIXY"
-    add_package_to_flake "ripgrep" "true" >/dev/null
+    cd "$profile_dir"
+    add_package_to_flake "ripgrep" >/dev/null
 
     # Add custom content (user customization)
     awk '
         /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Add a custom overlay section (user customization)
     awk '
         /forAllSystems = / { print; print "      myOverlay = final: prev: { custom-pkg = prev.hello; };"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Verify customizations exist before removing package
-    assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
-    assert_file_contains "./flake.nix" "myOverlay" || return 1
-    assert_file_contains "./flake.nix" "ripgrep = pkgs.ripgrep;" || return 1
+    assert_file_contains "$flake_nix" "my-custom-input.url" || return 1
+    assert_file_contains "$flake_nix" "myOverlay" || return 1
+    assert_file_contains "$flake_nix" "ripgrep = pkgs.ripgrep;" || return 1
 
     # Remove the package
-    remove_package_from_flake "ripgrep" "true" >/dev/null
+    remove_package_from_flake "ripgrep" >/dev/null
 
     # Verify customizations are still present after removing package
-    if ! grep -q "my-custom-input.url" "./flake.nix"; then
+    if ! grep -q "my-custom-input.url" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom input should be preserved after remove"
         return 1
     fi
 
-    if ! grep -q "myOverlay" "./flake.nix"; then
+    if ! grep -q "myOverlay" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom overlay should be preserved after remove"
         return 1
     fi
 
     # Verify package was removed
-    if grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+    if grep -q "ripgrep = pkgs.ripgrep;" "$flake_nix"; then
         echo "  ASSERTION FAILED: ripgrep should be removed from packages section"
         return 1
     fi
@@ -1689,39 +1297,43 @@ test_remove_preserves_user_customizations() {
 
 test_add_multiple_packages_preserves_all() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add custom content
     awk '
         /nixpkgs\.url/ { print; print "    custom.url = \"github:custom/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     source "$NIXY"
+    cd "$profile_dir"
 
     # Add multiple packages one by one
-    add_package_to_flake "ripgrep" "true" >/dev/null
-    add_package_to_flake "fzf" "true" >/dev/null
-    add_package_to_flake "bat" "true" >/dev/null
+    add_package_to_flake "ripgrep" >/dev/null
+    add_package_to_flake "fzf" >/dev/null
+    add_package_to_flake "bat" >/dev/null
 
     # Verify all packages are present
-    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "$flake_nix"; then
         echo "  ASSERTION FAILED: ripgrep should be in packages section"
         return 1
     fi
 
-    if ! grep -q "fzf = pkgs.fzf;" "./flake.nix"; then
+    if ! grep -q "fzf = pkgs.fzf;" "$flake_nix"; then
         echo "  ASSERTION FAILED: fzf should be in packages section"
         return 1
     fi
 
-    if ! grep -q "bat = pkgs.bat;" "./flake.nix"; then
+    if ! grep -q "bat = pkgs.bat;" "$flake_nix"; then
         echo "  ASSERTION FAILED: bat should be in packages section"
         return 1
     fi
 
     # Verify custom content is still present
-    if ! grep -q "custom.url" "./flake.nix"; then
+    if ! grep -q "custom.url" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom input should be preserved after adding multiple packages"
         return 1
     fi
@@ -1731,31 +1343,35 @@ test_add_multiple_packages_preserves_all() {
 
 test_remove_middle_package_preserves_others() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     source "$NIXY"
+    cd "$profile_dir"
 
     # Add three packages
-    add_package_to_flake "ripgrep" "true" >/dev/null
-    add_package_to_flake "fzf" "true" >/dev/null
-    add_package_to_flake "bat" "true" >/dev/null
+    add_package_to_flake "ripgrep" >/dev/null
+    add_package_to_flake "fzf" >/dev/null
+    add_package_to_flake "bat" >/dev/null
 
     # Remove the middle one
-    remove_package_from_flake "fzf" "true" >/dev/null
+    remove_package_from_flake "fzf" >/dev/null
 
     # Verify fzf is removed
-    if grep -q "fzf = pkgs.fzf;" "./flake.nix"; then
+    if grep -q "fzf = pkgs.fzf;" "$flake_nix"; then
         echo "  ASSERTION FAILED: fzf should be removed"
         return 1
     fi
 
     # Verify others are still present
-    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "$flake_nix"; then
         echo "  ASSERTION FAILED: ripgrep should still be present"
         return 1
     fi
 
-    if ! grep -q "bat = pkgs.bat;" "./flake.nix"; then
+    if ! grep -q "bat = pkgs.bat;" "$flake_nix"; then
         echo "  ASSERTION FAILED: bat should still be present"
         return 1
     fi
@@ -1765,23 +1381,27 @@ test_remove_middle_package_preserves_others() {
 
 test_add_skips_duplicate_package() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     source "$NIXY"
+    cd "$profile_dir"
 
     # Add a package
-    add_package_to_flake "ripgrep" "true" >/dev/null
+    add_package_to_flake "ripgrep" >/dev/null
 
     # Count occurrences of ripgrep before adding again
     local count_before
-    count_before=$(grep -c "ripgrep = pkgs.ripgrep;" "./flake.nix" || true)
+    count_before=$(grep -c "ripgrep = pkgs.ripgrep;" "$flake_nix" || true)
 
     # Add the same package again
-    add_package_to_flake "ripgrep" "true" >/dev/null
+    add_package_to_flake "ripgrep" >/dev/null
 
     # Count occurrences after
     local count_after
-    count_after=$(grep -c "ripgrep = pkgs.ripgrep;" "./flake.nix" || true)
+    count_after=$(grep -c "ripgrep = pkgs.ripgrep;" "$flake_nix" || true)
 
     if [[ "$count_before" != "$count_after" ]]; then
         echo "  ASSERTION FAILED: Adding duplicate package should not add another line"
@@ -1792,64 +1412,40 @@ test_add_skips_duplicate_package() {
     return 0
 }
 
-test_global_add_no_devshell_entry() {
-    cd "$TEST_DIR"
-
-    # Create global flake
-    mkdir -p "$NIXY_CONFIG_DIR"
-
-    source "$NIXY"
-
-    # Generate a global flake first
-    generate_flake --flake-dir "$NIXY_CONFIG_DIR" --global > "$NIXY_CONFIG_DIR/flake.nix"
-
-    # Add a package to global flake (use_local=false)
-    add_package_to_flake "ripgrep" "false" >/dev/null
-
-    # Global flake should NOT have devShells section at all
-    if grep -q "devShells" "$NIXY_CONFIG_DIR/flake.nix"; then
-        echo "  ASSERTION FAILED: Global flake should not have devShells"
-        return 1
-    fi
-
-    # But should have the package in packages section
-    if ! grep -q "ripgrep = pkgs.ripgrep;" "$NIXY_CONFIG_DIR/flake.nix"; then
-        echo "  ASSERTION FAILED: ripgrep should be added to global flake packages section"
-        return 1
-    fi
-
-    return 0
-}
-
 # =============================================================================
 # Test: Custom markers
 # =============================================================================
 
-test_init_has_custom_markers() {
+test_flake_has_custom_markers() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
     # Verify all custom marker sections exist
-    assert_file_contains "./flake.nix" "# \[nixy:custom-inputs\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:custom-inputs\]" && \
-    assert_file_contains "./flake.nix" "# \[nixy:custom-packages\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:custom-packages\]" && \
-    assert_file_contains "./flake.nix" "# \[nixy:custom-paths\]" && \
-    assert_file_contains "./flake.nix" "# \[/nixy:custom-paths\]"
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:custom-inputs\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:custom-inputs\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:custom-packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:custom-packages\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[nixy:custom-paths\]" && \
+    assert_file_contains "$profile_dir/flake.nix" "# \[/nixy:custom-paths\]"
 }
 
 test_custom_inputs_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add custom input between the markers
     awk '
         /# \[nixy:custom-inputs\]/ { print; print "    my-overlay.url = \"github:user/my-overlay\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Verify custom input exists
-    assert_file_contains "./flake.nix" "my-overlay.url" || return 1
+    assert_file_contains "$flake_nix" "my-overlay.url" || return 1
 
     # Create a package file
     cat > test-pkg.nix <<'EOF'
@@ -1863,10 +1459,10 @@ stdenv.mkDerivation {
 EOF
 
     # Install the package with --force (regenerates flake)
-    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+    "$NIXY" install --file test-pkg.nix --force 2>&1 || true
 
     # Verify custom input is still preserved
-    if ! grep -q "my-overlay.url" "./flake.nix"; then
+    if ! grep -q "my-overlay.url" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom input should be preserved after regeneration"
         return 1
     fi
@@ -1876,16 +1472,19 @@ EOF
 
 test_custom_packages_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add custom package between the markers
     awk '
         /# \[nixy:custom-packages\]/ { print; print "          my-custom-pkg = pkgs.hello.overrideAttrs { pname = \"my-custom\"; };"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Verify custom package exists
-    assert_file_contains "./flake.nix" "my-custom-pkg" || return 1
+    assert_file_contains "$flake_nix" "my-custom-pkg" || return 1
 
     # Create a package file
     cat > test-pkg.nix <<'EOF'
@@ -1899,10 +1498,10 @@ stdenv.mkDerivation {
 EOF
 
     # Install the package with --force (regenerates flake)
-    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+    "$NIXY" install --file test-pkg.nix --force 2>&1 || true
 
     # Verify custom package is still preserved
-    if ! grep -q "my-custom-pkg" "./flake.nix"; then
+    if ! grep -q "my-custom-pkg" "$flake_nix"; then
         echo "  ASSERTION FAILED: Custom package should be preserved after regeneration"
         return 1
     fi
@@ -1912,17 +1511,20 @@ EOF
 
 test_custom_paths_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add custom path between the markers
     awk '
         /# \[nixy:custom-paths\]/ { print; print "              my-custom-pkg"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Verify custom path exists
     local paths_section
-    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' flake.nix)
+    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' "$flake_nix")
     if ! echo "$paths_section" | grep -q "my-custom-pkg"; then
         echo "  ASSERTION FAILED: Custom path should exist before regeneration"
         return 1
@@ -1940,10 +1542,10 @@ stdenv.mkDerivation {
 EOF
 
     # Install the package with --force (regenerates flake)
-    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+    "$NIXY" install --file test-pkg.nix --force 2>&1 || true
 
     # Verify custom path is still preserved
-    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' flake.nix)
+    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' "$flake_nix")
     if ! echo "$paths_section" | grep -q "my-custom-pkg"; then
         echo "  ASSERTION FAILED: Custom path should be preserved after regeneration"
         return 1
@@ -1954,13 +1556,16 @@ EOF
 
 test_modification_warning_shown() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add modification OUTSIDE markers (this will trigger warning)
     awk '
         /nixpkgs\.url/ { print; print "    # OUTSIDE MARKER COMMENT"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Create a package file
     cat > test-pkg.nix <<'EOF'
@@ -1975,7 +1580,7 @@ EOF
 
     # Install without --force should warn and fail
     local output exit_code
-    output=$("$NIXY" install --file test-pkg.nix --local 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
 
     # Should fail
     assert_exit_code 1 "$exit_code" && \
@@ -1987,13 +1592,16 @@ EOF
 
 test_force_flag_bypasses_warning() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    local flake_nix="$profile_dir/flake.nix"
 
     # Add modification OUTSIDE markers
     awk '
         /nixpkgs\.url/ { print; print "    # OUTSIDE MARKER COMMENT"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    ' "$flake_nix" > "$flake_nix.tmp" && command mv "$flake_nix.tmp" "$flake_nix"
 
     # Create a package file
     cat > test-pkg.nix <<'EOF'
@@ -2008,7 +1616,7 @@ EOF
 
     # Install with --force should proceed (may fail at nix but not at warning)
     local output
-    output=$("$NIXY" install --file test-pkg.nix --local --force 2>&1) || true
+    output=$("$NIXY" install --file test-pkg.nix --force 2>&1) || true
 
     # Should mention proceeding with --force
     assert_output_contains "$output" "Proceeding with --force"
@@ -2016,7 +1624,7 @@ EOF
 
 test_no_warning_when_no_modifications() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" profile create default >/dev/null 2>&1
 
     # Don't add any modifications outside markers
 
@@ -2033,7 +1641,7 @@ EOF
 
     # Install without --force should not show warning
     local output
-    output=$("$NIXY" install --file test-pkg.nix --local 2>&1) || true
+    output=$("$NIXY" install --file test-pkg.nix 2>&1) || true
 
     # Should NOT mention modifications
     if echo "$output" | grep -q "modifications outside nixy markers"; then
@@ -2216,62 +1824,35 @@ main() {
     echo "======================================"
     echo ""
 
-    # Init tests
-    run_test "init creates flake.nix" test_init_creates_flake || true
-    run_test "init fails if flake exists" test_init_fails_if_flake_exists || true
-    run_test "init with directory argument" test_init_with_directory || true
-    run_test "init creates empty packages section" test_init_creates_empty_packages_section || true
-
-    # Local flag flake discovery tests
-    run_test "--local finds flake in current directory" test_local_flag_finds_flake_in_current_dir || true
-    run_test "--local finds flake in parent directory" test_local_flag_finds_flake_in_parent_dir || true
-    run_test "--local fails when no flake found" test_local_flag_fails_when_no_flake_found || true
-    run_test "error suggests nixy init" test_error_message_suggests_init || true
-
-    # Default global behavior tests
+    # Global flake behavior tests
     run_test "default uses global flake" test_default_uses_global_flake || true
-    run_test "-l short form works" test_local_short_form || true
-    run_test "default ignores local flake" test_default_ignores_local_flake || true
 
     # List command tests
     run_test "list shows flake packages" test_list_shows_flake_packages || true
     run_test "list shows none for empty flake" test_list_shows_none_for_empty_flake || true
 
-    # Init PATH hint test
-    run_test "init global shows PATH hint" test_init_global_shows_path_hint || true
-
-    # Global vs Local flake structure tests
-    run_test "local flake has devShells" test_local_flake_has_devshells || true
-    run_test "global flake has no devShells" test_global_flake_has_no_devshells || true
-    run_test "local flake generation has devShells" test_local_flake_generation_has_devshells || true
-
-    # Package management tests
-    run_test "flake has correct structure after init" test_flake_structure_after_init || true
+    # Flake structure tests
+    run_test "flake has no devShells" test_flake_has_no_devshells || true
+    run_test "flake structure has markers" test_flake_structure_has_markers || true
     run_test "install preserves existing packages" test_install_preserves_existing_packages || true
 
-    # Error propagation tests (the subshell exit bug)
+    # Error propagation tests
     run_test "install fails cleanly without flake" test_install_fails_cleanly_without_flake || true
-    run_test "uninstall --local fails without flake" test_uninstall_fails_cleanly_without_local_flake || true
-    run_test "upgrade --local rejects local flag" test_upgrade_rejects_local_flag || true
     run_test "upgrade --help shows help" test_upgrade_shows_help || true
     run_test "upgrade rejects unknown option" test_upgrade_rejects_unknown_option || true
     run_test "upgrade validates input name" test_upgrade_validates_input_name || true
     run_test "upgrade shows available inputs on error" test_upgrade_shows_available_inputs_on_error || true
     run_test "upgrade requires lock file for specific input" test_upgrade_requires_lock_file_for_specific_input || true
     run_test "upgrade handles corrupted lock file" test_upgrade_handles_corrupted_lock_file || true
-    run_test "install --local fails on non-nixy flake" test_install_fails_on_non_nixy_local_flake || true
-    run_test "uninstall --local fails on non-nixy flake" test_uninstall_fails_on_non_nixy_local_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
-    run_test "sync rejects --local flag" test_sync_rejects_local_flag || true
+    run_test "sync rejects unknown option" test_sync_rejects_unknown_option || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
-    run_test "sync preserves local packages" test_sync_preserves_local_packages || true
     run_test "sync builds environment" test_sync_builds_environment || true
     run_test "sync creates flake.lock" test_sync_creates_lock_file || true
     run_test "sync --remove flag accepted" test_sync_remove_flag_accepted || true
     run_test "sync -r short flag accepted" test_sync_short_remove_flag_accepted || true
     run_test "help shows sync command" test_help_shows_sync_command || true
-    run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Local package file parsing tests
     run_test "parse pname from nixpkgs-style file" test_parse_pname_from_nixpkgs_style || true
@@ -2280,10 +1861,6 @@ main() {
     run_test "fails without name or pname" test_parse_fails_without_name_or_pname || true
     run_test "install --file with nonexistent file" test_install_file_not_found || true
     run_test "install --file adds to local-packages section" test_install_file_adds_to_local_packages_section || true
-    run_test "install --file copies to flake dir packages" test_install_file_copies_to_flake_dir_packages || true
-    run_test "install --file adds to git in git repo" test_install_file_adds_to_git_in_git_repo || true
-    run_test "install --file works without git" test_install_file_works_without_git || true
-    run_test "install --file with symlinked flake" test_install_file_with_symlinked_flake || true
     run_test "install --file flake creates directory" test_install_flake_file_creates_directory || true
     run_test "install --file flake adds input" test_install_flake_file_adds_input || true
     run_test "install --file detects flake vs package" test_install_flake_file_detected_correctly || true
@@ -2297,8 +1874,6 @@ main() {
     run_test "validate skipped for file install" test_validate_skipped_for_file_install || true
 
     # Help tests
-    run_test "help shows init command" test_help_shows_init_command || true
-    run_test "help shows --local flag" test_help_shows_local_flag || true
     run_test "help exits successfully" test_help_exit_code || true
     run_test "unknown command fails" test_unknown_command_fails || true
 
@@ -2339,10 +1914,9 @@ main() {
     run_test "add multiple packages preserves all" test_add_multiple_packages_preserves_all || true
     run_test "remove middle package preserves others" test_remove_middle_package_preserves_others || true
     run_test "add skips duplicate package" test_add_skips_duplicate_package || true
-    run_test "global add no devShell entry" test_global_add_no_devshell_entry || true
 
     # Custom marker tests
-    run_test "init has custom markers" test_init_has_custom_markers || true
+    run_test "flake has custom markers" test_flake_has_custom_markers || true
     run_test "custom inputs preserved during regeneration" test_custom_inputs_preserved_during_regeneration || true
     run_test "custom packages preserved during regeneration" test_custom_packages_preserved_during_regeneration || true
     run_test "custom paths preserved during regeneration" test_custom_paths_preserved_during_regeneration || true
