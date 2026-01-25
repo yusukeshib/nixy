@@ -338,7 +338,9 @@ test_upgrade_requires_lock_file_for_specific_input() {
     cd "$TEST_DIR"
     "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
-    # Don't create flake.lock (no sync)
+    # Remove flake.lock created by profile switch (nix build creates it)
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+    rm -f "$profile_dir/flake.lock"
 
     local output exit_code
     output=$("$NIXY" upgrade nixpkgs 2>&1) && exit_code=0 || exit_code=$?
@@ -449,6 +451,9 @@ test_sync_creates_lock_file() {
     "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Remove flake.lock created by profile switch (nix build creates it)
+    rm -f "$profile_dir/flake.lock"
 
     # Verify no lock file exists before sync
     if [[ -f "$profile_dir/flake.lock" ]]; then
