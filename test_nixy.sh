@@ -262,8 +262,12 @@ test_list_shows_flake_packages() {
     cd "$TEST_DIR"
     "$NIXY" init >/dev/null 2>&1
 
-    # Add some packages to the flake
+    # Add some packages to the flake (both packages and env-paths sections)
     awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Create flake.lock (required for nix eval to work)
+    nix --extra-experimental-features nix-command --extra-experimental-features flakes flake update >/dev/null 2>&1
 
     local output
     output=$("$NIXY" list --local 2>&1)

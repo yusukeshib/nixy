@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.25"
+NIXY_VERSION="0.1.27"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -168,6 +168,8 @@ has_custom_modifications() {
 
 # Remove a line matching a pattern from between two markers
 # Usage: remove_line_from_section <file> <start_marker> <end_marker> <pattern>
+# Note: start_marker and end_marker are literal strings (matched with index())
+#       pattern is a regex pattern (matched with ~)
 remove_line_from_section() {
     local file="$1"
     local start_marker="$2"
@@ -179,29 +181,34 @@ remove_line_from_section() {
     tmp_file=$(mktemp)
 
     # Use awk to remove matching lines only within the section
+    # Using index() for markers (exact string match) to avoid escape sequence issues
     awk -v start="$start_marker" -v end="$end_marker" -v pat="$pattern" '
-        $0 ~ start { in_section=1 }
-        $0 ~ end { in_section=0 }
+        index($0, start) > 0 { in_section=1 }
+        index($0, end) > 0 { in_section=0 }
         in_section && $0 ~ pat { next }
         { print }
     ' "$file" > "$tmp_file" && command mv "$tmp_file" "$file"
 }
 
+# Get current system for nix eval
+nix_system() {
+    nix "${NIX_FLAGS[@]}" eval --impure --expr 'builtins.currentSystem' --raw 2>/dev/null
+}
+
 # Parse packages from flake.nix (profile packages)
+# Uses nix eval for reliable parsing (handles special characters correctly)
 get_packages_from_flake() {
     local flake="$1"
-    if [[ -f "$flake" ]]; then
-        # Extract package names from the packages section (format: "name = pkgs.name;")
-        {
-            sed -n '/# \[nixy:packages\]/,/# \[\/nixy:packages\]/p' "$flake" 2>/dev/null | \
-                { grep -E '^\s+[a-zA-Z0-9_-]+ = pkgs\.' || true; } | \
-                sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = pkgs\..*/\1/'
-            # Also extract local package names (format: "name = <expr>;")
-            sed -n '/# \[nixy:local-packages\]/,/# \[\/nixy:local-packages\]/p' "$flake" 2>/dev/null | \
-                { grep -E '^\s+[a-zA-Z0-9_-]+ = ' || true; } | \
-                sed 's/^[[:space:]]*\([a-zA-Z0-9_-]*\) = .*/\1/'
-        } | sort -u
-    fi
+    local flake_dir
+    flake_dir=$(dirname "$flake")
+
+    # flake.lock がなければ空を返す（まだ nix flake update していない）
+    [[ -f "$flake_dir/flake.lock" ]] || return 0
+
+    # nix eval でパッケージ名を取得（default を除外、改行区切りで出力）
+    nix "${NIX_FLAGS[@]}" eval "$flake_dir#packages.$(nix_system)" \
+        --apply 'pkgs: builtins.concatStringsSep "\n" (builtins.filter (n: n != "default") (builtins.attrNames pkgs))' \
+        --raw 2>/dev/null || true
 }
 
 # Parse only local packages from flake.nix (installed via --file)
@@ -216,15 +223,18 @@ get_local_packages_from_flake() {
 }
 
 # Parse dev packages from flake.nix
+# Uses nix eval for reliable parsing
 get_dev_packages_from_flake() {
     local flake="$1"
-    if [[ -f "$flake" ]]; then
-        # Extract package names from buildInputs
-        sed -n '/# \[nixy:devShell\]/,/# \[\/nixy:devShell\]/p' "$flake" 2>/dev/null | \
-            { grep -E '^\s+pkgs\.' || true; } | \
-            sed 's/.*pkgs\.\([a-zA-Z0-9_-]*\).*/\1/' | \
-            sort -u
-    fi
+    local flake_dir
+    flake_dir=$(dirname "$flake")
+
+    [[ -f "$flake_dir/flake.lock" ]] || return 0
+
+    # devShells.default.buildInputs からパッケージ名を抽出（改行区切りで出力）
+    nix "${NIX_FLAGS[@]}" eval "$flake_dir#devShells.$(nix_system).default.buildInputs" \
+        --apply 'inputs: builtins.concatStringsSep "\n" (map (p: p.pname or p.name or "unknown") inputs)' \
+        --raw 2>/dev/null || true
 }
 
 # Validate that a package exists in nixpkgs and is a derivation
@@ -999,10 +1009,8 @@ add_package_to_flake() {
         return 0
     fi
 
-    # Check if package already exists in flake
-    local existing_packages
-    existing_packages=$(get_packages_from_flake "$flake")
-    if echo "$existing_packages" | grep -qx "$pkg"; then
+    # Check if package already exists in flake (use direct grep, works without flake.lock)
+    if grep -q "^[[:space:]]*$pkg = pkgs\\.$pkg;" "$flake"; then
         success "Package $pkg already in $flake"
         return 0
     fi
@@ -1040,16 +1048,16 @@ remove_package_from_flake() {
     fi
 
     # Partial edit: remove package from existing flake.nix
-    # Note: Double backslashes needed because awk -v processes escape sequences
+    # Markers use literal strings (matched with index()), patterns use regex
     # 1. Remove from packages section: "$pkg = pkgs.$pkg;"
-    remove_line_from_section "$flake" '# \\[nixy:packages\\]' '# \\[/nixy:packages\\]' "^[[:space:]]*$pkg = pkgs\\\\.$pkg;"
+    remove_line_from_section "$flake" '# [nixy:packages]' '# [/nixy:packages]' "^[[:space:]]*$pkg = pkgs\\\\.$pkg;"
 
     # 2. Remove from env-paths section: "$pkg" (exact match with whitespace)
-    remove_line_from_section "$flake" '# \\[nixy:env-paths\\]' '# \\[/nixy:env-paths\\]' "^[[:space:]]*$pkg\$"
+    remove_line_from_section "$flake" '# [nixy:env-paths]' '# [/nixy:env-paths]' "^[[:space:]]*$pkg\$"
 
     # 3. For local flakes, remove from devShell section: "pkgs.$pkg"
     if [[ "$use_local" == "true" ]]; then
-        remove_line_from_section "$flake" '# \\[nixy:devShell\\]' '# \\[/nixy:devShell\\]' "^[[:space:]]*pkgs\\\\.$pkg\$"
+        remove_line_from_section "$flake" '# [nixy:devShell]' '# [/nixy:devShell]' "^[[:space:]]*pkgs\\\\.$pkg\$"
     fi
 
     success "Removed $pkg from $flake"
