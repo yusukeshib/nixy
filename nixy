@@ -15,7 +15,7 @@ GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.30"
+NIXY_VERSION="0.1.31"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -1179,9 +1179,6 @@ cmd_profile() {
     shift || true
 
     case "$subcmd" in
-        create)
-            cmd_profile_create "$@"
-            ;;
         switch|use)
             cmd_profile_switch "$@"
             ;;
@@ -1203,31 +1200,25 @@ cmd_profile() {
     esac
 }
 
-cmd_profile_create() {
-    local name="${1:-}"
-    [[ -z "$name" ]] && die "Usage: nixy profile create <name>"
-
-    validate_profile_name "$name"
-
-    local profile_dir
-    profile_dir=$(get_profile_dir "$name")
-
-    if [[ -d "$profile_dir" ]]; then
-        die "Profile '$name' already exists"
-    fi
-
-    info "Creating profile '$name'..."
-    mkdir -p "$profile_dir"
-    generate_flake --flake-dir "$profile_dir" > "$profile_dir/flake.nix"
-
-    success "Created profile '$name' at $profile_dir"
-    echo ""
-    info "To switch to this profile, run: nixy profile switch $name"
-}
-
 cmd_profile_switch() {
-    local name="${1:-}"
-    [[ -z "$name" ]] && die "Usage: nixy profile switch <name>"
+    local name=""
+    local create=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -c|--create) create=true; shift ;;
+            -*)
+                die "Unknown option: $1. Usage: nixy profile switch [-c] <name>"
+                ;;
+            *)
+                [[ -z "$name" ]] && name="$1"
+                shift
+                ;;
+        esac
+    done
+
+    [[ -z "$name" ]] && die "Usage: nixy profile switch [-c] <name>"
 
     validate_profile_name "$name"
 
@@ -1245,8 +1236,15 @@ cmd_profile_switch() {
         fi
     fi
 
+    # Create profile if -c flag is set and profile doesn't exist
     if [[ ! -d "$profile_dir" ]]; then
-        die "Profile '$name' does not exist. Create it with: nixy profile create $name"
+        if [[ "$create" == "true" ]]; then
+            info "Creating profile '$name'..."
+            mkdir -p "$profile_dir"
+            generate_flake --flake-dir "$profile_dir" > "$profile_dir/flake.nix"
+        else
+            die "Profile '$name' does not exist. Use -c to create it: nixy profile switch -c $name"
+        fi
     fi
 
     info "Switching to profile '$name'..."
@@ -1299,7 +1297,7 @@ cmd_profile_list() {
         else
             echo "  (no profiles)"
             echo ""
-            info "Create a profile with: nixy profile create <name>"
+            info "Create a profile with: nixy profile switch -c <name>"
         fi
     fi
 }
@@ -1369,8 +1367,7 @@ BASIC COMMANDS:
 
 PROFILE COMMANDS:
     profile                 Show current profile
-    profile create <name>   Create a new profile
-    profile switch <name>   Switch to a different profile
+    profile switch <name>   Switch to a different profile (-c to create)
     profile list            List all profiles
     profile delete <name>   Delete a profile (--force required)
 
@@ -1414,8 +1411,8 @@ EXAMPLES:
     nixy upgrade                        # Update nixpkgs and rebuild
     nixy version                        # Show current version
     nixy self-upgrade                   # Upgrade to latest version
-    nixy profile create work            # Create a new profile
-    nixy profile switch work            # Switch to 'work' profile
+    nixy profile switch -c work         # Create and switch to 'work' profile
+    nixy profile switch work            # Switch to existing 'work' profile
     nixy profile list                   # List all profiles
 
 EOF

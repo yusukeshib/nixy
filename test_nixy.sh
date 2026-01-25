@@ -163,14 +163,14 @@ run_test() {
 test_default_uses_global_flake() {
     cd "$TEST_DIR"
     # Create global flake via profile
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
     # Should work by default (no flags needed)
     "$NIXY" list >/dev/null 2>&1
 }
 
 test_list_shows_flake_packages() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -192,7 +192,7 @@ test_list_shows_flake_packages() {
 
 test_list_shows_none_for_empty_flake() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output
     output=$("$NIXY" list 2>&1)
@@ -232,7 +232,7 @@ test_flake_has_no_devshells() {
 
 test_install_adds_single_package() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -243,7 +243,7 @@ test_install_adds_single_package() {
 
 test_install_preserves_existing_packages() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -260,7 +260,7 @@ test_install_preserves_existing_packages() {
 
 test_flake_structure_has_markers() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -296,7 +296,7 @@ test_upgrade_shows_help() {
 
 test_upgrade_rejects_unknown_option() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" upgrade --foo 2>&1) && exit_code=0 || exit_code=$?
@@ -307,7 +307,7 @@ test_upgrade_rejects_unknown_option() {
 
 test_upgrade_validates_input_name() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Create flake.lock by running sync
     "$NIXY" sync >/dev/null 2>&1 || true
@@ -321,7 +321,7 @@ test_upgrade_validates_input_name() {
 
 test_upgrade_shows_available_inputs_on_error() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Create flake.lock by running sync
     "$NIXY" sync >/dev/null 2>&1 || true
@@ -336,7 +336,7 @@ test_upgrade_shows_available_inputs_on_error() {
 
 test_upgrade_requires_lock_file_for_specific_input() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Don't create flake.lock (no sync)
 
@@ -350,7 +350,7 @@ test_upgrade_requires_lock_file_for_specific_input() {
 
 test_upgrade_handles_corrupted_lock_file() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -374,7 +374,7 @@ test_sync_fails_cleanly_without_flake() {
 
 test_sync_rejects_unknown_option() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" sync --foo 2>&1) && exit_code=0 || exit_code=$?
@@ -385,7 +385,7 @@ test_sync_rejects_unknown_option() {
 
 test_sync_with_empty_flake() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -405,7 +405,7 @@ test_sync_with_empty_flake() {
 
 test_sync_with_packages_no_unbound_variable() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -429,7 +429,7 @@ test_sync_with_packages_no_unbound_variable() {
 
 test_sync_builds_environment() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Sync should attempt to build environment
     local output exit_code
@@ -446,7 +446,7 @@ test_sync_builds_environment() {
 
 test_sync_creates_lock_file() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -465,7 +465,7 @@ test_sync_creates_lock_file() {
 
 test_sync_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Test that --remove flag is accepted (backward compat, no-op)
     local output exit_code
@@ -481,7 +481,7 @@ test_sync_remove_flag_accepted() {
 
 test_sync_short_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Test that -r short flag is accepted (backward compat, no-op)
     local output exit_code
@@ -527,7 +527,7 @@ buildGoModule rec {
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Install should extract pname correctly
     local output exit_code
@@ -549,7 +549,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -572,7 +572,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -593,7 +593,7 @@ pkgs.stdenv.mkDerivation {
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file test-pkg.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -605,7 +605,7 @@ EOF
 
 test_install_file_not_found() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install --file nonexistent.nix 2>&1) && exit_code=0 || exit_code=$?
@@ -634,7 +634,7 @@ buildGoModule rec {
 EOF
 
     # Create global flake
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -673,7 +673,7 @@ test_install_flake_file_creates_directory() {
 EOF
 
     # Create global flake
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -709,7 +709,7 @@ test_install_flake_file_adds_input() {
 EOF
 
     # Create global flake
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -750,7 +750,7 @@ EOF
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -783,7 +783,7 @@ test_uninstall_flake_package() {
 }
 EOF
 
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -810,7 +810,7 @@ EOF
 
 test_validate_package_rejects_invalid_package() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output exit_code
     output=$("$NIXY" install rust 2>&1) && exit_code=0 || exit_code=$?
@@ -822,7 +822,7 @@ test_validate_package_rejects_invalid_package() {
 
 test_validate_package_rejects_attribute_set() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # 'lib' is an attribute set, not a derivation
     local output exit_code
@@ -834,7 +834,7 @@ test_validate_package_rejects_attribute_set() {
 
 test_validate_package_accepts_valid_package() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # 'hello' is a valid package in nixpkgs
     local output exit_code
@@ -852,7 +852,7 @@ test_validate_package_accepts_valid_package() {
 
 test_validate_package_suggests_search() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     local output
     output=$("$NIXY" install invalidpkg123 2>&1 || true)
@@ -863,7 +863,7 @@ test_validate_package_suggests_search() {
 
 test_validate_skipped_for_file_install() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1 || true
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
 
     # Create a local package file
     cat > test-pkg.nix <<'EOF'
@@ -1040,7 +1040,7 @@ test_help_shows_config_command() {
 
 test_flake_has_buildenv_default() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -1103,7 +1103,7 @@ test_individual_packages_still_accessible() {
 
 test_empty_flake_has_empty_buildenv() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -1115,7 +1115,7 @@ test_empty_flake_has_empty_buildenv() {
 
 test_buildenv_has_extra_outputs() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -1125,7 +1125,7 @@ test_buildenv_has_extra_outputs() {
 
 test_flake_structure_has_env_paths_markers() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -1189,7 +1189,7 @@ EOF
 
 test_add_preserves_user_customizations() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1245,7 +1245,7 @@ test_add_preserves_user_customizations() {
 
 test_remove_preserves_user_customizations() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1297,7 +1297,7 @@ test_remove_preserves_user_customizations() {
 
 test_add_multiple_packages_preserves_all() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1343,7 +1343,7 @@ test_add_multiple_packages_preserves_all() {
 
 test_remove_middle_package_preserves_others() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1381,7 +1381,7 @@ test_remove_middle_package_preserves_others() {
 
 test_add_skips_duplicate_package() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1418,7 +1418,7 @@ test_add_skips_duplicate_package() {
 
 test_flake_has_custom_markers() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
 
@@ -1433,7 +1433,7 @@ test_flake_has_custom_markers() {
 
 test_custom_inputs_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1472,7 +1472,7 @@ EOF
 
 test_custom_packages_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1511,7 +1511,7 @@ EOF
 
 test_custom_paths_preserved_during_regeneration() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1556,7 +1556,7 @@ EOF
 
 test_modification_warning_shown() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1592,7 +1592,7 @@ EOF
 
 test_force_flag_bypasses_warning() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
     local flake_nix="$profile_dir/flake.nix"
@@ -1624,7 +1624,7 @@ EOF
 
 test_no_warning_when_no_modifications() {
     cd "$TEST_DIR"
-    "$NIXY" profile create default >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1
 
     # Don't add any modifications outside markers
 
@@ -1670,31 +1670,32 @@ test_profile_shows_default() {
     assert_output_contains "$output" "Active profile: default"
 }
 
-test_profile_create() {
+test_profile_switch_c() {
     cd "$TEST_DIR"
     local output exit_code
-    output=$("$NIXY" profile create work 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" profile switch -c work 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 0 "$exit_code" && \
-    assert_output_contains "$output" "Created profile 'work'" && \
+    assert_output_contains "$output" "Creating profile 'work'" && \
     assert_file_exists "$NIXY_CONFIG_DIR/profiles/work/flake.nix"
 }
 
-test_profile_create_fails_if_exists() {
+test_profile_switch_c_with_existing() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
 
+    # Running -c on existing profile should succeed (just switches)
     local output exit_code
-    output=$("$NIXY" profile create work 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" profile switch -c work 2>&1) && exit_code=0 || exit_code=$?
 
-    assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "already exists"
+    assert_exit_code 0 "$exit_code" && \
+    assert_output_contains "$output" "Switched to profile 'work'"
 }
 
-test_profile_create_validates_name() {
+test_profile_switch_c_validates_name() {
     cd "$TEST_DIR"
     local output exit_code
-    output=$("$NIXY" profile create "invalid name!" 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" profile switch -c "invalid name!" 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
     assert_output_contains "$output" "Invalid profile name"
@@ -1702,7 +1703,7 @@ test_profile_create_validates_name() {
 
 test_profile_switch() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
 
     local output exit_code
     output=$("$NIXY" profile switch work 2>&1) && exit_code=0 || exit_code=$?
@@ -1730,8 +1731,8 @@ test_profile_switch_fails_if_not_exists() {
 
 test_profile_list() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
-    "$NIXY" profile create personal >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
+    "$NIXY" profile switch -c personal >/dev/null 2>&1
 
     local output
     output=$("$NIXY" profile list 2>&1)
@@ -1742,7 +1743,7 @@ test_profile_list() {
 
 test_profile_list_shows_active() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
     "$NIXY" profile switch work >/dev/null 2>&1
 
     local output
@@ -1753,7 +1754,8 @@ test_profile_list_shows_active() {
 
 test_profile_delete_requires_force() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1  # Switch back so work is not active
 
     local output exit_code
     output=$("$NIXY" profile delete work 2>&1) && exit_code=0 || exit_code=$?
@@ -1764,7 +1766,8 @@ test_profile_delete_requires_force() {
 
 test_profile_delete_with_force() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
+    "$NIXY" profile switch -c default >/dev/null 2>&1  # Switch back so work is not active
 
     local output exit_code
     output=$("$NIXY" profile delete work --force 2>&1) && exit_code=0 || exit_code=$?
@@ -1782,7 +1785,7 @@ test_profile_delete_with_force() {
 
 test_profile_delete_active_fails() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
     "$NIXY" profile switch work >/dev/null 2>&1
 
     local output exit_code
@@ -1796,7 +1799,6 @@ test_help_shows_profile_commands() {
     local output
     output=$("$NIXY" help 2>&1)
     assert_output_contains "$output" "PROFILE COMMANDS" && \
-    assert_output_contains "$output" "profile create" && \
     assert_output_contains "$output" "profile switch" && \
     assert_output_contains "$output" "profile list" && \
     assert_output_contains "$output" "profile delete"
@@ -1804,7 +1806,7 @@ test_help_shows_profile_commands() {
 
 test_install_uses_active_profile() {
     cd "$TEST_DIR"
-    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch -c work >/dev/null 2>&1
     "$NIXY" profile switch work >/dev/null 2>&1
 
     # Add a package (will fail at nix, but flake should be updated)
@@ -1927,9 +1929,9 @@ main() {
 
     # Profile management tests
     run_test "profile shows default" test_profile_shows_default || true
-    run_test "profile create" test_profile_create || true
-    run_test "profile create fails if exists" test_profile_create_fails_if_exists || true
-    run_test "profile create validates name" test_profile_create_validates_name || true
+    run_test "profile switch -c" test_profile_switch_c || true
+    run_test "profile switch -c with existing" test_profile_switch_c_with_existing || true
+    run_test "profile switch -c validates name" test_profile_switch_c_validates_name || true
     run_test "profile switch" test_profile_switch || true
     run_test "profile switch fails if not exists" test_profile_switch_fails_if_not_exists || true
     run_test "profile list" test_profile_list || true

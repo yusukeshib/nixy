@@ -106,8 +106,8 @@ nixy upgrade            # 全パッケージをアップグレード
 | `nixy version` | nixy のバージョンを表示 |
 | `nixy self-upgrade` | nixy を最新版にアップグレード |
 | `nixy profile` | 現在のプロファイルを表示 |
-| `nixy profile create <name>` | 新しいプロファイルを作成 |
 | `nixy profile switch <name>` | プロファイルを切り替え |
+| `nixy profile switch -c <name>` | 新しいプロファイルを作成して切り替え |
 | `nixy profile list` | 全プロファイルを一覧表示 |
 | `nixy profile delete <name>` | プロファイルを削除（`--force` 必須） |
 
@@ -116,12 +116,10 @@ nixy upgrade            # 全パッケージをアップグレード
 異なる用途（仕事、個人、プロジェクト）ごとに別々のパッケージセットを管理できます：
 
 ```bash
-nixy profile create work      # 新しいプロファイルを作成
-nixy profile switch work      # 切り替え
+nixy profile switch -c work   # 新しいプロファイルを作成して切り替え
 nixy install slack terraform  # 仕事用パッケージをインストール
 
-nixy profile create personal  # 別のプロファイルを作成
-nixy profile switch personal
+nixy profile switch -c personal  # 別のプロファイルを作成して切り替え
 nixy install spotify games    # ここには別のパッケージ
 
 nixy profile list             # 全プロファイルを表示
