@@ -191,60 +191,61 @@ test_init_creates_empty_packages_section() {
 }
 
 # =============================================================================
-# Test: Local flake discovery
+# Test: Local flake discovery (--local flag)
 # =============================================================================
 
-test_finds_flake_in_current_dir() {
+test_local_flag_finds_flake_in_current_dir() {
     cd "$TEST_DIR"
     "$NIXY" init >/dev/null 2>&1
-    # list should work without error (finds local flake)
-    "$NIXY" list >/dev/null 2>&1
+    # list --local should find local flake
+    "$NIXY" list --local >/dev/null 2>&1
 }
 
-test_finds_flake_in_parent_dir() {
+test_local_flag_finds_flake_in_parent_dir() {
     cd "$TEST_DIR"
     "$NIXY" init >/dev/null 2>&1
     mkdir -p subdir/deep/nested
     cd subdir/deep/nested
-    # Should find flake.nix in $TEST_DIR
-    "$NIXY" list >/dev/null 2>&1
+    # Should find flake.nix in $TEST_DIR with --local
+    "$NIXY" list --local >/dev/null 2>&1
 }
 
-test_fails_when_no_flake_found() {
+test_local_flag_fails_when_no_flake_found() {
     cd "$TEST_DIR"
-    # No flake.nix exists, should fail
+    # No flake.nix exists, --local should fail
     local output exit_code
-    output=$("$NIXY" list 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" list --local 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 1 "$exit_code" && \
     assert_output_contains "$output" "No flake.nix found"
 }
 
-test_error_message_suggests_global_flag() {
+test_error_message_suggests_init() {
     cd "$TEST_DIR"
     local output
-    output=$("$NIXY" list 2>&1 || true)
-    assert_output_contains "$output" "--global"
+    output=$("$NIXY" list --local 2>&1 || true)
+    assert_output_contains "$output" "nixy init"
 }
 
 # =============================================================================
-# Test: --global flag
+# Test: Global is default behavior
 # =============================================================================
 
-test_global_flag_uses_global_flake() {
+test_default_uses_global_flake() {
     cd "$TEST_DIR"
     # Create global flake
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
-    # Should work with --global even without local flake
-    "$NIXY" list --global >/dev/null 2>&1
+    # Should work by default (no flags needed)
+    "$NIXY" list >/dev/null 2>&1
 }
 
-test_global_flag_short_form() {
+test_local_short_form() {
     cd "$TEST_DIR"
-    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
-    "$NIXY" list -g >/dev/null 2>&1
+    "$NIXY" init >/dev/null 2>&1
+    # -l short form for --local
+    "$NIXY" list -l >/dev/null 2>&1
 }
 
-test_global_flag_ignores_local_flake() {
+test_default_ignores_local_flake() {
     cd "$TEST_DIR"
     # Create both local and global flakes
     "$NIXY" init >/dev/null 2>&1
@@ -253,7 +254,7 @@ test_global_flag_ignores_local_flake() {
     # Add marker to local flake to distinguish
     echo "# LOCAL_MARKER" >> flake.nix
 
-    # --global should use global flake (no LOCAL_MARKER)
+    # Default (global) should use global flake (no LOCAL_MARKER)
     assert_file_not_contains "$NIXY_CONFIG_DIR/flake.nix" "LOCAL_MARKER"
 }
 
@@ -402,25 +403,25 @@ test_install_fails_cleanly_without_flake() {
     assert_file_not_exists "./flake.nix" "flake.nix should not be created on failure"
 }
 
-test_uninstall_fails_cleanly_without_flake() {
+test_uninstall_fails_cleanly_without_local_flake() {
     cd "$TEST_DIR"
     local output exit_code
-    output=$("$NIXY" uninstall testpkg 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" uninstall --local testpkg 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
     assert_file_not_exists "./flake.nix"
 }
 
-test_upgrade_fails_cleanly_without_flake() {
+test_upgrade_fails_cleanly_without_local_flake() {
     cd "$TEST_DIR"
     local output exit_code
-    output=$("$NIXY" upgrade 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" upgrade --local 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
     assert_file_not_exists "./flake.nix"
 }
 
-test_install_fails_on_non_nixy_flake() {
+test_install_fails_on_non_nixy_local_flake() {
     cd "$TEST_DIR"
     # Create a non-nixy flake.nix (no markers)
     cat > flake.nix <<'EOF'
@@ -435,14 +436,14 @@ EOF
 
     local output exit_code
     # Use 'hello' which is a valid package (passes validation)
-    output=$("$NIXY" install hello 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" install --local hello 2>&1) && exit_code=0 || exit_code=$?
 
     # Should fail with error about non-nixy flake
     assert_exit_code 1 "$exit_code" && \
     assert_output_contains "$output" "not managed by nixy"
 }
 
-test_uninstall_fails_on_non_nixy_flake() {
+test_uninstall_fails_on_non_nixy_local_flake() {
     cd "$TEST_DIR"
     # Create a non-nixy flake.nix (no markers)
     cat > flake.nix <<'EOF'
@@ -453,7 +454,7 @@ test_uninstall_fails_on_non_nixy_flake() {
 EOF
 
     local output exit_code
-    output=$("$NIXY" uninstall testpkg 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" uninstall --local testpkg 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
     assert_output_contains "$output" "not managed by nixy"
@@ -462,21 +463,21 @@ EOF
 test_sync_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
-    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
     assert_file_not_exists "$NIXY_CONFIG_DIR/flake.nix"
 }
 
-test_sync_requires_global_flag() {
+test_sync_rejects_local_flag() {
     cd "$TEST_DIR"
     "$NIXY" init >/dev/null 2>&1
 
     local output exit_code
-    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --local 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
-    assert_output_contains "$output" "sync only works with --global flag"
+    assert_output_contains "$output" "sync only works with global flake"
 }
 
 test_sync_with_empty_flake() {
@@ -485,7 +486,7 @@ test_sync_with_empty_flake() {
 
     # Sync with empty flake (no packages) should not fail with unbound variable
     local output exit_code
-    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (already in sync)
     assert_exit_code 0 "$exit_code" && \
@@ -507,7 +508,7 @@ test_sync_with_packages_no_unbound_variable() {
     # Sync should not fail with unbound variable even when to_remove array is empty
     # (packages in flake but nothing to remove from nix profile)
     local output exit_code
-    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     # Should not have unbound variable error regardless of exit code
     # (exit code may be non-zero if nix commands fail, but that's not what we're testing)
@@ -584,7 +585,7 @@ test_sync_without_remove_only_warns() {
     # We need to mock the installed packages, but since nix profile is isolated,
     # this will just test that sync doesn't error with unbound variables
     local output exit_code
-    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed
     assert_exit_code 0 "$exit_code" && \
@@ -602,7 +603,7 @@ test_sync_remove_flag_accepted() {
 
     # Test that --remove flag is accepted (doesn't cause unknown option error)
     local output exit_code
-    output=$("$NIXY" sync --global --remove 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --remove 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (empty flake, nothing to remove)
     assert_exit_code 0 "$exit_code" && \
@@ -620,7 +621,7 @@ test_sync_short_remove_flag_accepted() {
 
     # Test that -r short flag is accepted
     local output exit_code
-    output=$("$NIXY" sync -g -r 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync -r 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (empty flake, nothing to remove)
     assert_exit_code 0 "$exit_code" && \
@@ -632,11 +633,11 @@ test_sync_short_remove_flag_accepted() {
     return 0
 }
 
-test_help_shows_sync_remove_flag() {
+test_help_shows_sync_command() {
     local output
     output=$("$NIXY" help 2>&1)
     assert_output_contains "$output" "sync" && \
-    assert_output_contains "$output" "--remove"
+    assert_output_contains "$output" "Sync installed packages"
 }
 
 test_shell_fails_cleanly_without_flake() {
@@ -782,8 +783,8 @@ EOF
     # Create global flake (packages are always stored in NIXY_CONFIG_DIR/packages)
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Install the local file with -g flag (will fail at nix profile add, but flake should be generated)
-    "$NIXY" install --file test-pkg.nix -g 2>&1 || true
+    # Install the local file (default is global, will fail at nix profile add, but flake should be generated)
+    "$NIXY" install --file test-pkg.nix 2>&1 || true
 
     # Verify package was copied
     assert_file_exists "$NIXY_CONFIG_DIR/packages/my-local-pkg.nix" && \
@@ -811,8 +812,8 @@ EOF
 
     cd myproject
 
-    # Install the local file (will fail at nix profile add, but package file should be copied)
-    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+    # Install the local file with --local flag (will fail at shell, but package file should be copied)
+    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
 
     # Verify package was copied to the flake directory's packages subdir (not NIXY_CONFIG_DIR)
     assert_file_exists "./packages/flake-dir-test-pkg.nix" "Package should be in flake dir's packages subdir" && \
@@ -847,8 +848,8 @@ stdenv.mkDerivation {
 }
 EOF
 
-    # Install the local file (will fail at nix profile add, but package file should be added to git)
-    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+    # Install the local file with --local (will fail at shell, but package file should be added to git)
+    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
 
     # Verify package file was added to git staging area
     local git_status
@@ -883,8 +884,8 @@ stdenv.mkDerivation {
 }
 EOF
 
-    # Install the local file (will fail at nix profile add, but package file should still be copied)
-    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+    # Install the local file with --local (will fail at shell, but package file should still be copied)
+    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
 
     # Verify package was copied successfully even without git
     assert_file_exists "./packages/no-git-pkg.nix" "Package should be copied even without git"
@@ -912,9 +913,9 @@ stdenv.mkDerivation {
 }
 EOF
 
-    # Install the file from the directory with the symlinked flake
+    # Install the file from the directory with the symlinked flake using --local
     cd symlink-dir
-    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+    "$NIXY" install --file ../test-pkg.nix --local 2>&1 || true
 
     # The package should be copied to the REAL config directory, not relative to symlink
     assert_file_exists "$TEST_DIR/real-config/packages/symlink-test-pkg.nix" "Package should be in real flake dir, not relative path"
@@ -947,8 +948,8 @@ EOF
     # Create global flake
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Install the flake file with -g flag
-    "$NIXY" install --file my-flake.nix -g 2>&1 || true
+    # Install the flake file (default is global)
+    "$NIXY" install --file my-flake.nix 2>&1 || true
 
     # Verify flake was copied to a subdirectory
     assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" "Flake should be in subdirectory"
@@ -981,8 +982,8 @@ EOF
     # Create global flake
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Install the flake file
-    "$NIXY" install --file gke-plugin.nix -g 2>&1 || true
+    # Install the flake file (default is global)
+    "$NIXY" install --file gke-plugin.nix 2>&1 || true
 
     # Verify flake.nix has the input
     assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin.url = "path:./packages/gke-plugin"' && \
@@ -1020,11 +1021,11 @@ EOF
 
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Install regular package
-    "$NIXY" install --file regular-pkg.nix -g 2>&1 || true
+    # Install regular package (default is global)
+    "$NIXY" install --file regular-pkg.nix 2>&1 || true
 
-    # Install flake package
-    "$NIXY" install --file flake-pkg.nix -g 2>&1 || true
+    # Install flake package (default is global)
+    "$NIXY" install --file flake-pkg.nix 2>&1 || true
 
     # Regular package should be a .nix file
     assert_file_exists "$NIXY_CONFIG_DIR/packages/regular-pkg.nix" && \
@@ -1051,14 +1052,14 @@ EOF
 
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Install the flake
-    "$NIXY" install --file my-flake.nix -g 2>&1 || true
+    # Install the flake (default is global)
+    "$NIXY" install --file my-flake.nix 2>&1 || true
 
     # Verify it was installed
     assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" || return 1
 
-    # Uninstall it
-    "$NIXY" uninstall my-flake -g 2>&1 || true
+    # Uninstall it (default is global)
+    "$NIXY" uninstall my-flake 2>&1 || true
 
     # Verify directory was removed
     if [[ -d "$NIXY_CONFIG_DIR/packages/my-flake" ]]; then
@@ -1161,10 +1162,10 @@ test_help_shows_init_command() {
     assert_output_contains "$output" "init"
 }
 
-test_help_shows_global_flag() {
+test_help_shows_local_flag() {
     local output
     output=$("$NIXY" help 2>&1)
-    assert_output_contains "$output" "--global"
+    assert_output_contains "$output" "--local"
 }
 
 test_help_exit_code() {
@@ -1390,9 +1391,9 @@ test_sync_upgrades_old_flake_without_buildenv() {
 }
 EOF
 
-    # Run sync - it should upgrade the flake to include buildEnv
+    # Run sync (default is global) - it should upgrade the flake to include buildEnv
     local output
-    output=$("$NIXY" sync --global 2>&1) || true
+    output=$("$NIXY" sync 2>&1) || true
 
     # Should mention upgrading
     if ! echo "$output" | grep -q "Upgrading flake.nix to buildEnv format"; then
@@ -1422,16 +1423,16 @@ main() {
     run_test "init with directory argument" test_init_with_directory || true
     run_test "init creates empty packages section" test_init_creates_empty_packages_section || true
 
-    # Flake discovery tests
-    run_test "finds flake in current directory" test_finds_flake_in_current_dir || true
-    run_test "finds flake in parent directory" test_finds_flake_in_parent_dir || true
-    run_test "fails when no flake found" test_fails_when_no_flake_found || true
-    run_test "error suggests --global flag" test_error_message_suggests_global_flag || true
+    # Local flag flake discovery tests
+    run_test "--local finds flake in current directory" test_local_flag_finds_flake_in_current_dir || true
+    run_test "--local finds flake in parent directory" test_local_flag_finds_flake_in_parent_dir || true
+    run_test "--local fails when no flake found" test_local_flag_fails_when_no_flake_found || true
+    run_test "error suggests nixy init" test_error_message_suggests_init || true
 
-    # Global flag tests
-    run_test "--global uses global flake" test_global_flag_uses_global_flake || true
-    run_test "-g short form works" test_global_flag_short_form || true
-    run_test "--global ignores local flake" test_global_flag_ignores_local_flake || true
+    # Default global behavior tests
+    run_test "default uses global flake" test_default_uses_global_flake || true
+    run_test "-l short form works" test_local_short_form || true
+    run_test "default ignores local flake" test_default_ignores_local_flake || true
 
     # Global vs Local flake structure tests
     run_test "local flake has devShells" test_local_flake_has_devshells || true
@@ -1444,19 +1445,19 @@ main() {
 
     # Error propagation tests (the subshell exit bug)
     run_test "install fails cleanly without flake" test_install_fails_cleanly_without_flake || true
-    run_test "uninstall fails cleanly without flake" test_uninstall_fails_cleanly_without_flake || true
-    run_test "upgrade fails cleanly without flake" test_upgrade_fails_cleanly_without_flake || true
-    run_test "install fails on non-nixy flake" test_install_fails_on_non_nixy_flake || true
-    run_test "uninstall fails on non-nixy flake" test_uninstall_fails_on_non_nixy_flake || true
+    run_test "uninstall --local fails without flake" test_uninstall_fails_cleanly_without_local_flake || true
+    run_test "upgrade --local fails without flake" test_upgrade_fails_cleanly_without_local_flake || true
+    run_test "install --local fails on non-nixy flake" test_install_fails_on_non_nixy_local_flake || true
+    run_test "uninstall --local fails on non-nixy flake" test_uninstall_fails_on_non_nixy_local_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
-    run_test "sync requires --global flag" test_sync_requires_global_flag || true
+    run_test "sync rejects --local flag" test_sync_rejects_local_flag || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "sync preserves local packages" test_sync_preserves_local_packages || true
     run_test "sync without --remove only warns" test_sync_without_remove_only_warns || true
     run_test "sync --remove flag accepted" test_sync_remove_flag_accepted || true
     run_test "sync -r short flag accepted" test_sync_short_remove_flag_accepted || true
-    run_test "help shows sync --remove flag" test_help_shows_sync_remove_flag || true
+    run_test "help shows sync command" test_help_shows_sync_command || true
     run_test "shell fails cleanly without flake" test_shell_fails_cleanly_without_flake || true
 
     # Local package file parsing tests
@@ -1484,7 +1485,7 @@ main() {
 
     # Help tests
     run_test "help shows init command" test_help_shows_init_command || true
-    run_test "help shows --global flag" test_help_shows_global_flag || true
+    run_test "help shows --local flag" test_help_shows_local_flag || true
     run_test "help exits successfully" test_help_exit_code || true
     run_test "unknown command fails" test_unknown_command_fails || true
 

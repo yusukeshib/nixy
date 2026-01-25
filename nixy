@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.17"
+NIXY_VERSION="0.1.18"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -55,31 +55,29 @@ find_local_flake() {
     return 1
 }
 
-# Get the flake.nix path (local takes precedence over global)
+# Get the flake.nix path (global by default, --local for project flake)
 get_flake() {
-    local use_global="${1:-false}"
+    local use_local="${1:-false}"
 
-    if [[ "$use_global" == "true" ]]; then
-        echo "$GLOBAL_FLAKE"
-        return 0
+    if [[ "$use_local" == "true" ]]; then
+        # Search up directory tree for local flake
+        local local_flake
+        if local_flake=$(find_local_flake); then
+            echo "$local_flake"
+            return 0
+        fi
+        die "No flake.nix found in current directory or parents. Use 'nixy init' to create one."
     fi
 
-    # Search up directory tree for local flake
-    local local_flake
-    if local_flake=$(find_local_flake); then
-        echo "$local_flake"
-        return 0
-    fi
-
-    # No local flake found and --global not specified
-    die "No flake.nix found in current directory or parents. Use --global for global flake."
+    # Default: use global flake
+    echo "$GLOBAL_FLAKE"
 }
 
 # Get flake directory (resolves symlinks)
 get_flake_dir() {
-    local use_global="${1:-false}"
+    local use_local="${1:-false}"
     local flake
-    flake="$(get_flake "$use_global")" || exit 1
+    flake="$(get_flake "$use_local")" || exit 1
     # Resolve symlinks to get real path
     if [[ -L "$flake" ]]; then
         local target
@@ -216,23 +214,23 @@ migrate_to_buildenv() {
 cmd_install() {
     local pkg=""
     local file=""
-    local use_global=false
+    local use_local=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             --file|-f) file="$2"; shift 2 ;;
             *) pkg="$1"; shift ;;
         esac
     done
 
     if [[ -n "$file" ]]; then
-        cmd_install_from_file "$file" "$use_global"
+        cmd_install_from_file "$file" "$use_local"
         return
     fi
 
-    [[ -z "$pkg" ]] && die "Usage: nixy install [--global] <package> or nixy install --file <path>"
+    [[ -z "$pkg" ]] && die "Usage: nixy install [--local] <package> or nixy install --file <path>"
 
     # Validate package exists in nixpkgs
     info "Validating package $pkg..."
@@ -242,21 +240,21 @@ cmd_install() {
 
     # Check if existing flake.nix is nixy-managed before installing
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
     if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
         die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
     fi
 
     # Add package to flake.nix
-    add_package_to_flake "$pkg" "$use_global"
+    add_package_to_flake "$pkg" "$use_local"
 
-    # Only sync for global installs (local packages are used via nixy shell)
-    if [[ "$use_global" == "true" ]]; then
-        info "Installing $pkg..."
-        cmd_sync --global
-    else
+    # Sync for global installs (local packages are used via nixy shell)
+    if [[ "$use_local" == "true" ]]; then
         info "Added $pkg to flake.nix (use 'nixy shell' to enter dev environment)"
+    else
+        info "Installing $pkg..."
+        cmd_sync
     fi
 }
 
@@ -278,14 +276,14 @@ parse_local_package() {
 # Install a package from a local nix file
 cmd_install_from_file() {
     local file="$1"
-    local use_global="${2:-false}"
+    local use_local="${2:-false}"
 
     # Validate file exists
     [[ ! -f "$file" ]] && die "File not found: $file"
 
     # Check if this is a flake file (has inputs and outputs)
     if is_flake_file "$file"; then
-        cmd_install_from_flake_file "$file" "$use_global"
+        cmd_install_from_flake_file "$file" "$use_local"
         return
     fi
 
@@ -299,7 +297,7 @@ cmd_install_from_file() {
 
     # Get flake directory first (packages must be relative to flake for git tracking)
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Check if existing flake.nix is nixy-managed
@@ -328,25 +326,25 @@ cmd_install_from_file() {
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
-    if [[ "$use_global" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
-    else
+    if [[ "$use_local" == "true" ]]; then
         generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
     fi
 
-    # Only sync for global installs (local packages are used via nixy shell)
-    if [[ "$use_global" == "true" ]]; then
-        info "Installing $pkg_name..."
-        cmd_sync --global
-    else
+    # Sync for global installs (local packages are used via nixy shell)
+    if [[ "$use_local" == "true" ]]; then
         info "Added $pkg_name to flake.nix (use 'nixy shell' to enter dev environment)"
+    else
+        info "Installing $pkg_name..."
+        cmd_sync
     fi
 }
 
 # Install a package from a local flake file
 cmd_install_from_flake_file() {
     local file="$1"
-    local use_global="${2:-false}"
+    local use_local="${2:-false}"
 
     # Extract package name from filename (remove .nix extension and path)
     local pkg_name
@@ -359,7 +357,7 @@ cmd_install_from_flake_file() {
 
     # Get flake directory first (packages must be relative to flake for git tracking)
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Check if existing flake.nix is nixy-managed
@@ -389,39 +387,39 @@ cmd_install_from_flake_file() {
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
-    if [[ "$use_global" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
-    else
+    if [[ "$use_local" == "true" ]]; then
         generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
     fi
 
-    # Only sync for global installs (local packages are used via nixy shell)
-    if [[ "$use_global" == "true" ]]; then
-        info "Installing $pkg_name..."
-        cmd_sync --global
-    else
+    # Sync for global installs (local packages are used via nixy shell)
+    if [[ "$use_local" == "true" ]]; then
         info "Added $pkg_name to flake.nix (use 'nixy shell' to enter dev environment)"
+    else
+        info "Installing $pkg_name..."
+        cmd_sync
     fi
 }
 
 # Uninstall a package
 cmd_uninstall() {
-    local use_global=false
+    local use_local=false
     local pkg=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             *) pkg="$1"; shift ;;
         esac
     done
 
-    [[ -z "$pkg" ]] && die "Usage: nixy uninstall [--global] <package>"
+    [[ -z "$pkg" ]] && die "Usage: nixy uninstall [--local] <package>"
 
     # Check if existing flake.nix is nixy-managed before uninstalling
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
     if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
         die "Existing flake.nix is not managed by nixy."
@@ -449,14 +447,14 @@ cmd_uninstall() {
     fi
 
     # Remove from flake.nix (source of truth)
-    remove_package_from_flake "$pkg" "$use_global"
+    remove_package_from_flake "$pkg" "$use_local"
 
     # For global uninstalls, rebuild the environment
-    if [[ "$use_global" == "true" ]]; then
-        info "Rebuilding environment..."
-        cmd_sync --global
-    else
+    if [[ "$use_local" == "true" ]]; then
         success "Removed $pkg from flake.nix"
+    else
+        info "Rebuilding environment..."
+        cmd_sync
     fi
 }
 
@@ -471,18 +469,18 @@ cmd_search() {
 
 # List installed packages
 cmd_list() {
-    local use_global=false
+    local use_local=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             *) shift ;;
         esac
     done
 
     # Validate flake exists (to give helpful error message)
-    get_flake "$use_global" >/dev/null || exit 1
+    get_flake "$use_local" >/dev/null || exit 1
 
     info "Installed packages:"
     nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags)
@@ -490,18 +488,18 @@ cmd_list() {
 
 # Upgrade all packages
 cmd_upgrade() {
-    local use_global=false
+    local use_local=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             *) shift ;;
         esac
     done
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Update flake.lock if flake.nix exists
@@ -812,24 +810,24 @@ EOF
 
 # Sync installed packages with flake.nix (atomic mode using buildEnv)
 cmd_sync() {
-    local use_global=false
+    local use_local=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             --remove|-r) shift ;; # Kept for backward compatibility (no-op in atomic mode)
             *) shift ;;
         esac
     done
 
-    # Sync only works in global mode
-    if [[ "$use_global" != "true" ]]; then
-        die "sync only works with --global flag. Use 'nixy sync --global' to sync global packages."
+    # Sync only works in global mode (default)
+    if [[ "$use_local" == "true" ]]; then
+        die "sync only works with global flake. Use 'nixy shell' for local development environments."
     fi
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
@@ -882,9 +880,9 @@ cmd_sync() {
 # Add a package to flake.nix (reads existing packages and adds the new one)
 add_package_to_flake() {
     local pkg="$1"
-    local use_global="${2:-false}"
+    local use_local="${2:-false}"
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Check if existing flake.nix is nixy-managed
@@ -913,10 +911,10 @@ add_package_to_flake() {
 
     # Generate and write flake.nix
     mkdir -p "$flake_dir"
-    if [[ "$use_global" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
-    else
+    if [[ "$use_local" == "true" ]]; then
         generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
     fi
     success "Added $pkg to $flake"
 }
@@ -924,9 +922,9 @@ add_package_to_flake() {
 # Remove a package from flake.nix
 remove_package_from_flake() {
     local pkg="$1"
-    local use_global="${2:-false}"
+    local use_local="${2:-false}"
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     # Check if existing flake.nix is nixy-managed
@@ -941,10 +939,10 @@ remove_package_from_flake() {
     done < <(get_packages_from_flake "$flake")
 
     # Generate and write flake.nix
-    if [[ "$use_global" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
-    else
+    if [[ "$use_local" == "true" ]]; then
         generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+    else
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
     fi
     success "Removed $pkg from $flake"
 }
@@ -987,24 +985,24 @@ cmd_bundle_dump() {
     info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"
 }
 
-# Enter dev shell
+# Enter dev shell (local by default for shell command)
 cmd_shell() {
-    local use_global=false
+    local use_local=true
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --global|-g) use_global=true; shift ;;
+            --local|-l) use_local=true; shift ;;
             *) shift ;;
         esac
     done
 
     local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
+    flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
     if [[ ! -f "$flake" ]]; then
-        die "No flake.nix found at $flake. Run 'nixy add <package>' to create one."
+        die "No flake.nix found at $flake. Run 'nixy init' to create one."
     fi
 
     info "Entering dev shell..."
@@ -1138,7 +1136,8 @@ USAGE:
 
 BASIC COMMANDS:
     init [dir]              Initialize a local flake.nix (default: current dir)
-    install <pkg>           Install a package (tracked in flake.nix)
+    install <pkg>           Install a package to global profile
+    install --local <pkg>   Install a package to local flake.nix
     install --file <path>   Install from local nix file
     uninstall <pkg>         Uninstall a package
     search <query>          Search for packages
@@ -1147,23 +1146,23 @@ BASIC COMMANDS:
     version                 Show nixy version
 
 SYNC COMMANDS:
-    sync [--remove]         Sync installed packages with flake.nix
-                            (--remove to also remove packages not in flake)
+    sync                    Sync installed packages with global flake.nix
+                            (use on new machine to restore packages)
 
 ENVIRONMENT COMMANDS:
-    shell                   Enter dev shell from flake.nix
+    shell                   Enter dev shell from local flake.nix
     gc                      Garbage collect old generations
 
 MAINTENANCE COMMANDS:
     self-upgrade [--force]  Upgrade nixy to the latest version
 
-GLOBAL FLAGS:
-    --global, -g            Use global flake (~/.config/nix/flake.nix)
-                            instead of searching for local flake.nix
+FLAGS:
+    --local, -l             Use local flake.nix (in current dir or parents)
+                            instead of global flake
 
 CONFIG FILES:
-    Global: ~/.config/nix/flake.nix (use with --global)
-    Local:  ./flake.nix or parent directories (auto-discovered)
+    Global: ~/.config/nix/flake.nix (default for install/uninstall/sync)
+    Local:  ./flake.nix or parent directories (use with --local)
     Local packages: ~/.config/nix/packages/
 
 LOCAL PACKAGE FORMAT:
@@ -1175,12 +1174,13 @@ LOCAL PACKAGE FORMAT:
     }
 
 EXAMPLES:
-    nixy init                           # Initialize flake.nix in current dir
-    nixy install ripgrep                # Install package (uses local flake)
-    nixy install --global ripgrep       # Install to global flake
+    nixy install ripgrep                # Install to global profile
+    nixy install --local webpack        # Add to local project flake.nix
+    nixy uninstall ripgrep              # Remove from global profile
     nixy install --file neovim.nix      # Install from local nix file
-    nixy sync                           # Install from flake.nix (on new machine)
-    nixy shell                          # Enter dev shell
+    nixy sync                           # Restore packages on new machine
+    nixy init                           # Initialize local flake.nix
+    nixy shell                          # Enter local dev shell
     nixy version                        # Show current version
     nixy self-upgrade                   # Upgrade to latest version
 
