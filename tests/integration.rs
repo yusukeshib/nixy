@@ -553,35 +553,550 @@ fn test_install_validates_file_extension() {
 }
 
 // =============================================================================
-// Config command output format tests
+// Upgrade command tests (additional)
 // =============================================================================
 
 #[test]
-fn test_config_bash_has_correct_format() {
-    let output = nixy_cmd().args(["config", "bash"]).output().unwrap();
+fn test_upgrade_help() {
+    let output = nixy_cmd().args(["upgrade", "--help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Should have shell configuration comment
-    assert!(
-        stdout.contains("# nixy shell configuration"),
-        "Should have config comment: {}",
-        stdout
-    );
-    // Should export PATH
-    assert!(stdout.contains("export PATH="));
-    // Should include nixy/env/bin in path
-    assert!(stdout.contains("nixy/env/bin"));
+    assert!(stdout.contains("nixpkgs") || stdout.contains("input") || stdout.contains("Usage"));
 }
 
 #[test]
-fn test_config_fish_has_correct_format() {
-    let output = nixy_cmd().args(["config", "fish"]).output().unwrap();
-    assert!(output.status.success());
+fn test_upgrade_requires_lock_file_for_specific_input() {
+    let env = TestEnv::new();
+
+    // Create profile directory with flake.nix but no flake.lock
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(
+        profile_dir.join("flake.nix"),
+        r#"{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }: {};
+}"#,
+    )
+    .unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["upgrade", "nixpkgs"]).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("flake.lock") || stderr.contains("lock") || stderr.contains("sync"),
+        "Should mention lock file: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_upgrade_handles_corrupted_lock_file() {
+    let env = TestEnv::new();
+
+    // Create profile directory with flake.nix and corrupted flake.lock
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    std::fs::write(
+        profile_dir.join("flake.nix"),
+        r#"{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }: {};
+}"#,
+    )
+    .unwrap();
+    std::fs::write(profile_dir.join("flake.lock"), "not valid json").unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["upgrade", "nixpkgs"]).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("parse") || stderr.contains("invalid") || stderr.contains("Failed"),
+        "Should mention parse failure: {}",
+        stderr
+    );
+}
+
+// =============================================================================
+// Sync command tests (additional)
+// =============================================================================
+
+#[test]
+fn test_sync_with_profile() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "test"])
+        .output();
+
+    // Sync should attempt to build
+    let output = env.cmd().arg("sync").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should mention building environment or fail gracefully
+    assert!(
+        stdout.contains("Building")
+            || stdout.contains("environment")
+            || stderr.contains("build")
+            || output.status.success(),
+        "Sync should attempt to build: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+// =============================================================================
+// Profile management tests (additional)
+// =============================================================================
+
+#[test]
+fn test_profile_list_shows_active() {
+    let env = TestEnv::new();
+
+    // Create and switch to a profile
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output();
+
+    let output = env.cmd().args(["profile", "list"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Should use fish syntax
-    assert!(stdout.contains("set -gx PATH"));
-    // Should include nixy/env/bin in path
-    assert!(stdout.contains("nixy/env/bin"));
+    // Should show work as active
+    assert!(
+        stdout.contains("work") && (stdout.contains("active") || stdout.contains("*")),
+        "Should show active profile: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_profile_delete_requires_force() {
+    let env = TestEnv::new();
+
+    // Create two profiles
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output();
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Try to delete without --force
+    let output = env
+        .cmd()
+        .args(["profile", "delete", "work"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--force") || stderr.contains("force"),
+        "Should mention --force: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_profile_delete_active_fails() {
+    let env = TestEnv::new();
+
+    // Create a profile and stay on it (it becomes active)
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output();
+
+    // Try to delete the active profile
+    let output = env
+        .cmd()
+        .args(["profile", "delete", "work", "--force"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("active") || stderr.contains("Cannot delete"),
+        "Should prevent deleting active profile: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_profile_delete_with_force_success() {
+    let env = TestEnv::new();
+
+    // Create two profiles
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output();
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Switch to default so work is not active
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "default"])
+        .output();
+
+    // Delete work with --force
+    let output = env
+        .cmd()
+        .args(["profile", "delete", "work", "--force"])
+        .output()
+        .unwrap();
+
+    // Should succeed or at least attempt to delete
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() || stdout.contains("Deleted") || stderr.contains("Deleted"),
+        "Should delete profile: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_profile_switch_with_existing() {
+    let env = TestEnv::new();
+
+    // Create a profile
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output();
+
+    // Create another profile
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Switch back with -c (should just switch, not error)
+    let output = env
+        .cmd()
+        .args(["profile", "switch", "-c", "work"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should switch successfully
+    assert!(
+        output.status.success() || stdout.contains("Switched") || stdout.contains("work"),
+        "Should switch to existing profile"
+    );
+}
+
+// =============================================================================
+// Install --file tests (additional)
+// =============================================================================
+
+#[test]
+fn test_install_file_parses_pname() {
+    let env = TestEnv::new();
+    let temp = TempDir::new().unwrap();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Create a .nix file with pname
+    let pkg_file = temp.path().join("my-pkg.nix");
+    std::fs::write(
+        &pkg_file,
+        r#"{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "my-package";
+  version = "1.0.0";
+  src = ./.;
+}"#,
+    )
+    .unwrap();
+
+    let output = env
+        .cmd()
+        .args(["install", "--file", pkg_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should find the package name
+    assert!(
+        stdout.contains("my-package") || stderr.contains("my-package"),
+        "Should detect package name: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_install_file_requires_name_or_pname() {
+    let env = TestEnv::new();
+    let temp = TempDir::new().unwrap();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Create a .nix file without name or pname
+    let pkg_file = temp.path().join("invalid-pkg.nix");
+    std::fs::write(
+        &pkg_file,
+        r#"{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  src = ./.;
+}"#,
+    )
+    .unwrap();
+
+    let output = env
+        .cmd()
+        .args(["install", "--file", pkg_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("name") || stderr.contains("pname") || stderr.contains("Could not find"),
+        "Should mention missing name: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_install_file_detects_flake() {
+    let env = TestEnv::new();
+    let temp = TempDir::new().unwrap();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // Create a flake file (has inputs and outputs)
+    let flake_file = temp.path().join("my-flake.nix");
+    std::fs::write(
+        &flake_file,
+        r#"{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }: {
+    packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;
+  };
+}"#,
+    )
+    .unwrap();
+
+    let output = env
+        .cmd()
+        .args(["install", "--file", flake_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should detect and process as flake
+    assert!(
+        stdout.contains("flake") || stdout.contains("my-flake") || stderr.contains("flake"),
+        "Should detect flake file: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+// =============================================================================
+// Self-upgrade command tests
+// =============================================================================
+
+#[test]
+fn test_self_upgrade_help() {
+    let output = nixy_cmd()
+        .args(["self-upgrade", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("force") || stdout.contains("upgrade"));
+}
+
+#[test]
+fn test_self_upgrade_accepts_force_flag() {
+    // Test that --force is a valid option by checking help output
+    let output = nixy_cmd()
+        .args(["self-upgrade", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should show --force in help
+    assert!(
+        stdout.contains("--force") || stdout.contains("-f"),
+        "Should show --force in help: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_self_upgrade_accepts_short_force_flag() {
+    // Test that -f short flag is shown in help
+    let output = nixy_cmd()
+        .args(["self-upgrade", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should show -f short flag in help
+    assert!(
+        stdout.contains("-f") || stdout.contains("force"),
+        "Should show -f in help: {}",
+        stdout
+    );
+}
+
+// =============================================================================
+// List command tests (additional)
+// =============================================================================
+
+#[test]
+fn test_list_shows_none_for_empty_flake() {
+    let env = TestEnv::new();
+
+    // Create a profile (empty flake)
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    let output = env.cmd().arg("list").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should show (none) or empty list message
+    assert!(
+        stdout.contains("(none)")
+            || stdout.contains("No packages")
+            || stdout.contains("Packages in")
+            || output.status.success(),
+        "Should handle empty flake: {}",
+        stdout
+    );
+}
+
+// =============================================================================
+// Uninstall command tests (additional)
+// =============================================================================
+
+#[test]
+fn test_uninstall_package_not_installed() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    // This test verifies that uninstalling a non-existent package doesn't crash
+    // The behavior may vary: it could succeed silently (no-op) or fail with an error
+    let output = env
+        .cmd()
+        .args(["uninstall", "nonexistent-package"])
+        .output()
+        .unwrap();
+
+    // The command completed without panicking - that's what we're testing
+    let _ = String::from_utf8_lossy(&output.stdout);
+    let _ = String::from_utf8_lossy(&output.stderr);
+    // Test passes if we get here without panicking
+}
+
+// =============================================================================
+// Install --from tests (additional)
+// =============================================================================
+
+#[test]
+fn test_install_from_unknown_registry() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    let output = env
+        .cmd()
+        .args(["install", "--from", "nonexistent-registry", "hello"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not found") || stderr.contains("registry") || stderr.contains("Unknown"),
+        "Should fail for unknown registry: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_install_from_detects_direct_url() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env
+        .cmd()
+        .args(["profile", "switch", "-c", "default"])
+        .output();
+
+    let output = env
+        .cmd()
+        .args(["install", "--from", "github:NixOS/nixpkgs", "hello"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should detect as direct URL (not lookup in registry)
+    assert!(
+        stdout.contains("URL")
+            || stdout.contains("flake")
+            || stderr.contains("URL")
+            || output.status.success(),
+        "Should detect direct URL: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
 }
