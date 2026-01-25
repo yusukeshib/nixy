@@ -14,7 +14,9 @@ pub fn run(config: &Config) -> Result<()> {
 
     info(&format!("Packages in {}:", flake_path.display()));
 
-    let flake_dir = flake_path.parent().unwrap();
+    let flake_dir = flake_path
+        .parent()
+        .ok_or_else(|| Error::NoFlakeFound(flake_path.display().to_string()))?;
     let packages = Nix::eval_packages(flake_dir)?;
 
     if packages.is_empty() {

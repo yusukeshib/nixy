@@ -1,10 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::{Error, Result};
+
+/// Regex for validating profile names (alphanumeric, dashes, underscores only)
+static PROFILE_NAME_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").expect("Invalid regex pattern"));
 
 /// Profile management
 pub struct Profile {
@@ -64,8 +69,7 @@ pub fn set_active_profile(config: &Config, name: &str) -> Result<()> {
 
 /// Validate profile name (alphanumeric, dashes, underscores only)
 pub fn validate_profile_name(name: &str) -> Result<()> {
-    let re = Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap();
-    if !re.is_match(name) {
+    if !PROFILE_NAME_REGEX.is_match(name) {
         return Err(Error::InvalidProfileName(name.to_string()));
     }
     Ok(())
@@ -118,17 +122,27 @@ pub fn get_flake_dir(config: &Config) -> Result<PathBuf> {
         let resolved = if target.is_absolute() {
             target
         } else {
-            flake_path.parent().unwrap().join(&target)
+            match flake_path.parent() {
+                Some(parent) => parent.join(&target),
+                None => target,
+            }
         };
         // Normalize the path
-        let parent = resolved.parent().unwrap();
+        let parent = match resolved.parent() {
+            Some(p) => p.to_path_buf(),
+            None => resolved.clone(),
+        };
         if parent.exists() {
-            Ok(fs::canonicalize(parent)?)
+            Ok(fs::canonicalize(&parent)?)
         } else {
-            Ok(parent.to_path_buf())
+            Ok(parent)
         }
     } else {
-        Ok(flake_path.parent().unwrap().to_path_buf())
+        let dir = flake_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        Ok(dir)
     }
 }
 

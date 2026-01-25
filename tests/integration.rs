@@ -149,7 +149,7 @@ fn test_profile_list_empty() {
 
 #[test]
 fn test_profile_switch_create() {
-    let temp = setup_test_env();
+    let _temp = setup_test_env();
 
     // Create a new profile
     let output = nixy_cmd()
@@ -157,18 +157,26 @@ fn test_profile_switch_create() {
         .output()
         .unwrap();
 
-    let profile_dir = temp.path().join("config/profiles/test-profile");
+    // The command should either succeed (profile created + nix build worked)
+    // or fail during nix build (profile created but build failed).
+    // In CI with nix available, the command should attempt to create the profile.
+    // We verify the command ran without crashing and produced expected output.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // The profile directory should be created even if nix build fails
-    // But the test environment might not pass NIXY_CONFIG_DIR correctly
-    // to the subprocess. Check both success cases.
-    if output.status.success() {
-        // If command succeeded, the profile should exist
-        // (but might not due to env var not being passed to subprocess)
-        let _ = profile_dir.exists();
-    }
-    // If command failed, it's likely because nix isn't available
-    // which is acceptable in a test environment
+    // The command should mention creating or switching to the profile
+    let mentioned_profile = stdout.contains("test-profile")
+        || stderr.contains("test-profile")
+        || stdout.contains("Creating profile")
+        || stdout.contains("Switching to profile");
+
+    // Either the command succeeded or it failed for a known reason (nix build failure)
+    assert!(
+        output.status.success() || mentioned_profile || stderr.contains("build"),
+        "Unexpected failure: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
 }
 
 #[test]
