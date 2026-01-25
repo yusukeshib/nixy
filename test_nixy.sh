@@ -263,7 +263,7 @@ test_list_shows_flake_packages() {
     "$NIXY" init >/dev/null 2>&1
 
     # Add some packages to the flake
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     local output
     output=$("$NIXY" list --local 2>&1)
@@ -402,7 +402,7 @@ test_install_preserves_existing_packages() {
     "$NIXY" init >/dev/null 2>&1
 
     # Manually add a package to the flake (use awk for portability)
-    awk '/# \[nixy:packages\]/{print; print "          existing-pkg = pkgs.existing-pkg;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          existing-pkg = pkgs.existing-pkg;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Verify existing-pkg is there
     assert_file_contains "./flake.nix" "existing-pkg"
@@ -565,8 +565,8 @@ test_sync_preserves_local_packages() {
     "$NIXY" init >/dev/null 2>&1
 
     # Add both a regular package and a local package to the flake
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
-    awk '/# \[nixy:local-packages\]/{print; print "          my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix {};"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:local-packages\]/{print; print "          my-local-pkg = pkgs.callPackage ./packages/my-local-pkg.nix {};"; next}1' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Test get_packages_from_flake returns both regular and local packages
     local packages
@@ -1515,14 +1515,14 @@ test_add_preserves_user_customizations() {
     awk '
         /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Add a custom nixConfig section after inputs (user customization)
     awk '
         /^  inputs = \{/ { in_inputs=1 }
         in_inputs && /^  \};/ { print; print ""; print "  nixConfig = {"; print "    extra-substituters = [ \"https://my-cache.cachix.org\" ];"; print "  };"; in_inputs=0; next }
         { print }
-    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Verify customizations exist before adding package
     assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
@@ -1570,13 +1570,13 @@ test_remove_preserves_user_customizations() {
     awk '
         /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Add a custom overlay section (user customization)
     awk '
         /forAllSystems = / { print; print "      myOverlay = final: prev: { custom-pkg = prev.hello; };"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     # Verify customizations exist before removing package
     assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
@@ -1614,7 +1614,7 @@ test_add_multiple_packages_preserves_all() {
     awk '
         /nixpkgs\.url/ { print; print "    custom.url = \"github:custom/repo\";"; next }
         { print }
-    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
 
     source "$NIXY"
 
@@ -1738,6 +1738,236 @@ test_global_add_no_devshell_entry() {
     fi
 
     return 0
+}
+
+# =============================================================================
+# Test: Custom markers
+# =============================================================================
+
+test_init_has_custom_markers() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Verify all custom marker sections exist
+    assert_file_contains "./flake.nix" "# \[nixy:custom-inputs\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:custom-inputs\]" && \
+    assert_file_contains "./flake.nix" "# \[nixy:custom-packages\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:custom-packages\]" && \
+    assert_file_contains "./flake.nix" "# \[nixy:custom-paths\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:custom-paths\]"
+}
+
+test_custom_inputs_preserved_during_regeneration() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add custom input between the markers
+    awk '
+        /# \[nixy:custom-inputs\]/ { print; print "    my-overlay.url = \"github:user/my-overlay\";"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Verify custom input exists
+    assert_file_contains "./flake.nix" "my-overlay.url" || return 1
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the package with --force (regenerates flake)
+    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+
+    # Verify custom input is still preserved
+    if ! grep -q "my-overlay.url" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom input should be preserved after regeneration"
+        return 1
+    fi
+
+    return 0
+}
+
+test_custom_packages_preserved_during_regeneration() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add custom package between the markers
+    awk '
+        /# \[nixy:custom-packages\]/ { print; print "          my-custom-pkg = pkgs.hello.overrideAttrs { pname = \"my-custom\"; };"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Verify custom package exists
+    assert_file_contains "./flake.nix" "my-custom-pkg" || return 1
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the package with --force (regenerates flake)
+    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+
+    # Verify custom package is still preserved
+    if ! grep -q "my-custom-pkg" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom package should be preserved after regeneration"
+        return 1
+    fi
+
+    return 0
+}
+
+test_custom_paths_preserved_during_regeneration() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add custom path between the markers
+    awk '
+        /# \[nixy:custom-paths\]/ { print; print "              my-custom-pkg"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Verify custom path exists
+    local paths_section
+    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' flake.nix)
+    if ! echo "$paths_section" | grep -q "my-custom-pkg"; then
+        echo "  ASSERTION FAILED: Custom path should exist before regeneration"
+        return 1
+    fi
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the package with --force (regenerates flake)
+    "$NIXY" install --file test-pkg.nix --local --force 2>&1 || true
+
+    # Verify custom path is still preserved
+    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' flake.nix)
+    if ! echo "$paths_section" | grep -q "my-custom-pkg"; then
+        echo "  ASSERTION FAILED: Custom path should be preserved after regeneration"
+        return 1
+    fi
+
+    return 0
+}
+
+test_modification_warning_shown() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add modification OUTSIDE markers (this will trigger warning)
+    awk '
+        /nixpkgs\.url/ { print; print "    # OUTSIDE MARKER COMMENT"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install without --force should warn and fail
+    local output exit_code
+    output=$("$NIXY" install --file test-pkg.nix --local 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should fail
+    assert_exit_code 1 "$exit_code" && \
+    # Should mention modifications
+    assert_output_contains "$output" "modifications outside nixy markers" && \
+    # Should suggest --force
+    assert_output_contains "$output" "--force"
+}
+
+test_force_flag_bypasses_warning() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add modification OUTSIDE markers
+    awk '
+        /nixpkgs\.url/ { print; print "    # OUTSIDE MARKER COMMENT"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && command mv flake.nix.tmp flake.nix
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install with --force should proceed (may fail at nix but not at warning)
+    local output
+    output=$("$NIXY" install --file test-pkg.nix --local --force 2>&1) || true
+
+    # Should mention proceeding with --force
+    assert_output_contains "$output" "Proceeding with --force"
+}
+
+test_no_warning_when_no_modifications() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Don't add any modifications outside markers
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install without --force should not show warning
+    local output
+    output=$("$NIXY" install --file test-pkg.nix --local 2>&1) || true
+
+    # Should NOT mention modifications
+    if echo "$output" | grep -q "modifications outside nixy markers"; then
+        echo "  ASSERTION FAILED: Should not warn when no modifications outside markers"
+        return 1
+    fi
+
+    return 0
+}
+
+test_help_shows_force_flag() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "--force" && \
+    assert_output_contains "$output" "Force regeneration"
 }
 
 # =============================================================================
@@ -1868,6 +2098,16 @@ main() {
     run_test "remove middle package preserves others" test_remove_middle_package_preserves_others || true
     run_test "add skips duplicate package" test_add_skips_duplicate_package || true
     run_test "global add no devShell entry" test_global_add_no_devshell_entry || true
+
+    # Custom marker tests
+    run_test "init has custom markers" test_init_has_custom_markers || true
+    run_test "custom inputs preserved during regeneration" test_custom_inputs_preserved_during_regeneration || true
+    run_test "custom packages preserved during regeneration" test_custom_packages_preserved_during_regeneration || true
+    run_test "custom paths preserved during regeneration" test_custom_paths_preserved_during_regeneration || true
+    run_test "modification warning shown" test_modification_warning_shown || true
+    run_test "force flag bypasses warning" test_force_flag_bypasses_warning || true
+    run_test "no warning when no modifications" test_no_warning_when_no_modifications || true
+    run_test "help shows force flag" test_help_shows_force_flag || true
 
     echo ""
     echo "======================================"

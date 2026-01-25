@@ -192,7 +192,15 @@ Use `nixy search <keyword>`. Package names sometimes differ from what you expect
 In the Nix store (`/nix/store/`). nixy builds a combined environment and creates a symlink at `~/.local/state/nixy/env` pointing to it. The `nixy config` command sets up your PATH to include this location.
 
 **Can I edit the flake.nix manually?**
-Yes, but with care. nixy regenerates the entire flake.nix when you install/uninstall packages, preserving only what's inside the `# [nixy:...]` markers. For heavy customization, consider managing flake.nix manually and using `nix` commands directly.
+Yes! nixy provides custom markers where you can add your own inputs, packages, and paths that will be preserved during regeneration:
+
+```nix
+# [nixy:custom-inputs]
+my-overlay.url = "github:user/my-overlay";
+# [/nixy:custom-inputs]
+```
+
+Any content outside these markers will be overwritten when nixy regenerates the flake. For heavy customization, see "Customizing flake.nix" in the Appendix.
 
 **How do I update nixy?**
 Run `nixy self-upgrade`. It checks for updates, downloads the latest version, and replaces itself. Use `--force` to reinstall even if already up to date.
@@ -206,6 +214,65 @@ Just delete the `nixy` script. Your flake.nix files remain and work with standar
 ---
 
 ## Appendix
+
+### Customizing flake.nix
+
+nixy provides custom markers where you can add your own content that will be preserved when nixy regenerates the flake:
+
+**Custom inputs** - Add your own flake inputs:
+```nix
+# [nixy:custom-inputs]
+my-overlay.url = "github:user/my-overlay";
+home-manager.url = "github:nix-community/home-manager";
+# [/nixy:custom-inputs]
+```
+
+**Custom packages** - Add custom package definitions:
+```nix
+# [nixy:custom-packages]
+my-tool = pkgs.writeShellScriptBin "my-tool" ''echo "Hello"'';
+patched-app = pkgs.app.overrideAttrs { ... };
+# [/nixy:custom-packages]
+```
+
+**Custom paths** - Add extra paths to the buildEnv:
+```nix
+# [nixy:custom-paths]
+my-tool
+patched-app
+# [/nixy:custom-paths]
+```
+
+If you edit content **outside** these markers, nixy will warn you before overwriting:
+```
+Warning: flake.nix has modifications outside nixy markers.
+Use --force to proceed (custom changes will be lost).
+```
+
+### For Existing Nix Users
+
+If you already manage your own `flake.nix` and want to use nixy's package list, you can import it:
+
+```nix
+{
+  inputs.nixy.url = "path:~/.config/nixy";
+
+  outputs = { self, nixpkgs, nixy }: {
+    # nixy.packages.<system>.default is a buildEnv with all nixy packages
+    # You can use it as a dependency or merge it with your own environment
+  };
+}
+```
+
+This way, nixy manages your package list while you maintain full control of your flake.
+
+### Coexistence with nix profile
+
+nixy and `nix profile` use separate paths and don't conflict:
+- nixy: `~/.local/state/nixy/env/bin`
+- nix profile: `~/.nix-profile/bin`
+
+If you have both in your PATH, the one listed first takes precedence for packages installed in both. You can use both tools for different purposes.
 
 ### Custom Package Definitions
 

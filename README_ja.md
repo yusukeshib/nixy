@@ -174,7 +174,15 @@ nixy shell             # 全プロジェクトパッケージ入りの開発シ�
 Nix ストア（`/nix/store/`）にインストールされます。nixy は統合された環境をビルドし、`~/.local/state/nixy/env` にシンボリックリンクを作成します。`nixy config` コマンドでこの場所を PATH に追加する設定を行います。
 
 **flake.nix を手動で編集できる？**
-はい、ただし注意が必要です。nixy はパッケージのインストール/アンインストール時に flake.nix 全体を再生成し、`# [nixy:...]` マーカー内の内容のみ保持します。高度なカスタマイズが必要な場合は、flake.nix を手動で管理し `nix` コマンドを直接使用することを検討してください。
+はい！nixy はカスタムマーカーを提供しており、再生成時に保持される独自の inputs、packages、paths を追加できます：
+
+```nix
+# [nixy:custom-inputs]
+my-overlay.url = "github:user/my-overlay";
+# [/nixy:custom-inputs]
+```
+
+これらのマーカー外のコンテンツは、nixy が flake を再生成する際に上書きされます。詳細なカスタマイズについては、付録の「flake.nix のカスタマイズ」を参照してください。
 
 **nixy をアップデートするには？**
 `nixy self-upgrade` を実行します。更新を確認し、最新版をダウンロードして自動的に置き換えます。すでに最新版でも再インストールしたい場合は `--force` オプションを使用してください。
@@ -188,6 +196,65 @@ Nix ストア（`/nix/store/`）にインストールされます。nixy は統�
 ---
 
 ## 付録
+
+### flake.nix のカスタマイズ
+
+nixy はカスタムマーカーを提供しており、flake 再生成時に保持される独自のコンテンツを追加できます：
+
+**カスタム inputs** - 独自の flake inputs を追加：
+```nix
+# [nixy:custom-inputs]
+my-overlay.url = "github:user/my-overlay";
+home-manager.url = "github:nix-community/home-manager";
+# [/nixy:custom-inputs]
+```
+
+**カスタム packages** - カスタムパッケージ定義を追加：
+```nix
+# [nixy:custom-packages]
+my-tool = pkgs.writeShellScriptBin "my-tool" ''echo "Hello"'';
+patched-app = pkgs.app.overrideAttrs { ... };
+# [/nixy:custom-packages]
+```
+
+**カスタム paths** - buildEnv に追加のパスを指定：
+```nix
+# [nixy:custom-paths]
+my-tool
+patched-app
+# [/nixy:custom-paths]
+```
+
+これらのマーカー**外**のコンテンツを編集すると、上書き前に nixy が警告します：
+```
+Warning: flake.nix has modifications outside nixy markers.
+Use --force to proceed (custom changes will be lost).
+```
+
+### 既存の Nix ユーザー向け
+
+すでに独自の `flake.nix` を管理していて、nixy のパッケージリストを使いたい場合は、インポートできます：
+
+```nix
+{
+  inputs.nixy.url = "path:~/.config/nixy";
+
+  outputs = { self, nixpkgs, nixy }: {
+    # nixy.packages.<system>.default は全 nixy パッケージを含む buildEnv
+    # 依存関係として使ったり、独自の環境とマージできます
+  };
+}
+```
+
+こうすることで、nixy がパッケージリストを管理しつつ、flake の完全なコントロールを維持できます。
+
+### nix profile との共存
+
+nixy と `nix profile` は別のパスを使用するため、競合しません：
+- nixy: `~/.local/state/nixy/env/bin`
+- nix profile: `~/.nix-profile/bin`
+
+両方が PATH にある場合、先にリストされた方が、両方にインストールされたパッケージで優先されます。異なる目的で両方のツールを使用できます。
 
 ### カスタムパッケージ定義
 

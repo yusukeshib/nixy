@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.24"
+NIXY_VERSION="0.1.25"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -114,6 +114,58 @@ insert_after_marker() {
 $escaped_line" "$file" && rm -f "$file.bak"
 }
 
+# Extract content between markers
+# Usage: extract_marker_content <file> <marker_name>
+# Returns the lines between the markers (excluding the markers themselves)
+# Example: extract_marker_content flake.nix "nixy:custom-inputs"
+extract_marker_content() {
+    local file="$1"
+    local marker="$2"
+
+    if [[ ! -f "$file" ]]; then
+        return
+    fi
+
+    sed -n "/# \[$marker\]/,/# \[\/$marker\]/p" "$file" 2>/dev/null | \
+        grep -v "# \[$marker\]" | \
+        grep -v "# \[/$marker\]" || true
+}
+
+# Check if flake has custom modifications outside nixy markers
+# Returns 0 if modifications exist, 1 otherwise
+has_custom_modifications() {
+    local flake="$1"
+
+    [[ ! -f "$flake" ]] && return 1
+
+    # Generate a clean flake with the same packages
+    local -a packages=()
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && packages+=("$p")
+    done < <(get_packages_from_flake "$flake")
+
+    local flake_dir
+    flake_dir=$(dirname "$flake")
+
+    # Generate what a clean flake would look like, preserving custom marker content
+    local clean_flake
+    if grep -q "devShells" "$flake" 2>/dev/null; then
+        clean_flake=$(generate_flake --flake-dir "$flake_dir" --preserve-from "$flake" "${packages[@]+"${packages[@]}"}")
+    else
+        clean_flake=$(generate_flake --flake-dir "$flake_dir" --global --preserve-from "$flake" "${packages[@]+"${packages[@]}"}")
+    fi
+
+    # Compare the actual flake with what we would generate
+    local actual_flake
+    actual_flake=$(cat "$flake")
+
+    if [[ "$clean_flake" != "$actual_flake" ]]; then
+        return 0  # Has modifications
+    fi
+
+    return 1  # No modifications
+}
+
 # Remove a line matching a pattern from between two markers
 # Usage: remove_line_from_section <file> <start_marker> <end_marker> <pattern>
 remove_line_from_section() {
@@ -199,18 +251,20 @@ cmd_install() {
     local pkg=""
     local file=""
     local use_local=false
+    local force=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --local|-l) use_local=true; shift ;;
             --file|-f) file="$2"; shift 2 ;;
+            --force) force=true; shift ;;
             *) pkg="$1"; shift ;;
         esac
     done
 
     if [[ -n "$file" ]]; then
-        cmd_install_from_file "$file" "$use_local"
+        cmd_install_from_file "$file" "$use_local" "$force"
         return
     fi
 
@@ -261,13 +315,14 @@ parse_local_package() {
 cmd_install_from_file() {
     local file="$1"
     local use_local="${2:-false}"
+    local force="${3:-false}"
 
     # Validate file exists
     [[ ! -f "$file" ]] && die "File not found: $file"
 
     # Check if this is a flake file (has inputs and outputs)
     if is_flake_file "$file"; then
-        cmd_install_from_flake_file "$file" "$use_local"
+        cmd_install_from_flake_file "$file" "$use_local" "$force"
         return
     fi
 
@@ -289,6 +344,16 @@ cmd_install_from_file() {
         die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
     fi
 
+    # Check for custom modifications outside markers BEFORE making any changes
+    if [[ -f "$flake" ]] && has_custom_modifications "$flake"; then
+        if [[ "$force" != "true" ]]; then
+            warn "flake.nix has modifications outside nixy markers."
+            warn "Use --force to proceed (custom changes will be lost)."
+            die "Aborted. Use 'nixy install --file $file --force' to override."
+        fi
+        warn "Proceeding with --force: custom modifications outside markers will be lost."
+    fi
+
     # Create packages directory inside flake directory
     local pkg_dir
     pkg_dir=$(get_packages_dir "$flake_dir")
@@ -304,17 +369,21 @@ cmd_install_from_file() {
         git -C "$flake_dir" add "packages/$pkg_name.nix" 2>/dev/null || true
     fi
 
-    # Regenerate flake.nix preserving existing packages
+    # Regenerate flake.nix preserving existing packages and custom content
+    # Write to temp file first to avoid truncating source before reading
     local -a packages=()
     while IFS= read -r p; do
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
+    local tmp_flake
+    tmp_flake=$(mktemp)
     if [[ "$use_local" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+        generate_flake --flake-dir "$flake_dir" --preserve-from "$flake" "${packages[@]+"${packages[@]}"}" > "$tmp_flake"
     else
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+        generate_flake --flake-dir "$flake_dir" --global --preserve-from "$flake" "${packages[@]+"${packages[@]}"}" > "$tmp_flake"
     fi
+    command mv "$tmp_flake" "$flake"
 
     # Sync for global installs (local packages are used via nixy shell)
     if [[ "$use_local" == "true" ]]; then
@@ -329,6 +398,7 @@ cmd_install_from_file() {
 cmd_install_from_flake_file() {
     local file="$1"
     local use_local="${2:-false}"
+    local force="${3:-false}"
 
     # Extract package name from filename (remove .nix extension and path)
     local pkg_name
@@ -349,6 +419,16 @@ cmd_install_from_flake_file() {
         die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
     fi
 
+    # Check for custom modifications outside markers BEFORE making any changes
+    if [[ -f "$flake" ]] && has_custom_modifications "$flake"; then
+        if [[ "$force" != "true" ]]; then
+            warn "flake.nix has modifications outside nixy markers."
+            warn "Use --force to proceed (custom changes will be lost)."
+            die "Aborted. Use 'nixy install --file $file --force' to override."
+        fi
+        warn "Proceeding with --force: custom modifications outside markers will be lost."
+    fi
+
     # Create packages/pkg_name directory for the flake (nix requires flakes to be in a directory)
     local pkg_dir
     pkg_dir=$(get_packages_dir "$flake_dir")
@@ -365,17 +445,21 @@ cmd_install_from_flake_file() {
         git -C "$flake_dir" add "packages/$pkg_name/flake.nix" 2>/dev/null || true
     fi
 
-    # Regenerate flake.nix preserving existing packages
+    # Regenerate flake.nix preserving existing packages and custom content
+    # Write to temp file first to avoid truncating source before reading
     local -a packages=()
     while IFS= read -r p; do
         [[ -n "$p" ]] && packages+=("$p")
     done < <(get_packages_from_flake "$flake")
 
+    local tmp_flake
+    tmp_flake=$(mktemp)
     if [[ "$use_local" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" "${packages[@]+"${packages[@]}"}" > "$flake"
+        generate_flake --flake-dir "$flake_dir" --preserve-from "$flake" "${packages[@]+"${packages[@]}"}" > "$tmp_flake"
     else
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+        generate_flake --flake-dir "$flake_dir" --global --preserve-from "$flake" "${packages[@]+"${packages[@]}"}" > "$tmp_flake"
     fi
+    command mv "$tmp_flake" "$flake"
 
     # Sync for global installs (local packages are used via nixy shell)
     if [[ "$use_local" == "true" ]]; then
@@ -590,10 +674,11 @@ collect_local_packages() {
 }
 
 # Generate flake.nix content
-# Usage: generate_flake [--flake-dir <dir>] [--global] [package1] [package2] ...
+# Usage: generate_flake [--flake-dir <dir>] [--global] [--preserve-from <flake>] [package1] [package2] ...
 generate_flake() {
     local flake_dir=""
     local is_global=false
+    local preserve_from=""
     local -a packages=()
 
     # Parse arguments
@@ -607,12 +692,31 @@ generate_flake() {
                 is_global=true
                 shift
                 ;;
+            --preserve-from)
+                preserve_from="$2"
+                shift 2
+                ;;
             *)
                 packages+=("$1")
                 shift
                 ;;
         esac
     done
+
+    # Extract custom content from existing flake if specified
+    # Add trailing newline to non-empty content for proper formatting in heredoc
+    local custom_inputs=""
+    local custom_packages=""
+    local custom_paths=""
+    if [[ -n "$preserve_from" && -f "$preserve_from" ]]; then
+        custom_inputs=$(extract_marker_content "$preserve_from" "nixy:custom-inputs")
+        custom_packages=$(extract_marker_content "$preserve_from" "nixy:custom-packages")
+        custom_paths=$(extract_marker_content "$preserve_from" "nixy:custom-paths")
+        # Ensure trailing newline for proper heredoc formatting
+        [[ -n "$custom_inputs" ]] && custom_inputs="$custom_inputs"$'\n'
+        [[ -n "$custom_packages" ]] && custom_packages="$custom_packages"$'\n'
+        [[ -n "$custom_paths" ]] && custom_paths="$custom_paths"$'\n'
+    fi
 
     local pkg_entries=""
     local shell_entries=""
@@ -781,6 +885,8 @@ ${shell_entries}              # [/nixy:devShell]
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     # [nixy:local-inputs]
 ${local_inputs}    # [/nixy:local-inputs]
+    # [nixy:custom-inputs]
+${custom_inputs}    # [/nixy:custom-inputs]
   };
 
   outputs = { $output_params }@inputs:
@@ -797,6 +903,8 @@ ${local_inputs}    # [/nixy:local-inputs]
 ${pkg_entries}          # [/nixy:packages]
           # [nixy:local-packages]
 ${local_packages}          # [/nixy:local-packages]
+          # [nixy:custom-packages]
+${custom_packages}          # [/nixy:custom-packages]
 
           # Unified environment for atomic install (nixy sync)
           default = pkgs.buildEnv {
@@ -804,6 +912,8 @@ ${local_packages}          # [/nixy:local-packages]
             paths = [
               # [nixy:env-paths]
 ${buildenv_paths}              # [/nixy:env-paths]
+              # [nixy:custom-paths]
+${custom_paths}              # [/nixy:custom-paths]
             ];
             extraOutputsToInstall = [ "man" "doc" "info" ];
           };
@@ -848,7 +958,11 @@ cmd_sync() {
         while IFS= read -r p; do
             [[ -n "$p" ]] && packages+=("$p")
         done < <(get_packages_from_flake "$flake")
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+        # Write to temp file first to avoid truncating source before reading
+        local tmp_flake
+        tmp_flake=$(mktemp)
+        generate_flake --flake-dir "$flake_dir" --global --preserve-from "$flake" "${packages[@]+"${packages[@]}"}" > "$tmp_flake"
+        command mv "$tmp_flake" "$flake"
     fi
 
     # Build environment and create symlink
@@ -1155,6 +1269,8 @@ MAINTENANCE COMMANDS:
 FLAGS:
     --local, -l             Use local flake.nix (in current dir or parents)
                             instead of global flake
+    --force                 Force regeneration even if flake.nix has
+                            custom modifications outside markers
 
 CONFIG FILES:
     Global: ~/.config/nixy/flake.nix (default for install/uninstall/sync)
