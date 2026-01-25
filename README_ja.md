@@ -115,24 +115,51 @@ nixy upgrade            # 全パッケージをアップグレード
 
 ## コマンド
 
+### パッケージ管理
+
+| コマンド | エイリアス | 説明 |
+|---------|-----------|------|
+| `nixy install <pkg>` | `add` | nixpkgs からパッケージをインストール |
+| `nixy install --from <flake> <pkg>` | | flake からインストール（レジストリ名または URL） |
+| `nixy install --file <path>` | | カスタム nix ファイルからインストール |
+| `nixy uninstall <pkg>` | `remove` | パッケージをアンインストール |
+| `nixy list` | `ls` | インストール済みパッケージを一覧表示 |
+| `nixy search <query>` | | パッケージを検索 |
+| `nixy upgrade [input...]` | | 全 input または指定した input をアップグレード |
+| `nixy sync` | | flake.nix から環境をビルド（新しいマシン用） |
+| `nixy gc` | | 古いパッケージを削除 |
+
+### プロファイル管理
+
+| コマンド | エイリアス | 説明 |
+|---------|-----------|------|
+| `nixy profile` | | 現在のプロファイルを表示 |
+| `nixy profile switch <name>` | `use` | プロファイルを切り替え |
+| `nixy profile switch -c <name>` | | 新しいプロファイルを作成して切り替え |
+| `nixy profile list` | `ls` | 全プロファイルを一覧表示 |
+| `nixy profile delete <name>` | `rm` | プロファイルを削除（`--force` 必須） |
+
+### ユーティリティ
+
 | コマンド | 説明 |
 |---------|------|
-| `nixy install <pkg>` | nixpkgs からパッケージをインストール |
-| `nixy install --from <flake> <pkg>` | flake からインストール（レジストリ名または URL） |
-| `nixy uninstall <pkg>` | パッケージをアンインストール |
-| `nixy list` | インストール済みパッケージを一覧表示 |
-| `nixy search <query>` | パッケージを検索 |
-| `nixy upgrade [input...]` | 全 input または指定した input をアップグレード |
-| `nixy sync` | flake.nix から環境をビルド（新しいマシン用） |
-| `nixy gc` | 古いパッケージを削除 |
 | `nixy config <shell>` | シェル設定を出力（PATH 設定用） |
 | `nixy version` | nixy のバージョンを表示 |
 | `nixy self-upgrade` | nixy を最新版にアップグレード |
-| `nixy profile` | 現在のプロファイルを表示 |
-| `nixy profile switch <name>` | プロファイルを切り替え |
-| `nixy profile switch -c <name>` | 新しいプロファイルを作成して切り替え |
-| `nixy profile list` | 全プロファイルを一覧表示 |
-| `nixy profile delete <name>` | プロファイルを削除（`--force` 必須） |
+| `nixy self-upgrade --force` | 最新版でも強制的に再インストール |
+
+### install オプション
+
+`install` コマンドはいくつかのオプションをサポートしています：
+
+```bash
+nixy install ripgrep              # nixpkgs からインストール（デフォルト）
+nixy install --from <flake> <pkg> # 外部 flake からインストール
+nixy install --file my-pkg.nix    # カスタム nix ファイルからインストール
+nixy install --force <pkg>        # flake.nix を強制的に再生成
+```
+
+`--force` は、nixy マーカー外を手動で編集した場合に使用します（カスタム変更は失われます）。
 
 ## 複数プロファイル
 
@@ -206,7 +233,7 @@ my-overlay.url = "github:user/my-overlay";
 これらのマーカー外のコンテンツは、nixy が flake を再生成する際に上書きされます。詳細なカスタマイズについては、付録の「flake.nix のカスタマイズ」を参照してください。
 
 **nixy をアップデートするには？**
-`cargo install nixy` で crates.io から最新版を取得するか、インストールスクリプトを再実行してください。
+`nixy self-upgrade` で自動的に最新版にアップデートできます。または `cargo install nixy` やインストールスクリプトの再実行でも可能です。
 
 **nixy をアンインストールするには？**
 `nixy` スクリプトを削除するだけ。flake.nix ファイルはそのまま残り、標準の `nix` コマンドで使えます。
