@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.12"
+NIXY_VERSION="0.1.14"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -657,8 +657,9 @@ generate_flake() {
         for name in "${LOCAL_FLAKE_NAMES[@]}"; do
             local_inputs+="    $name.url = \"path:./packages/$name\";"$'\n'
             local_input_params+="$name, "
-            local_packages+="          $name = $name.packages.\${system}.default;"$'\n'
-            shell_entries+="              $name.packages.\${system}.default"$'\n'
+            # Use inputs.$name to avoid shadowing in rec block
+            local_packages+="          $name = inputs.$name.packages.\${system}.default;"$'\n'
+            shell_entries+="              inputs.$name.packages.\${system}.default"$'\n'
         done
     fi
 
@@ -690,24 +691,24 @@ generate_flake() {
     fi
 
     # Build buildEnv paths array (for atomic install)
+    # Use package names to reference attributes in the rec set
     local buildenv_paths=""
     for pkg in "${filtered_packages[@]+"${filtered_packages[@]}"}"; do
         [[ -z "$pkg" ]] && continue
-        buildenv_paths+="              pkgs.$pkg"$'\n'
+        buildenv_paths+="              $pkg"$'\n'
     done
 
-    # Add local package expressions to buildenv paths
+    # Add local package names to buildenv paths (reference by name, not expression)
     if [[ ${#LOCAL_PKG_NAMES[@]} -gt 0 ]]; then
-        for i in "${!LOCAL_PKG_NAMES[@]}"; do
-            local pkg_expr="${LOCAL_PKG_EXPRS[$i]}"
-            [[ -n "$pkg_expr" ]] && buildenv_paths+="              $pkg_expr"$'\n'
+        for name in "${LOCAL_PKG_NAMES[@]}"; do
+            buildenv_paths+="              $name"$'\n'
         done
     fi
 
-    # Add flake-type packages to buildenv paths
+    # Add flake-type package names to buildenv paths
     if [[ ${#LOCAL_FLAKE_NAMES[@]} -gt 0 ]]; then
         for name in "${LOCAL_FLAKE_NAMES[@]}"; do
-            buildenv_paths+="              $name.packages.\${system}.default"$'\n'
+            buildenv_paths+="              $name"$'\n'
         done
     fi
 
@@ -772,7 +773,7 @@ ${shell_entries}              # [/nixy:devShell]
 ${local_inputs}    # [/nixy:local-inputs]
   };
 
-  outputs = { $output_params }:
+  outputs = { $output_params }@inputs:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
@@ -781,7 +782,7 @@ ${local_inputs}    # [/nixy:local-inputs]
       # Profile packages (nixy install)
       packages = forAllSystems (system:
         $pkgs_binding
-        in {
+        in rec {
           # [nixy:packages]
 ${pkg_entries}          # [/nixy:packages]
           # [nixy:local-packages]

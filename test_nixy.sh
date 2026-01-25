@@ -988,7 +988,7 @@ EOF
     assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin.url = "path:./packages/gke-plugin"' && \
 
     # Verify flake.nix has the package expression
-    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin = gke-plugin.packages'
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin = inputs.gke-plugin.packages'
 }
 
 test_install_flake_file_detected_correctly() {
@@ -1290,16 +1290,18 @@ test_buildenv_contains_all_packages() {
     local flake_content
     flake_content=$(generate_flake --flake-dir "$TEST_DIR" ripgrep fzf bat)
 
-    # Check that buildEnv paths contains all packages
-    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.ripgrep"; then
+    # Check that buildEnv paths contains all packages (referenced by name via rec)
+    local paths_section
+    paths_section=$(echo "$flake_content" | sed -n '/# \[nixy:env-paths\]/,/# \[\/nixy:env-paths\]/p')
+    if ! echo "$paths_section" | grep -qw "ripgrep"; then
         echo "  ASSERTION FAILED: buildEnv paths should contain ripgrep"
         return 1
     fi
-    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.fzf"; then
+    if ! echo "$paths_section" | grep -qw "fzf"; then
         echo "  ASSERTION FAILED: buildEnv paths should contain fzf"
         return 1
     fi
-    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.bat"; then
+    if ! echo "$paths_section" | grep -qw "bat"; then
         echo "  ASSERTION FAILED: buildEnv paths should contain bat"
         return 1
     fi
