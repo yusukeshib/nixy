@@ -107,16 +107,17 @@ get_flake() {
         die "No flake.nix found in current directory or parents. Use 'nixy init' to create one."
     fi
 
-    # Default: use active profile's flake (with fallback to legacy location)
-    local profile_dir
+    # Default: use active profile's flake (with fallback to legacy location for default profile only)
+    local profile_dir active_profile
+    active_profile=$(get_active_profile)
     profile_dir=$(get_profile_dir)
     if [[ -f "$profile_dir/flake.nix" ]]; then
         echo "$profile_dir/flake.nix"
-    elif [[ -f "$GLOBAL_FLAKE" ]]; then
-        # Legacy fallback: use old global flake location
+    elif [[ "$active_profile" == "$NIXY_DEFAULT_PROFILE" ]] && [[ -f "$GLOBAL_FLAKE" ]]; then
+        # Legacy fallback: only for default profile
         echo "$GLOBAL_FLAKE"
     else
-        # New installation: use profile directory
+        # New installation or non-default profile: use profile directory
         echo "$profile_dir/flake.nix"
     fi
 }
@@ -1318,7 +1319,7 @@ cmd_profile() {
             info "Active profile: $active"
             ;;
         *)
-            die "Unknown profile subcommand: $subcmd. Run 'nixy profile --help' for usage."
+            die "Unknown profile subcommand: $subcmd. Run 'nixy help' for usage."
             ;;
     esac
 }
@@ -1425,18 +1426,24 @@ cmd_profile_list() {
 }
 
 cmd_profile_delete() {
-    local name="${1:-}"
+    local name=""
     local force=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force|-f) force=true; shift ;;
-            *) name="$1"; shift ;;
+            -*)
+                die "Unknown option: $1. Usage: nixy profile delete [--force] <name>"
+                ;;
+            *)
+                [[ -z "$name" ]] && name="$1"
+                shift
+                ;;
         esac
     done
 
-    [[ -z "$name" ]] && die "Usage: nixy profile delete <name>"
+    [[ -z "$name" ]] && die "Usage: nixy profile delete [--force] <name>"
 
     validate_profile_name "$name"
 
@@ -1513,6 +1520,7 @@ CONFIG FILES:
     Active profile: ~/.config/nixy/active
     Local:  ./flake.nix or parent directories (use with --local)
     Environment symlink: ~/.local/state/nixy/env
+    Legacy (auto-migrated): ~/.config/nixy/flake.nix, ~/.config/nixy/packages/
 
 PATH SETUP:
     Add to your shell config:

@@ -2028,7 +2028,10 @@ test_profile_switch() {
     # Verify active profile changed
     local active
     active=$(cat "$NIXY_CONFIG_DIR/active")
-    [[ "$active" == "work" ]]
+    [[ "$active" == "work" ]] || {
+        echo "  ASSERTION FAILED: expected active profile 'work', got '$active'" >&2
+        return 1
+    }
 }
 
 test_profile_switch_fails_if_not_exists() {
