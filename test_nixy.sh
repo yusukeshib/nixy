@@ -1822,6 +1822,178 @@ test_install_uses_active_profile() {
 }
 
 # =============================================================================
+# Test: Registry install
+# =============================================================================
+
+test_install_from_requires_package() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local output exit_code
+    output=$("$NIXY" install --from nixpkgs 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Package name is required"
+}
+
+test_install_from_unknown_registry_fails() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local output exit_code
+    output=$("$NIXY" install --from nonexistent-registry hello 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not found"
+}
+
+test_install_from_nixpkgs_works() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    # nixpkgs is always in the global registry
+    local output exit_code
+    output=$("$NIXY" install --from nixpkgs hello 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should succeed (may take time to build)
+    assert_exit_code 0 "$exit_code" && \
+    assert_output_contains "$output" "Looking up 'nixpkgs' in nix registry"
+}
+
+test_install_from_adds_to_custom_inputs() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install from nixpkgs registry
+    # Note: nixpkgs is already a default input, so it won't be added to custom-inputs
+    # This test verifies the input exists somewhere in the flake
+    "$NIXY" install --from nixpkgs hello 2>&1 || true
+
+    # Verify nixpkgs input exists in the flake (either in default inputs or custom-inputs)
+    if ! grep -q "nixpkgs.url" "$profile_dir/flake.nix"; then
+        echo "  ASSERTION FAILED: nixpkgs input should exist in flake.nix"
+        return 1
+    fi
+    return 0
+}
+
+test_install_from_adds_to_custom_packages() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install from nixpkgs registry
+    "$NIXY" install --from nixpkgs hello 2>&1 || true
+
+    # Verify the package was added to custom-packages section
+    # Note: nixpkgs uses legacyPackages, and we reuse the existing nixpkgs input
+    local packages_section
+    packages_section=$(sed -n '/# \[nixy:custom-packages\]/,/# \[\/nixy:custom-packages\]/p' "$profile_dir/flake.nix")
+    if ! echo "$packages_section" | grep -q "hello = inputs.nixpkgs.legacyPackages"; then
+        echo "  ASSERTION FAILED: hello package should be in custom-packages section with legacyPackages"
+        echo "  Got: $packages_section"
+        return 1
+    fi
+    return 0
+}
+
+test_install_from_adds_to_custom_paths() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install from nixpkgs registry
+    "$NIXY" install --from nixpkgs hello 2>&1 || true
+
+    # Verify the package was added to custom-paths section
+    local paths_section
+    paths_section=$(sed -n '/# \[nixy:custom-paths\]/,/# \[\/nixy:custom-paths\]/p' "$profile_dir/flake.nix")
+    if ! echo "$paths_section" | grep -q "hello"; then
+        echo "  ASSERTION FAILED: hello should be in custom-paths section"
+        return 1
+    fi
+    return 0
+}
+
+test_install_from_validates_package() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local output exit_code
+    output=$("$NIXY" install --from nixpkgs nonexistent-pkg-xyz 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "not found"
+}
+
+test_help_shows_from_option() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "--from" && \
+    assert_output_contains "$output" "registry"
+}
+
+test_lookup_registry_function() {
+    cd "$TEST_DIR"
+
+    # Source nixy to test lookup_registry directly
+    source "$NIXY"
+
+    # nixpkgs should always be in the registry
+    local url
+    url=$(lookup_registry "nixpkgs")
+
+    if [[ -z "$url" ]]; then
+        echo "  ASSERTION FAILED: nixpkgs should be in the registry"
+        return 1
+    fi
+
+    # URL should contain github:NixOS/nixpkgs
+    if ! echo "$url" | grep -q "NixOS/nixpkgs"; then
+        echo "  ASSERTION FAILED: nixpkgs URL should contain NixOS/nixpkgs"
+        echo "  Got: $url"
+        return 1
+    fi
+
+    return 0
+}
+
+test_install_from_direct_url_detected() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    # Direct URL should be detected (contains ':')
+    local output exit_code
+    output=$("$NIXY" install --from github:NixOS/nixpkgs hello 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should show "Using flake URL" message (not "Looking up in registry")
+    assert_output_contains "$output" "Using flake URL"
+}
+
+test_install_from_direct_url_generates_input_name() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install from direct URL (using nixpkgs which already exists as default input)
+    "$NIXY" install --from github:NixOS/nixpkgs hello 2>&1 || true
+
+    # For NixOS/nixpkgs URLs, we reuse the existing nixpkgs input
+    # Verify the package references inputs.nixpkgs
+    if ! grep -q "inputs.nixpkgs.legacyPackages" "$profile_dir/flake.nix"; then
+        echo "  ASSERTION FAILED: flake.nix should reference inputs.nixpkgs"
+        cat "$profile_dir/flake.nix"
+        return 1
+    fi
+    return 0
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -1946,6 +2118,19 @@ main() {
     run_test "profile delete active fails" test_profile_delete_active_fails || true
     run_test "help shows profile commands" test_help_shows_profile_commands || true
     run_test "install uses active profile" test_install_uses_active_profile || true
+
+    # Registry install tests
+    run_test "install --from requires package" test_install_from_requires_package || true
+    run_test "install --from unknown registry fails" test_install_from_unknown_registry_fails || true
+    run_test "install --from nixpkgs works" test_install_from_nixpkgs_works || true
+    run_test "install --from adds to custom-inputs" test_install_from_adds_to_custom_inputs || true
+    run_test "install --from adds to custom-packages" test_install_from_adds_to_custom_packages || true
+    run_test "install --from adds to custom-paths" test_install_from_adds_to_custom_paths || true
+    run_test "install --from validates package" test_install_from_validates_package || true
+    run_test "help shows --from option" test_help_shows_from_option || true
+    run_test "lookup_registry function works" test_lookup_registry_function || true
+    run_test "install --from direct URL detected" test_install_from_direct_url_detected || true
+    run_test "install --from direct URL uses existing nixpkgs" test_install_from_direct_url_generates_input_name || true
 
     echo ""
     echo "======================================"

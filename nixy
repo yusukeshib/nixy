@@ -15,7 +15,7 @@ GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.31"
+NIXY_VERSION="0.1.33"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -281,17 +281,98 @@ validate_flake_inputs() {
     [[ ${#INVALID_INPUTS[@]} -eq 0 ]]
 }
 
+# Look up a flake URL from the nix registry
+# Usage: lookup_registry <name>
+# Returns the flake URL if found, empty string otherwise
+lookup_registry() {
+    local name="$1"
+    # nix registry list format: "global flake:nixpkgs github:NixOS/nixpkgs/nixpkgs-unstable"
+    # We need to extract the URL for the given name
+    # Use awk for literal string matching to avoid regex metacharacter issues
+    # Build target string in BEGIN block for consistent behavior across awk implementations
+    nix "${NIX_FLAGS[@]}" registry list 2>/dev/null | awk -v name="$name" 'BEGIN {target = "flake:" name} $2 == target {print $3; exit}'
+}
+
+# Validate that a package exists in a flake
+# Usage: validate_flake_package <flake_url> <package>
+# Returns 0 if package exists, 1 otherwise
+# Sets FLAKE_PKG_OUTPUT to "packages" or "legacyPackages" depending on where it was found
+validate_flake_package() {
+    local flake_url="$1"
+    local pkg="$2"
+    local system
+    system=$(nix_system)
+    FLAKE_PKG_OUTPUT=""
+
+    # Try packages.<system>.<pkg> first (standard flake output)
+    if nix "${NIX_FLAGS[@]}" eval "$flake_url#packages.$system.$pkg.type" 2>/dev/null | grep -q "derivation"; then
+        FLAKE_PKG_OUTPUT="packages"
+        return 0
+    fi
+
+    # Try legacyPackages.<system>.<pkg> (nixpkgs uses this)
+    if nix "${NIX_FLAGS[@]}" eval "$flake_url#legacyPackages.$system.$pkg.type" 2>/dev/null | grep -q "derivation"; then
+        FLAKE_PKG_OUTPUT="legacyPackages"
+        return 0
+    fi
+
+    return 1
+}
+
+# List available packages in a flake
+# Usage: list_flake_packages <flake_url>
+# Returns package names one per line
+# Queries both packages.<system> and legacyPackages.<system> (nixpkgs uses legacyPackages)
+list_flake_packages() {
+    local flake_url="$1"
+    local system
+    system=$(nix_system)
+
+    # Prefer the attribute set detected by validate_flake_package (if any),
+    # otherwise try both packages.<system> and legacyPackages.<system>.
+    local output_attr="${FLAKE_PKG_OUTPUT:-}"
+    local -a candidates=()
+
+    if [[ "$output_attr" == "packages" || "$output_attr" == "legacyPackages" ]]; then
+        candidates+=("$output_attr.$system")
+    else
+        candidates+=("packages.$system" "legacyPackages.$system")
+    fi
+
+    local attr_path
+    for attr_path in "${candidates[@]}"; do
+        if nix "${NIX_FLAGS[@]}" eval "$flake_url#$attr_path" \
+            --apply 'pkgs: builtins.concatStringsSep "\n" (builtins.attrNames pkgs)' \
+            --raw 2>/dev/null; then
+            return 0
+        fi
+    done
+}
 
 # Install a package and track in flake.nix
 cmd_install() {
     local pkg=""
     local file=""
+    local from_registry=""
     local force=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --file|-f) file="$2"; shift 2 ;;
+            --file|-f)
+                if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                    die "Missing argument for $1. Usage: nixy install --file <path>"
+                fi
+                file="$2"
+                shift 2
+                ;;
+            --from)
+                if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                    die "Missing argument for $1. Usage: nixy install --from <registry> <package>"
+                fi
+                from_registry="$2"
+                shift 2
+                ;;
             --force) force=true; shift ;;
             -*) die "Unknown option: $1" ;;
             *) pkg="$1"; shift ;;
@@ -303,7 +384,14 @@ cmd_install() {
         return
     fi
 
-    [[ -z "$pkg" ]] && die "Usage: nixy install <package> or nixy install --file <path>"
+    # Install from registry if --from is specified
+    if [[ -n "$from_registry" ]]; then
+        [[ -z "$pkg" ]] && die "Package name is required. Usage: nixy install --from <registry> <package>"
+        cmd_install_from_registry "$from_registry" "$pkg"
+        return
+    fi
+
+    [[ -z "$pkg" ]] && die "Usage: nixy install <package> or nixy install --file <path> or nixy install --from <registry> <package>"
 
     # Validate package exists in nixpkgs
     info "Validating package $pkg..."
@@ -324,6 +412,134 @@ cmd_install() {
 
     info "Installing $pkg..."
     cmd_sync
+}
+
+# Install a package from a flake (via registry name or direct URL)
+cmd_install_from_registry() {
+    local from_arg="$1"
+    local pkg="$2"
+
+    [[ -z "$from_arg" ]] && die "Flake source is required"
+    [[ -z "$pkg" ]] && die "Package name is required"
+
+    local flake_url
+
+    # Check if it's a direct flake URL (contains ':') or a registry name
+    if [[ "$from_arg" == *":"* ]]; then
+        # Direct flake URL (e.g., github:nix-community/neovim-nightly-overlay)
+        flake_url="$from_arg"
+        info "Using flake URL: $flake_url"
+    else
+        # Registry name - look it up
+        info "Looking up '$from_arg' in nix registry..."
+        flake_url=$(lookup_registry "$from_arg")
+
+        if [[ -z "$flake_url" ]]; then
+            die "Registry entry '$from_arg' not found. Use 'nix registry list' to see available entries, or provide a direct flake URL (e.g., github:user/repo)."
+        fi
+
+        info "Found: $flake_url"
+    fi
+
+    # Derive input name in a way that avoids collisions:
+    # - for registry names, use the registry alias
+    # - for direct URLs, include owner+repo (last two path components)
+    local input_name
+    if [[ "$from_arg" != *":"* ]]; then
+        # Use the registry alias as the base name
+        input_name=$(echo "$from_arg" | tr -cs 'a-zA-Z0-9' '-' | sed 's/^-//;s/-$//')
+    else
+        # Derive from the resolved URL: use the last two path components (owner-repo) when possible
+        input_name=$(echo "$flake_url" | sed -E 's@.*/([^/]+)/([^/]+)(\\.git)?$@\1-\2@' | tr -cs 'a-zA-Z0-9' '-' | sed 's/^-//;s/-$//')
+    fi
+    [[ -z "$input_name" ]] && input_name="custom-flake"
+
+    # Validate the package exists in that flake
+    info "Validating package '$pkg' in $input_name..."
+    if ! validate_flake_package "$flake_url" "$pkg"; then
+        local available
+        available=$(list_flake_packages "$flake_url" | head -10 | tr '\n' ' ')
+        if [[ -n "$available" ]]; then
+            die "Package '$pkg' not found in '$input_name'. Available packages: $available..."
+        else
+            die "Package '$pkg' not found in '$input_name' or flake has no packages."
+        fi
+    fi
+
+    # Check if existing flake.nix is nixy-managed before installing
+    local flake_dir
+    flake_dir=$(get_flake_dir) || exit 1
+    local flake="$flake_dir/flake.nix"
+
+    # Create flake.nix if it doesn't exist
+    if [[ ! -f "$flake" ]]; then
+        mkdir -p "$flake_dir"
+        generate_flake --flake-dir "$flake_dir" > "$flake"
+    fi
+
+    if ! is_nixy_managed_flake "$flake"; then
+        die "Existing flake.nix is not managed by nixy."
+    fi
+
+    # Add the flake as an input and the package
+    add_registry_package_to_flake "$input_name" "$flake_url" "$pkg"
+
+    info "Installing $pkg from $input_name..."
+    cmd_sync
+}
+
+# Add a package from a registry flake to flake.nix
+# This adds the flake as a custom input and the package to custom-packages
+# Expects FLAKE_PKG_OUTPUT to be set (from validate_flake_package)
+add_registry_package_to_flake() {
+    local input_name="$1"
+    local flake_url="$2"
+    local pkg="$3"
+    local pkg_output="${FLAKE_PKG_OUTPUT:-packages}"
+
+    local flake_dir
+    flake_dir=$(get_flake_dir) || exit 1
+    local flake="$flake_dir/flake.nix"
+
+    # Check if we should reuse the existing nixpkgs input
+    # Reuse existing nixpkgs when:
+    # 1. User explicitly requested 'nixpkgs' as the registry name, OR
+    # 2. The flake URL points to NixOS/nixpkgs repository
+    # Note: For nixpkgs variants with specific branches/refs, users should either
+    # modify their flake.nix directly or use a different registry alias.
+    local use_existing_nixpkgs=false
+    if [[ "$flake_url" == *"NixOS/nixpkgs"* ]] && grep -q "^[[:space:]]*nixpkgs\\.url" "$flake"; then
+        input_name="nixpkgs"
+        use_existing_nixpkgs=true
+        info "Using existing nixpkgs input"
+    fi
+
+    # Check if input already exists (for non-nixpkgs inputs)
+    if [[ "$use_existing_nixpkgs" == "false" ]]; then
+        if grep -q "^[[:space:]]*$input_name\\.url" "$flake"; then
+            info "Input '$input_name' already exists in flake.nix"
+        else
+            # Add the input to custom-inputs section
+            insert_after_marker "$flake" "# \[nixy:custom-inputs\]" "    $input_name.url = \"$flake_url\";"
+            success "Added input '$input_name' to flake.nix"
+        fi
+    fi
+
+    # Check if package already exists
+    if grep -q "^[[:space:]]*$pkg = " "$flake"; then
+        success "Package '$pkg' already in $flake"
+        return 0
+    fi
+
+    # Add the package to custom-packages section
+    # Use inputs.$input_name to reference the flake
+    # Use the correct output (packages or legacyPackages)
+    insert_after_marker "$flake" "# \[nixy:custom-packages\]" "          $pkg = inputs.$input_name.$pkg_output.\${system}.$pkg;"
+
+    # Add to env-paths section
+    insert_after_marker "$flake" "# \[nixy:custom-paths\]" "              $pkg"
+
+    success "Added $pkg from $input_name to $flake"
 }
 
 # Parse a local package nix file and extract attributes
@@ -1357,7 +1573,8 @@ USAGE:
     nixy <command> [args]
 
 BASIC COMMANDS:
-    install <pkg>           Install a package
+    install <pkg>           Install a package from nixpkgs
+    install --from <flake> <pkg>  Install from a flake (registry name or URL)
     install --file <path>   Install from local nix file
     uninstall <pkg>         Uninstall a package
     search <query>          Search for packages
@@ -1407,6 +1624,7 @@ EXAMPLES:
     nixy install ripgrep                # Install a package
     nixy uninstall ripgrep              # Remove from flake.nix
     nixy install --file neovim.nix      # Install from local nix file
+    nixy install --from nixpkgs hello   # Install from a registry flake
     nixy sync                           # Build/restore environment
     nixy upgrade                        # Update nixpkgs and rebuild
     nixy version                        # Show current version
@@ -1414,6 +1632,14 @@ EXAMPLES:
     nixy profile switch -c work         # Create and switch to 'work' profile
     nixy profile switch work            # Switch to existing 'work' profile
     nixy profile list                   # List all profiles
+
+FLAKE USAGE:
+    # Install directly from a flake URL:
+    nixy install --from github:nix-community/neovim-nightly-overlay neovim
+
+    # Or use nix registry (if you've added a flake to your registry):
+    nix registry add neovim-nightly github:nix-community/neovim-nightly-overlay
+    nixy install --from neovim-nightly neovim
 
 EOF
 }
