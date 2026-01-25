@@ -100,7 +100,7 @@ pub fn run(force: bool) -> Result<()> {
 
 fn get_asset_name() -> Result<String> {
     let arch = std::env::consts::ARCH; // e.g., "x86_64", "aarch64"
-    let os = std::env::consts::OS; // "linux", "macos" (macOS is transformed to "darwin")
+    let os = std::env::consts::OS; // e.g., "linux" or "macos" (mapped to "darwin" below)
     let os_name = match os {
         "macos" => "darwin",
         "linux" => "linux",
