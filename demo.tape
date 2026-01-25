@@ -12,7 +12,7 @@ Set TypingSpeed 50ms
 
 # Hidden setup
 Hide
-Type "export NIXY_CONFIG_DIR=/tmp/nixy-demo-config NIXY_PROFILE=/tmp/nixy-demo-profile"
+Type "export NIXY_CONFIG_DIR=/tmp/nixy-demo-config NIXY_ENV=/tmp/nixy-demo-env"
 Enter
 Type "alias nixy='./nixy'"
 Enter
@@ -23,11 +23,11 @@ Type "# Install packages like Homebrew"
 Enter
 Sleep 500ms
 
-Type "nixy install -g ripgrep"
+Type "nixy install ripgrep"
 Enter
 Sleep 6s
 
-Type "nixy install -g fzf"
+Type "nixy install fzf"
 Enter
 Sleep 5s
 
@@ -35,7 +35,7 @@ Type "# See what's installed"
 Enter
 Sleep 500ms
 
-Type "nixy list -g"
+Type "nixy list"
 Enter
 Sleep 2s
 
