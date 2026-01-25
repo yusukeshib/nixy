@@ -1,10 +1,10 @@
-# nixy - Use Nix Like Homebrew
+# nixy - Simple Declarative Nix Package Management
 
 [日本語版はこちら](README_ja.md)
 
 ![nixy demo](demo.gif)
 
-**Reproducible Nix packages, Homebrew simplicity.** Install packages with a single command, sync them across all your machines.
+**Reproducible Nix packages, simple commands.** Install packages with a single command, sync them across all your machines.
 
 ```bash
 nixy install ripgrep    # That's it. Nix made simple.
@@ -17,20 +17,18 @@ nixy manages your Nix packages through a declarative `flake.nix`. Unlike `nix pr
 Nix is powerful, but managing packages shouldn't be complicated. You want the benefits of Nix without writing flake files by hand.
 
 nixy gives you:
-- **Homebrew-like commands**: `nixy install`, `nixy uninstall`, `nixy upgrade` - that's it
+- **Simple commands**: `nixy install`, `nixy uninstall`, `nixy upgrade` - that's it
 - **Reproducibility**: Same packages, same versions, on every machine
 - **No hidden state**: Your `flake.nix` is the single source of truth
 - **Atomic upgrades & rollbacks**: Updates either fully succeed or nothing changes
 - **Cross-platform**: Same workflow on macOS and Linux
+- **Multiple profiles**: Separate package sets for work, personal, projects
 
 Unlike `nix profile`, nixy uses `flake.nix` + `flake.lock` for full reproducibility. Copy your config to a new machine, run `nixy sync`, done.
 
 ## How it works
 
-nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup:
-
-- **Global packages** (default): `flake.nix` at `~/.config/nixy/`, built with `nix build`
-- **Project packages** (`--local`): Just a `flake.nix` in your project directory
+nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup. Your packages are defined in `flake.nix` at `~/.config/nixy/profiles/<name>/`, built with `nix build`.
 
 nixy is **purely declarative** - your `flake.nix` is the single source of truth. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/env`) pointing to your built environment. This means:
 - No hidden profile state to get out of sync
@@ -51,18 +49,6 @@ nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it gene
 | Rollback | Profile generations only | Git + `flake.lock` |
 
 If you only use one machine and don't need reproducibility, `nix profile` is simpler. If you want the same environment everywhere, use nixy.
-
-## Homebrew vs nixy
-
-| Homebrew | nixy |
-|----------|------|
-| `brew install ripgrep` | `nixy install ripgrep` |
-| `brew uninstall ripgrep` | `nixy uninstall ripgrep` |
-| `brew list` | `nixy list` |
-| `brew search git` | `nixy search git` |
-| `brew upgrade` | `nixy upgrade` |
-
-Familiar interface, but with Nix's reproducibility underneath. No lock-in - it's just standard Nix.
 
 ## Quick Start
 
@@ -92,10 +78,10 @@ For fish, add to `~/.config/fish/config.fish`:
 nixy config fish | source
 ```
 
-### 4. Start using it like Homebrew
+### 4. Start installing packages
 
 ```bash
-nixy install ripgrep    # First run auto-creates ~/.config/nixy/flake.nix
+nixy install ripgrep    # First run auto-creates the default profile
 nixy install nodejs
 nixy install git
 
@@ -106,7 +92,7 @@ nixy upgrade            # Upgrade all inputs
 nixy upgrade nixpkgs    # Upgrade only nixpkgs
 ```
 
-Just like Homebrew - packages are installed globally and available in all terminal sessions.
+Packages are installed globally and available in all terminal sessions.
 
 ## Commands
 
@@ -170,50 +156,7 @@ Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`. Switc
 
 ---
 
-## Advanced: Per-Project Packages
-
-For developers who want project-specific dependencies (like a `package.json` but for any tools):
-
-```bash
-cd my-project
-nixy init                     # Create a flake.nix in this directory
-nixy install --local nodejs   # Add packages to local flake.nix
-nixy install --local postgres
-
-nixy shell                    # Enter a shell with these packages available
-```
-
-With `--local` (or `-l`), packages are added to the project's `flake.nix` but not installed to your global profile. Use `nixy shell` to enter a development shell with all project packages available. This keeps project dependencies isolated from your global environment.
-
-nixy automatically finds and uses the nearest `flake.nix` in parent directories when using `--local` (similar to how git finds `.git`).
-
-### Sharing Project Environment
-
-```bash
-# Commit flake.nix to your repo
-git add flake.nix flake.lock
-
-# Teammates can get the same environment:
-git clone my-project && cd my-project
-nixy shell             # Enter dev shell with all project packages
-```
-
-### Additional Commands for Projects
-
-| Command | Description |
-|---------|-------------|
-| `nixy init` | Create a flake.nix in current directory |
-| `nixy install --local <pkg>` | Add package to local flake.nix |
-| `nixy shell` | Enter dev shell with project packages |
-
-Use `--local` (or `-l`) with install/uninstall/list/upgrade to operate on project flake instead of global.
-
----
-
 ## FAQ
-
-**Can I use Homebrew and nixy together?**
-Yes. They don't conflict. You can migrate gradually or use both.
 
 **How do I find the right package name?**
 Use `nixy search <keyword>`. Package names sometimes differ from what you expect (e.g., `ripgrep` not `rg`).
@@ -328,7 +271,6 @@ Format for `my-package.nix`:
 |------|-------------|
 | `~/.config/nixy/profiles/<name>/flake.nix` | Profile packages |
 | `~/.config/nixy/active` | Current active profile name |
-| `./flake.nix` | Project-local packages (with `--local`) |
 | `~/.config/nixy/profiles/<name>/packages/` | Custom package definitions for profile |
 | `~/.local/state/nixy/env` | Symlink to built environment (add `bin/` to PATH) |
 | `~/.config/nixy/flake.nix` | Legacy location (auto-migrated to default profile) |
