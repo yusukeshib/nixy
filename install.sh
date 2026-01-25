@@ -48,11 +48,6 @@ check_nix() {
     return 0
 }
 
-# Check if cargo is available
-has_cargo() {
-    command -v cargo &> /dev/null
-}
-
 # Check if directory is in PATH
 check_path() {
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -106,20 +101,6 @@ try_download_binary() {
     fi
 }
 
-# Build from source using cargo
-build_with_cargo() {
-    info "Building from source with cargo..."
-
-    if ! has_cargo; then
-        return 1
-    fi
-
-    # Install using cargo
-    cargo install --git "https://github.com/$REPO" --root "$HOME/.local" 2>&1
-
-    return $?
-}
-
 # Build from source using nix
 build_with_nix() {
     info "Building from source with nix..."
@@ -165,15 +146,7 @@ main() {
         info "Installed pre-built binary"
     fi
 
-    # 2. Try cargo (if available)
-    if [[ "$installed" == "false" ]] && has_cargo; then
-        if build_with_cargo; then
-            installed=true
-            info "Built and installed with cargo"
-        fi
-    fi
-
-    # 3. Try nix build (if nix available)
+    # 2. Try nix build (if nix available)
     if [[ "$installed" == "false" ]] && command -v nix &> /dev/null; then
         if build_with_nix; then
             installed=true
@@ -181,23 +154,17 @@ main() {
         fi
     fi
 
-    # 4. Provide manual instructions if all methods failed
+    # 3. Provide manual instructions if all methods failed
     if [[ "$installed" == "false" ]]; then
         error "Could not install nixy automatically.
 
 Please install manually using one of these methods:
 
-  # Using cargo (requires Rust 1.80+)
-  cargo install --git https://github.com/$REPO
-
-  # Using nix
+  # Using nix profile
   nix profile install github:$REPO
 
-  # Build from source
-  git clone https://github.com/$REPO
-  cd nixy
-  cargo build --release
-  cp target/release/nixy ~/.local/bin/
+  # Using nix run (without installing)
+  nix run github:$REPO -- --help
 "
     fi
 

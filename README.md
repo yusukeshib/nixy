@@ -76,12 +76,12 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
 
-This will try (in order): pre-built binary, cargo install, or nix build.
+This will try (in order): pre-built binary or nix build.
 
-**With cargo:**
+**With cargo (from crates.io):**
 
 ```bash
-cargo install --git https://github.com/yusukeshib/nixy.git
+cargo install nixy
 ```
 
 **With nix:**
@@ -221,10 +221,10 @@ my-overlay.url = "github:user/my-overlay";
 Any content outside these markers will be overwritten when nixy regenerates the flake. For heavy customization, see "Customizing flake.nix" in the Appendix.
 
 **How do I update nixy?**
-Rebuild from source or run `cargo install --git https://github.com/yusukeshib/nixy.git --force`.
+Run `cargo install nixy` to get the latest version from crates.io, or re-run the install script.
 
 **How do I uninstall nixy?**
-Delete the `nixy` binary (typically `/usr/local/bin/nixy` or `~/.cargo/bin/nixy`). Your flake.nix files remain and work with standard `nix` commands.
+Delete the `nixy` binary (typically `~/.local/bin/nixy` or `~/.cargo/bin/nixy`). Your flake.nix files remain and work with standard `nix` commands.
 
 **Why not use `nix profile` directly?**
 `nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `flake.nix` as the source of truth, which can be copied, version-controlled, and shared.
