@@ -890,6 +890,36 @@ EOF
     assert_file_exists "./packages/no-git-pkg.nix" "Package should be copied even without git"
 }
 
+test_install_file_with_symlinked_flake() {
+    cd "$TEST_DIR"
+
+    # Create the actual config directory in a subdirectory
+    mkdir -p real-config
+    "$NIXY" init real-config >/dev/null 2>&1
+
+    # Create a symlink with a relative path to the flake
+    mkdir -p symlink-dir
+    ln -s ../real-config/flake.nix symlink-dir/flake.nix
+
+    # Create a package file
+    cat > test-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "symlink-test-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Install the file from the directory with the symlinked flake
+    cd symlink-dir
+    "$NIXY" install --file ../test-pkg.nix 2>&1 || true
+
+    # The package should be copied to the REAL config directory, not relative to symlink
+    assert_file_exists "$TEST_DIR/real-config/packages/symlink-test-pkg.nix" "Package should be in real flake dir, not relative path"
+}
+
 test_install_flake_file_creates_directory() {
     cd "$TEST_DIR"
 
@@ -1298,6 +1328,7 @@ main() {
     run_test "install --file copies to flake dir packages" test_install_file_copies_to_flake_dir_packages || true
     run_test "install --file adds to git in git repo" test_install_file_adds_to_git_in_git_repo || true
     run_test "install --file works without git" test_install_file_works_without_git || true
+    run_test "install --file with symlinked flake" test_install_file_with_symlinked_flake || true
     run_test "install --file flake creates directory" test_install_flake_file_creates_directory || true
     run_test "install --file flake adds input" test_install_flake_file_adds_input || true
     run_test "install --file detects flake vs package" test_install_flake_file_detected_correctly || true
