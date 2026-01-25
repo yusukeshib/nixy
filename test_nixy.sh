@@ -1408,6 +1408,244 @@ EOF
 }
 
 # =============================================================================
+# Test: Partial editing preserves user customizations
+# =============================================================================
+
+test_add_preserves_user_customizations() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add custom content outside of markers (user customization)
+    # Insert a custom input before [nixy:local-inputs]
+    awk '
+        /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Add a custom nixConfig section after inputs (user customization)
+    awk '
+        /^  inputs = \{/ { in_inputs=1 }
+        in_inputs && /^  \};/ { print; print ""; print "  nixConfig = {"; print "    extra-substituters = [ \"https://my-cache.cachix.org\" ];"; print "  };"; in_inputs=0; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Verify customizations exist before adding package
+    assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
+    assert_file_contains "./flake.nix" "nixConfig" || return 1
+    assert_file_contains "./flake.nix" "extra-substituters" || return 1
+
+    # Use add_package_to_flake directly (source the script)
+    source "$NIXY"
+    add_package_to_flake "ripgrep" "true" >/dev/null
+
+    # Verify customizations are still present after adding package
+    if ! grep -q "my-custom-input.url" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom input should be preserved after add"
+        return 1
+    fi
+
+    if ! grep -q "nixConfig" "./flake.nix"; then
+        echo "  ASSERTION FAILED: nixConfig should be preserved after add"
+        return 1
+    fi
+
+    if ! grep -q "extra-substituters" "./flake.nix"; then
+        echo "  ASSERTION FAILED: extra-substituters should be preserved after add"
+        return 1
+    fi
+
+    # Verify package was added
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: ripgrep should be added to packages section"
+        return 1
+    fi
+
+    return 0
+}
+
+test_remove_preserves_user_customizations() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add a package first
+    source "$NIXY"
+    add_package_to_flake "ripgrep" "true" >/dev/null
+
+    # Add custom content (user customization)
+    awk '
+        /nixpkgs\.url/ { print; print "    my-custom-input.url = \"github:user/repo\";"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Add a custom overlay section (user customization)
+    awk '
+        /forAllSystems = / { print; print "      myOverlay = final: prev: { custom-pkg = prev.hello; };"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    # Verify customizations exist before removing package
+    assert_file_contains "./flake.nix" "my-custom-input.url" || return 1
+    assert_file_contains "./flake.nix" "myOverlay" || return 1
+    assert_file_contains "./flake.nix" "ripgrep = pkgs.ripgrep;" || return 1
+
+    # Remove the package
+    remove_package_from_flake "ripgrep" "true" >/dev/null
+
+    # Verify customizations are still present after removing package
+    if ! grep -q "my-custom-input.url" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom input should be preserved after remove"
+        return 1
+    fi
+
+    if ! grep -q "myOverlay" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom overlay should be preserved after remove"
+        return 1
+    fi
+
+    # Verify package was removed
+    if grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: ripgrep should be removed from packages section"
+        return 1
+    fi
+
+    return 0
+}
+
+test_add_multiple_packages_preserves_all() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add custom content
+    awk '
+        /nixpkgs\.url/ { print; print "    custom.url = \"github:custom/repo\";"; next }
+        { print }
+    ' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    source "$NIXY"
+
+    # Add multiple packages one by one
+    add_package_to_flake "ripgrep" "true" >/dev/null
+    add_package_to_flake "fzf" "true" >/dev/null
+    add_package_to_flake "bat" "true" >/dev/null
+
+    # Verify all packages are present
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: ripgrep should be in packages section"
+        return 1
+    fi
+
+    if ! grep -q "fzf = pkgs.fzf;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: fzf should be in packages section"
+        return 1
+    fi
+
+    if ! grep -q "bat = pkgs.bat;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: bat should be in packages section"
+        return 1
+    fi
+
+    # Verify custom content is still present
+    if ! grep -q "custom.url" "./flake.nix"; then
+        echo "  ASSERTION FAILED: Custom input should be preserved after adding multiple packages"
+        return 1
+    fi
+
+    return 0
+}
+
+test_remove_middle_package_preserves_others() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    source "$NIXY"
+
+    # Add three packages
+    add_package_to_flake "ripgrep" "true" >/dev/null
+    add_package_to_flake "fzf" "true" >/dev/null
+    add_package_to_flake "bat" "true" >/dev/null
+
+    # Remove the middle one
+    remove_package_from_flake "fzf" "true" >/dev/null
+
+    # Verify fzf is removed
+    if grep -q "fzf = pkgs.fzf;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: fzf should be removed"
+        return 1
+    fi
+
+    # Verify others are still present
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: ripgrep should still be present"
+        return 1
+    fi
+
+    if ! grep -q "bat = pkgs.bat;" "./flake.nix"; then
+        echo "  ASSERTION FAILED: bat should still be present"
+        return 1
+    fi
+
+    return 0
+}
+
+test_add_skips_duplicate_package() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    source "$NIXY"
+
+    # Add a package
+    add_package_to_flake "ripgrep" "true" >/dev/null
+
+    # Count occurrences of ripgrep before adding again
+    local count_before
+    count_before=$(grep -c "ripgrep = pkgs.ripgrep;" "./flake.nix" || true)
+
+    # Add the same package again
+    add_package_to_flake "ripgrep" "true" >/dev/null
+
+    # Count occurrences after
+    local count_after
+    count_after=$(grep -c "ripgrep = pkgs.ripgrep;" "./flake.nix" || true)
+
+    if [[ "$count_before" != "$count_after" ]]; then
+        echo "  ASSERTION FAILED: Adding duplicate package should not add another line"
+        echo "  Before: $count_before, After: $count_after"
+        return 1
+    fi
+
+    return 0
+}
+
+test_global_add_no_devshell_entry() {
+    cd "$TEST_DIR"
+
+    # Create global flake
+    mkdir -p "$NIXY_CONFIG_DIR"
+
+    source "$NIXY"
+
+    # Generate a global flake first
+    generate_flake --flake-dir "$NIXY_CONFIG_DIR" --global > "$NIXY_CONFIG_DIR/flake.nix"
+
+    # Add a package to global flake (use_local=false)
+    add_package_to_flake "ripgrep" "false" >/dev/null
+
+    # Global flake should NOT have devShells section at all
+    if grep -q "devShells" "$NIXY_CONFIG_DIR/flake.nix"; then
+        echo "  ASSERTION FAILED: Global flake should not have devShells"
+        return 1
+    fi
+
+    # But should have the package in packages section
+    if ! grep -q "ripgrep = pkgs.ripgrep;" "$NIXY_CONFIG_DIR/flake.nix"; then
+        echo "  ASSERTION FAILED: ripgrep should be added to global flake packages section"
+        return 1
+    fi
+
+    return 0
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -1511,6 +1749,14 @@ main() {
     run_test "buildEnv has extra outputs" test_buildenv_has_extra_outputs || true
     run_test "flake has env-paths markers" test_flake_structure_has_env_paths_markers || true
     run_test "sync upgrades old flake without buildEnv" test_sync_upgrades_old_flake_without_buildenv || true
+
+    # Partial editing (preserves user customizations) tests
+    run_test "add preserves user customizations" test_add_preserves_user_customizations || true
+    run_test "remove preserves user customizations" test_remove_preserves_user_customizations || true
+    run_test "add multiple packages preserves all" test_add_multiple_packages_preserves_all || true
+    run_test "remove middle package preserves others" test_remove_middle_package_preserves_others || true
+    run_test "add skips duplicate package" test_add_skips_duplicate_package || true
+    run_test "global add no devShell entry" test_global_add_no_devshell_entry || true
 
     echo ""
     echo "======================================"
