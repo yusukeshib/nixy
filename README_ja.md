@@ -3,7 +3,7 @@
 **今日から Nix を使い始めて、少しずつ学んでいこう。** Homebrew と同じ感覚で、コマンド一つでパッケージをインストール。
 
 ```bash
-nixy install -g ripgrep    # これだけ。シンプルな Nix 生活。
+nixy install ripgrep    # これだけ。シンプルな Nix 生活。
 ```
 
 nixy は Nix の強力な機能（再現可能なビルド、ロールバック、依存関係の衝突なし）を Homebrew のシンプルさで提供します。薄いラッパースクリプトなので、ロックインも複雑な仕組みもありません。
@@ -19,14 +19,14 @@ nixy はその移行をスムーズにします。シンプルなコマンドか
 - **ロールバック**: アップグレードで問題が起きても即座に戻せる
 - **クロスプラットフォーム**: macOS と Linux で同じワークフロー
 
-`nixy install -g <package>` から始めて、準備ができたら生成された flake.nix を読んでみよう。
+`nixy install <package>` から始めて、準備ができたら生成された flake.nix を読んでみよう。
 
 ## 仕組み
 
 nixy はシンプルな Nix の機能だけを使います - Home Manager も NixOS も不要：
 
-- **グローバルパッケージ (`-g`)**: `~/.config/nix/` に `flake.nix` + `nix profile`
-- **プロジェクトパッケージ**: プロジェクトディレクトリに `flake.nix` のみ
+- **グローバルパッケージ**（デフォルト）: `~/.config/nix/` に `flake.nix` + `nix profile`
+- **プロジェクトパッケージ**（`--local`）: プロジェクトディレクトリに `flake.nix` のみ
 
 nixy は flake.nix を編集して標準の `nix` コマンドを実行するだけ。生成される flake.nix は普通の Nix なので、直接読んだり編集したり、`nix` コマンドを直接使うこともできます。
 
@@ -34,11 +34,11 @@ nixy は flake.nix を編集して標準の `nix` コマンドを実行するだ
 
 | Homebrew | nixy |
 |----------|------|
-| `brew install ripgrep` | `nixy install -g ripgrep` |
-| `brew uninstall ripgrep` | `nixy uninstall -g ripgrep` |
-| `brew list` | `nixy list -g` |
+| `brew install ripgrep` | `nixy install ripgrep` |
+| `brew uninstall ripgrep` | `nixy uninstall ripgrep` |
+| `brew list` | `nixy list` |
 | `brew search git` | `nixy search git` |
-| `brew upgrade` | `nixy upgrade -g` |
+| `brew upgrade` | `nixy upgrade` |
 
 同じシンプルさで、裏側は Nix の信頼性。ロックインなし - 標準の Nix そのものです。
 
@@ -59,27 +59,28 @@ curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | b
 ### 3. Homebrew のように使い始める
 
 ```bash
-nixy install -g ripgrep    # 初回実行時に ~/.config/nix/flake.nix を自動作成
-nixy install -g nodejs
-nixy install -g git
+nixy install ripgrep    # 初回実行時に ~/.config/nix/flake.nix を自動作成
+nixy install nodejs
+nixy install git
 
-nixy list -g               # インストール済みパッケージを表示
-nixy search python         # パッケージを検索
-nixy uninstall -g nodejs   # パッケージを削除
-nixy upgrade -g            # 全パッケージをアップグレード
+nixy list               # インストール済みパッケージを表示
+nixy search python      # パッケージを検索
+nixy uninstall nodejs   # パッケージを削除
+nixy upgrade            # 全パッケージをアップグレード
 ```
 
-`-g`（または `--global`）フラグで Homebrew のように動作します - パッケージはグローバルにインストールされ、すべてのターミナルセッションで利用可能になります。
+Homebrew と同じように、パッケージはグローバルにインストールされ、すべてのターミナルセッションで利用可能になります。
 
 ## コマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `nixy install -g <pkg>` | パッケージをグローバルにインストール |
-| `nixy uninstall -g <pkg>` | パッケージをアンインストール |
-| `nixy list -g` | インストール済みパッケージを一覧表示 |
+| `nixy install <pkg>` | パッケージをグローバルにインストール |
+| `nixy uninstall <pkg>` | パッケージをアンインストール |
+| `nixy list` | インストール済みパッケージを一覧表示 |
 | `nixy search <query>` | パッケージを検索 |
-| `nixy upgrade -g` | 全パッケージをアップグレード |
+| `nixy upgrade` | 全パッケージをアップグレード |
+| `nixy sync` | flake.nix からプロファイルを同期（新しいマシン用） |
 | `nixy gc` | 古いパッケージを削除 |
 | `nixy version` | nixy のバージョンを表示 |
 | `nixy self-upgrade` | nixy を最新版にアップグレード |
@@ -95,7 +96,7 @@ cp ~/.config/nix/flake.nix ~/dotfiles/
 # 新しいマシンで：
 mkdir -p ~/.config/nix
 cp ~/dotfiles/flake.nix ~/.config/nix/
-nixy sync -g    # flake.nix からすべてをインストール
+nixy sync    # flake.nix からすべてをインストール
 ```
 
 どのマシンでも同じパッケージ、同じバージョン。
@@ -108,16 +109,16 @@ nixy sync -g    # flake.nix からすべてをインストール
 
 ```bash
 cd my-project
-nixy init              # このディレクトリに flake.nix を作成
-nixy install nodejs    # flake.nix にパッケージを追加
-nixy install postgres
+nixy init                     # このディレクトリに flake.nix を作成
+nixy install --local nodejs   # ローカル flake.nix にパッケージを追加
+nixy install --local postgres
 
-nixy shell             # これらのパッケージが使えるシェルに入る
+nixy shell                    # これらのパッケージが使えるシェルに入る
 ```
 
-`-g` なしの場合、パッケージは `flake.nix` に追加されますが、プロファイルにはインストールされません。`nixy shell` で全プロジェクトパッケージが利用可能な開発シェルに入れます。これにより、プロジェクトの依存関係をグローバル環境から分離できます。
+`--local`（または `-l`）を付けると、パッケージはプロジェクトの `flake.nix` に追加されますが、グローバルプロファイルにはインストールされません。`nixy shell` で全プロジェクトパッケージが利用可能な開発シェルに入れます。これにより、プロジェクトの依存関係をグローバル環境から分離できます。
 
-nixy は親ディレクトリを遡って最も近い `flake.nix` を自動的に探して使用します（git が `.git` を探すのと同様）。
+`--local` を使用すると、nixy は親ディレクトリを遡って最も近い `flake.nix` を自動的に探して使用します（git が `.git` を探すのと同様）。
 
 ### プロジェクト環境の共有
 
@@ -135,10 +136,10 @@ nixy shell             # 全プロジェクトパッケージ入りの開発シ�
 | コマンド | 説明 |
 |---------|------|
 | `nixy init` | カレントディレクトリに flake.nix を作成 |
+| `nixy install --local <pkg>` | ローカル flake.nix にパッケージを追加 |
 | `nixy shell` | プロジェクトパッケージ入りの開発シェルに入る |
-| `nixy sync -g` | グローバルプロファイルを flake.nix と同期 |
 
-すべてのコマンドで `-g` または `--global` を付けるとグローバルパッケージを操作します。
+`--local`（または `-l`）を install/uninstall/list/upgrade に付けると、グローバルではなくプロジェクトの flake を操作します。
 
 ---
 
@@ -188,8 +189,8 @@ nixy install --file my-package.nix
 
 | パス | 説明 |
 |------|------|
-| `~/.config/nix/flake.nix` | グローバルパッケージ（`-g` で使用） |
-| `./flake.nix` | プロジェクトローカルパッケージ |
+| `~/.config/nix/flake.nix` | グローバルパッケージ（デフォルト） |
+| `./flake.nix` | プロジェクトローカルパッケージ（`--local` で使用） |
 | `~/.config/nix/packages/` | カスタムパッケージ定義 |
 
 ### 環境変数
