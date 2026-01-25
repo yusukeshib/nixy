@@ -122,22 +122,51 @@ Just like Homebrew - packages are installed globally and available in all termin
 | `nixy config <shell>` | Output shell config (for PATH setup) |
 | `nixy version` | Show nixy version |
 | `nixy self-upgrade` | Upgrade nixy to the latest version |
+| `nixy profile` | Show current profile |
+| `nixy profile create <name>` | Create a new profile |
+| `nixy profile switch <name>` | Switch to a different profile |
+| `nixy profile list` | List all profiles |
+| `nixy profile delete <name>` | Delete a profile (requires `--force`) |
 
 ## Sync Across Machines
 
-Your package list is just a text file (`~/.config/nixy/flake.nix`). Back it up, version control it, or sync it with dotfiles:
+Your package list is just a text file. Back it up, version control it, or sync it with dotfiles:
 
 ```bash
-# Back up your package list
-cp ~/.config/nixy/flake.nix ~/dotfiles/
+# Back up your package list (default profile)
+cp ~/.config/nixy/profiles/default/flake.nix ~/dotfiles/
 
 # On a new machine:
-mkdir -p ~/.config/nix
-cp ~/dotfiles/flake.nix ~/.config/nixy/
+mkdir -p ~/.config/nixy/profiles/default
+cp ~/dotfiles/flake.nix ~/.config/nixy/profiles/default/
 nixy sync    # Installs everything from flake.nix
 ```
 
 Same packages, same versions, on every machine.
+
+## Multiple Profiles
+
+Maintain separate package sets for different contexts (work, personal, projects):
+
+```bash
+nixy profile create work      # Create a new profile
+nixy profile switch work      # Switch to it
+nixy install slack terraform  # Install work-specific packages
+
+nixy profile create personal  # Create another profile
+nixy profile switch personal
+nixy install spotify games    # Different packages here
+
+nixy profile list             # See all profiles
+nixy profile                  # Show current profile
+```
+
+Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`. Switching profiles rebuilds the environment symlink to point to that profile's packages.
+
+**Use cases:**
+- **Work vs Personal**: Keep work tools separate from personal apps
+- **Client projects**: Different toolchains for different clients
+- **Experimentation**: Try new packages without affecting your main setup
 
 ---
 
@@ -297,10 +326,12 @@ Format for `my-package.nix`:
 
 | Path | Description |
 |------|-------------|
-| `~/.config/nixy/flake.nix` | Global packages (default) |
+| `~/.config/nixy/profiles/<name>/flake.nix` | Profile packages |
+| `~/.config/nixy/active` | Current active profile name |
 | `./flake.nix` | Project-local packages (with `--local`) |
-| `~/.config/nixy/packages/` | Custom package definitions |
+| `~/.config/nixy/profiles/<name>/packages/` | Custom package definitions for profile |
 | `~/.local/state/nixy/env` | Symlink to built environment (add `bin/` to PATH) |
+| `~/.config/nixy/flake.nix` | Legacy location (auto-migrated to default profile) |
 
 ### Environment Variables
 

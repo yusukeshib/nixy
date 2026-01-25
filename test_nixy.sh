@@ -2052,6 +2052,161 @@ test_help_shows_force_flag() {
 }
 
 # =============================================================================
+# Test: Profile management
+# =============================================================================
+
+test_profile_shows_default() {
+    cd "$TEST_DIR"
+    local output
+    output=$("$NIXY" profile 2>&1)
+    assert_output_contains "$output" "Active profile: default"
+}
+
+test_profile_create() {
+    cd "$TEST_DIR"
+    local output exit_code
+    output=$("$NIXY" profile create work 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 0 "$exit_code" && \
+    assert_output_contains "$output" "Created profile 'work'" && \
+    assert_file_exists "$NIXY_CONFIG_DIR/profiles/work/flake.nix"
+}
+
+test_profile_create_fails_if_exists() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" profile create work 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "already exists"
+}
+
+test_profile_create_validates_name() {
+    cd "$TEST_DIR"
+    local output exit_code
+    output=$("$NIXY" profile create "invalid name!" 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Invalid profile name"
+}
+
+test_profile_switch() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" profile switch work 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 0 "$exit_code" && \
+    assert_output_contains "$output" "Switched to profile 'work'"
+
+    # Verify active profile changed
+    local active
+    active=$(cat "$NIXY_CONFIG_DIR/active")
+    [[ "$active" == "work" ]] || {
+        echo "  ASSERTION FAILED: expected active profile 'work', got '$active'" >&2
+        return 1
+    }
+}
+
+test_profile_switch_fails_if_not_exists() {
+    cd "$TEST_DIR"
+    local output exit_code
+    output=$("$NIXY" profile switch nonexistent 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "does not exist"
+}
+
+test_profile_list() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile create personal >/dev/null 2>&1
+
+    local output
+    output=$("$NIXY" profile list 2>&1)
+
+    assert_output_contains "$output" "work" && \
+    assert_output_contains "$output" "personal"
+}
+
+test_profile_list_shows_active() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch work >/dev/null 2>&1
+
+    local output
+    output=$("$NIXY" profile list 2>&1)
+
+    assert_output_contains "$output" "work (active)"
+}
+
+test_profile_delete_requires_force() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" profile delete work 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "--force"
+}
+
+test_profile_delete_with_force() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" profile delete work --force 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 0 "$exit_code" && \
+    assert_output_contains "$output" "Deleted profile 'work'"
+
+    # Verify profile directory is gone
+    if [[ -d "$NIXY_CONFIG_DIR/profiles/work" ]]; then
+        echo "  ASSERTION FAILED: Profile directory should be deleted"
+        return 1
+    fi
+    return 0
+}
+
+test_profile_delete_active_fails() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch work >/dev/null 2>&1
+
+    local output exit_code
+    output=$("$NIXY" profile delete work --force 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Cannot delete the active profile"
+}
+
+test_help_shows_profile_commands() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "PROFILE COMMANDS" && \
+    assert_output_contains "$output" "profile create" && \
+    assert_output_contains "$output" "profile switch" && \
+    assert_output_contains "$output" "profile list" && \
+    assert_output_contains "$output" "profile delete"
+}
+
+test_install_uses_active_profile() {
+    cd "$TEST_DIR"
+    "$NIXY" profile create work >/dev/null 2>&1
+    "$NIXY" profile switch work >/dev/null 2>&1
+
+    # Add a package (will fail at nix, but flake should be updated)
+    "$NIXY" install hello 2>&1 || true
+
+    # Verify the flake in the work profile was updated
+    assert_file_contains "$NIXY_CONFIG_DIR/profiles/work/flake.nix" "hello = pkgs.hello"
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -2195,6 +2350,21 @@ main() {
     run_test "force flag bypasses warning" test_force_flag_bypasses_warning || true
     run_test "no warning when no modifications" test_no_warning_when_no_modifications || true
     run_test "help shows force flag" test_help_shows_force_flag || true
+
+    # Profile management tests
+    run_test "profile shows default" test_profile_shows_default || true
+    run_test "profile create" test_profile_create || true
+    run_test "profile create fails if exists" test_profile_create_fails_if_exists || true
+    run_test "profile create validates name" test_profile_create_validates_name || true
+    run_test "profile switch" test_profile_switch || true
+    run_test "profile switch fails if not exists" test_profile_switch_fails_if_not_exists || true
+    run_test "profile list" test_profile_list || true
+    run_test "profile list shows active" test_profile_list_shows_active || true
+    run_test "profile delete requires force" test_profile_delete_requires_force || true
+    run_test "profile delete with force" test_profile_delete_with_force || true
+    run_test "profile delete active fails" test_profile_delete_active_fails || true
+    run_test "help shows profile commands" test_help_shows_profile_commands || true
+    run_test "install uses active profile" test_install_uses_active_profile || true
 
     echo ""
     echo "======================================"

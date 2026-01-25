@@ -8,12 +8,15 @@ set -euo pipefail
 # Configuration
 NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nixy}"
 NIXY_ENV="${NIXY_ENV:-$HOME/.local/state/nixy/env}"
+NIXY_PROFILES_DIR="$NIXY_CONFIG_DIR/profiles"
+NIXY_ACTIVE_FILE="$NIXY_CONFIG_DIR/active"
+NIXY_DEFAULT_PROFILE="default"
 GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.28"
+NIXY_VERSION="0.1.29"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -29,6 +32,43 @@ success() { echo -e "${GREEN}==>>${NC} $*"; }
 warn() { echo -e "${YELLOW}Warning:${NC} $*"; }
 error() { echo -e "${RED}Error:${NC} $*" >&2; }
 die() { error "$@"; exit 1; }
+
+# Profile management helpers
+# Get active profile name (returns default if not set)
+get_active_profile() {
+    if [[ -f "$NIXY_ACTIVE_FILE" ]]; then
+        cat "$NIXY_ACTIVE_FILE"
+    else
+        echo "$NIXY_DEFAULT_PROFILE"
+    fi
+}
+
+# Set active profile
+set_active_profile() {
+    local name="$1"
+    mkdir -p "$NIXY_CONFIG_DIR"
+    echo "$name" > "$NIXY_ACTIVE_FILE"
+}
+
+# Get profile directory path
+get_profile_dir() {
+    local name="${1:-$(get_active_profile)}"
+    echo "$NIXY_PROFILES_DIR/$name"
+}
+
+# Check if profile exists
+profile_exists() {
+    local name="$1"
+    [[ -d "$(get_profile_dir "$name")" ]]
+}
+
+# Validate profile name (alphanumeric, dashes, underscores only)
+validate_profile_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        die "Invalid profile name '$name'. Use only letters, numbers, dashes, and underscores."
+    fi
+}
 
 # Check if nixy environment symlink exists
 is_nixy_env_linked() {
@@ -67,8 +107,19 @@ get_flake() {
         die "No flake.nix found in current directory or parents. Use 'nixy init' to create one."
     fi
 
-    # Default: use global flake
-    echo "$GLOBAL_FLAKE"
+    # Default: use active profile's flake (with fallback to legacy location for default profile only)
+    local profile_dir active_profile
+    active_profile=$(get_active_profile)
+    profile_dir=$(get_profile_dir)
+    if [[ -f "$profile_dir/flake.nix" ]]; then
+        echo "$profile_dir/flake.nix"
+    elif [[ "$active_profile" == "$NIXY_DEFAULT_PROFILE" ]] && [[ -f "$GLOBAL_FLAKE" ]]; then
+        # Legacy fallback: only for default profile
+        echo "$GLOBAL_FLAKE"
+    else
+        # New installation or non-default profile: use profile directory
+        echo "$profile_dir/flake.nix"
+    fi
 }
 
 # Get flake directory (resolves symlinks)
@@ -1317,6 +1368,183 @@ cmd_version() {
     echo "nixy version $NIXY_VERSION"
 }
 
+# Profile management commands
+cmd_profile() {
+    local subcmd="${1:-}"
+    shift || true
+
+    case "$subcmd" in
+        create)
+            cmd_profile_create "$@"
+            ;;
+        switch|use)
+            cmd_profile_switch "$@"
+            ;;
+        list|ls)
+            cmd_profile_list "$@"
+            ;;
+        delete|rm)
+            cmd_profile_delete "$@"
+            ;;
+        "")
+            # No subcommand: show current profile
+            local active
+            active=$(get_active_profile)
+            info "Active profile: $active"
+            ;;
+        *)
+            die "Unknown profile subcommand: $subcmd. Run 'nixy help' for usage."
+            ;;
+    esac
+}
+
+cmd_profile_create() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && die "Usage: nixy profile create <name>"
+
+    validate_profile_name "$name"
+
+    local profile_dir
+    profile_dir=$(get_profile_dir "$name")
+
+    if [[ -d "$profile_dir" ]]; then
+        die "Profile '$name' already exists"
+    fi
+
+    info "Creating profile '$name'..."
+    mkdir -p "$profile_dir"
+    generate_flake --flake-dir "$profile_dir" --global > "$profile_dir/flake.nix"
+
+    success "Created profile '$name' at $profile_dir"
+    echo ""
+    info "To switch to this profile, run: nixy profile switch $name"
+}
+
+cmd_profile_switch() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && die "Usage: nixy profile switch <name>"
+
+    validate_profile_name "$name"
+
+    local profile_dir
+    profile_dir=$(get_profile_dir "$name")
+
+    # Auto-create default profile from legacy location if needed
+    if [[ "$name" == "$NIXY_DEFAULT_PROFILE" ]] && [[ ! -d "$profile_dir" ]]; then
+        if [[ -f "$GLOBAL_FLAKE" ]]; then
+            info "Migrating legacy flake to default profile..."
+            mkdir -p "$profile_dir"
+            cp "$GLOBAL_FLAKE" "$profile_dir/flake.nix"
+            [[ -f "$NIXY_CONFIG_DIR/flake.lock" ]] && cp "$NIXY_CONFIG_DIR/flake.lock" "$profile_dir/flake.lock"
+            [[ -d "$LOCAL_PACKAGES_DIR" ]] && cp -r "$LOCAL_PACKAGES_DIR" "$profile_dir/packages"
+        fi
+    fi
+
+    if [[ ! -d "$profile_dir" ]]; then
+        die "Profile '$name' does not exist. Create it with: nixy profile create $name"
+    fi
+
+    info "Switching to profile '$name'..."
+    set_active_profile "$name"
+
+    # Rebuild environment for the new profile
+    if [[ -f "$profile_dir/flake.nix" ]]; then
+        info "Building environment for profile '$name'..."
+        mkdir -p "$(dirname "$NIXY_ENV")"
+        if nix "${NIX_FLAGS[@]}" build "$profile_dir#default" --out-link "$NIXY_ENV" 2>/dev/null; then
+            success "Switched to profile '$name'"
+        else
+            warn "Profile switched but environment build failed. Run 'nixy sync' to rebuild."
+            success "Switched to profile '$name'"
+        fi
+    else
+        success "Switched to profile '$name' (no packages installed)"
+    fi
+}
+
+cmd_profile_list() {
+    local active
+    active=$(get_active_profile)
+
+    info "Available profiles:"
+
+    # Check for legacy flake (not yet migrated)
+    local has_profiles=false
+
+    if [[ -d "$NIXY_PROFILES_DIR" ]]; then
+        for profile_dir in "$NIXY_PROFILES_DIR"/*/; do
+            [[ ! -d "$profile_dir" ]] && continue
+            has_profiles=true
+            local name
+            name=$(basename "$profile_dir")
+            if [[ "$name" == "$active" ]]; then
+                echo "  * $name (active)"
+            else
+                echo "    $name"
+            fi
+        done
+    fi
+
+    # Show legacy location if exists and no profiles yet
+    if [[ "$has_profiles" == "false" ]]; then
+        if [[ -f "$GLOBAL_FLAKE" ]]; then
+            echo "  * default (active, legacy location)"
+            echo ""
+            info "Run 'nixy profile switch default' to migrate to the new profile structure."
+        else
+            echo "  (no profiles)"
+            echo ""
+            info "Create a profile with: nixy profile create <name>"
+        fi
+    fi
+}
+
+cmd_profile_delete() {
+    local name=""
+    local force=false
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force|-f) force=true; shift ;;
+            -*)
+                die "Unknown option: $1. Usage: nixy profile delete [--force] <name>"
+                ;;
+            *)
+                [[ -z "$name" ]] && name="$1"
+                shift
+                ;;
+        esac
+    done
+
+    [[ -z "$name" ]] && die "Usage: nixy profile delete [--force] <name>"
+
+    validate_profile_name "$name"
+
+    local profile_dir
+    profile_dir=$(get_profile_dir "$name")
+
+    if [[ ! -d "$profile_dir" ]]; then
+        die "Profile '$name' does not exist"
+    fi
+
+    local active
+    active=$(get_active_profile)
+
+    if [[ "$name" == "$active" ]]; then
+        die "Cannot delete the active profile. Switch to another profile first."
+    fi
+
+    if [[ "$force" != "true" ]]; then
+        warn "This will delete profile '$name' and all its packages."
+        die "Use --force to confirm deletion."
+    fi
+
+    info "Deleting profile '$name'..."
+    rm -rf "$profile_dir"
+    success "Deleted profile '$name'"
+}
+
 # Show help
 cmd_help() {
     cat << 'EOF'
@@ -1335,6 +1563,13 @@ BASIC COMMANDS:
     list                    List packages in flake.nix
     upgrade [input...]      Upgrade all inputs or specific ones
     version                 Show nixy version
+
+PROFILE COMMANDS:
+    profile                 Show current profile
+    profile create <name>   Create a new profile
+    profile switch <name>   Switch to a different profile
+    profile list            List all profiles
+    profile delete <name>   Delete a profile (--force required)
 
 SYNC COMMANDS:
     sync                    Build environment from flake.nix and create symlink
@@ -1355,10 +1590,11 @@ FLAGS:
                             custom modifications outside markers
 
 CONFIG FILES:
-    Global: ~/.config/nixy/flake.nix (default for install/uninstall/sync)
+    Profiles: ~/.config/nixy/profiles/<name>/flake.nix
+    Active profile: ~/.config/nixy/active
     Local:  ./flake.nix or parent directories (use with --local)
-    Local packages: ~/.config/nixy/packages/
     Environment symlink: ~/.local/state/nixy/env
+    Legacy (auto-migrated): ~/.config/nixy/flake.nix, ~/.config/nixy/packages/
 
 PATH SETUP:
     Add to your shell config:
@@ -1384,6 +1620,9 @@ EXAMPLES:
     nixy shell                          # Enter local dev shell
     nixy version                        # Show current version
     nixy self-upgrade                   # Upgrade to latest version
+    nixy profile create work            # Create a new profile
+    nixy profile switch work            # Switch to 'work' profile
+    nixy profile list                   # List all profiles
 
 EOF
 }
@@ -1428,6 +1667,9 @@ main() {
             ;;
         config)
             cmd_config "${1:-}"
+            ;;
+        profile)
+            cmd_profile "$@"
             ;;
         version|--version|-v)
             cmd_version
