@@ -6,14 +6,14 @@
 set -euo pipefail
 
 # Configuration
-NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nix}"
-NIXY_ENV="${NIXY_ENV:-$HOME/.local/state/nixy/result}"
+NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nixy}"
+NIXY_ENV="${NIXY_ENV:-$HOME/.local/state/nixy/env}"
 GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.23"
+NIXY_VERSION="0.1.24"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -1093,13 +1093,13 @@ cmd_config() {
         bash|zsh|sh)
             cat << 'EOF'
 # nixy shell configuration
-export PATH="$HOME/.local/state/nixy/result/bin:$PATH"
+export PATH="$HOME/.local/state/nixy/env/bin:$PATH"
 EOF
             ;;
         fish)
             cat << 'EOF'
 # nixy shell configuration
-set -gx PATH $HOME/.local/state/nixy/result/bin $PATH
+set -gx PATH $HOME/.local/state/nixy/env/bin $PATH
 EOF
             ;;
         "")
@@ -1157,10 +1157,10 @@ FLAGS:
                             instead of global flake
 
 CONFIG FILES:
-    Global: ~/.config/nix/flake.nix (default for install/uninstall/sync)
+    Global: ~/.config/nixy/flake.nix (default for install/uninstall/sync)
     Local:  ./flake.nix or parent directories (use with --local)
-    Local packages: ~/.config/nix/packages/
-    Environment symlink: ~/.local/state/nixy/result
+    Local packages: ~/.config/nixy/packages/
+    Environment symlink: ~/.local/state/nixy/env
 
 PATH SETUP:
     Add to your shell config:

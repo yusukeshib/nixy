@@ -25,10 +25,10 @@ nixy が提供するもの：
 
 nixy はシンプルな Nix の機能だけを使います - Home Manager も NixOS も不要：
 
-- **グローバルパッケージ**（デフォルト）: `~/.config/nix/` に `flake.nix`、`nix build` でビルド
+- **グローバルパッケージ**（デフォルト）: `~/.config/nixy/` に `flake.nix`、`nix build` でビルド
 - **プロジェクトパッケージ**（`--local`）: プロジェクトディレクトリに `flake.nix` のみ
 
-nixy は**純粋に宣言的** - `flake.nix` が唯一の真実の源です。可変な状態を持つ `nix profile` とは異なり、nixy は `nix build --out-link` を使ってビルド済み環境へのシンボリックリンク（`~/.local/state/nixy/result`）を作成します。これにより：
+nixy は**純粋に宣言的** - `flake.nix` が唯一の真実の源です。可変な状態を持つ `nix profile` とは異なり、nixy は `nix build --out-link` を使ってビルド済み環境へのシンボリックリンク（`~/.local/state/nixy/env`）を作成します。これにより：
 - 同期が狂う隠れたプロファイル状態がない
 - `flake.nix` にあるものが、そのままインストールされているもの
 - 理解しやすく、デバッグしやすく、バージョン管理しやすい
@@ -77,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | b
 ### 3. Homebrew のように使い始める
 
 ```bash
-nixy install ripgrep    # 初回実行時に ~/.config/nix/flake.nix を自動作成
+nixy install ripgrep    # 初回実行時に ~/.config/nixy/flake.nix を自動作成
 nixy install nodejs
 nixy install git
 
@@ -106,15 +106,15 @@ Homebrew と同じように、パッケージはグローバルにインスト�
 
 ## 複数マシンで同期
 
-パッケージリストはただのテキストファイル（`~/.config/nix/flake.nix`）。バックアップしたり、バージョン管理したり、dotfiles と一緒に同期できます：
+パッケージリストはただのテキストファイル（`~/.config/nixy/flake.nix`）。バックアップしたり、バージョン管理したり、dotfiles と一緒に同期できます：
 
 ```bash
 # パッケージリストをバックアップ
-cp ~/.config/nix/flake.nix ~/dotfiles/
+cp ~/.config/nixy/flake.nix ~/dotfiles/
 
 # 新しいマシンで：
 mkdir -p ~/.config/nix
-cp ~/dotfiles/flake.nix ~/.config/nix/
+cp ~/dotfiles/flake.nix ~/.config/nixy/
 nixy sync    # flake.nix からすべてをインストール
 ```
 
@@ -171,7 +171,7 @@ nixy shell             # 全プロジェクトパッケージ入りの開発シ�
 `nixy search <キーワード>` を使ってください。パッケージ名は予想と異なることがあります（例：`rg` ではなく `ripgrep`）。
 
 **パッケージは実際にどこにインストールされる？**
-Nix ストア（`/nix/store/`）にインストールされます。nixy は統合された環境をビルドし、`~/.local/state/nixy/result` にシンボリックリンクを作成します。`nixy config` コマンドでこの場所を PATH に追加する設定を行います。
+Nix ストア（`/nix/store/`）にインストールされます。nixy は統合された環境をビルドし、`~/.local/state/nixy/env` にシンボリックリンクを作成します。`nixy config` コマンドでこの場所を PATH に追加する設定を行います。
 
 **flake.nix を手動で編集できる？**
 はい、ただし注意が必要です。nixy はパッケージのインストール/アンインストール時に flake.nix 全体を再生成し、`# [nixy:...]` マーカー内の内容のみ保持します。高度なカスタマイズが必要な場合は、flake.nix を手動で管理し `nix` コマンドを直接使用することを検討してください。
@@ -211,17 +211,17 @@ nixy install --file my-package.nix
 
 | パス | 説明 |
 |------|------|
-| `~/.config/nix/flake.nix` | グローバルパッケージ（デフォルト） |
+| `~/.config/nixy/flake.nix` | グローバルパッケージ（デフォルト） |
 | `./flake.nix` | プロジェクトローカルパッケージ（`--local` で使用） |
-| `~/.config/nix/packages/` | カスタムパッケージ定義 |
-| `~/.local/state/nixy/result` | ビルド済み環境へのシンボリックリンク（`bin/` を PATH に追加） |
+| `~/.config/nixy/packages/` | カスタムパッケージ定義 |
+| `~/.local/state/nixy/env` | ビルド済み環境へのシンボリックリンク（`bin/` を PATH に追加） |
 
 ### 環境変数
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `NIXY_CONFIG_DIR` | `~/.config/nix` | グローバル flake.nix の場所 |
-| `NIXY_ENV` | `~/.local/state/nixy/result` | ビルド済み環境へのシンボリックリンク |
+| `NIXY_CONFIG_DIR` | `~/.config/nixy` | グローバル flake.nix の場所 |
+| `NIXY_ENV` | `~/.local/state/nixy/env` | ビルド済み環境へのシンボリックリンク |
 
 ### 制限事項
 

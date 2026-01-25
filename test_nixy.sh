@@ -1324,7 +1324,7 @@ test_config_zsh_outputs_path() {
     local output
     output=$("$NIXY" config zsh 2>&1)
     assert_output_contains "$output" 'export PATH=' && \
-    assert_output_contains "$output" '.local/state/nixy/result/bin'
+    assert_output_contains "$output" '.local/state/nixy/env/bin'
 }
 
 test_config_bash_outputs_path() {
@@ -1337,7 +1337,7 @@ test_config_fish_outputs_path() {
     local output
     output=$("$NIXY" config fish 2>&1)
     assert_output_contains "$output" 'set -gx PATH' && \
-    assert_output_contains "$output" '.local/state/nixy/result/bin'
+    assert_output_contains "$output" '.local/state/nixy/env/bin'
 }
 
 test_config_without_shell_fails() {

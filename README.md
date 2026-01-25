@@ -29,10 +29,10 @@ Unlike `nix profile`, nixy uses `flake.nix` + `flake.lock` for full reproducibil
 
 nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup:
 
-- **Global packages** (default): `flake.nix` at `~/.config/nix/`, built with `nix build`
+- **Global packages** (default): `flake.nix` at `~/.config/nixy/`, built with `nix build`
 - **Project packages** (`--local`): Just a `flake.nix` in your project directory
 
-nixy is **purely declarative** - your `flake.nix` is the single source of truth. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/result`) pointing to your built environment. This means:
+nixy is **purely declarative** - your `flake.nix` is the single source of truth. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/env`) pointing to your built environment. This means:
 - No hidden profile state to get out of sync
 - What's in `flake.nix` is exactly what's installed
 - Easy to understand, debug, and version control
@@ -95,7 +95,7 @@ nixy config fish | source
 ### 4. Start using it like Homebrew
 
 ```bash
-nixy install ripgrep    # First run auto-creates ~/.config/nix/flake.nix
+nixy install ripgrep    # First run auto-creates ~/.config/nixy/flake.nix
 nixy install nodejs
 nixy install git
 
@@ -124,15 +124,15 @@ Just like Homebrew - packages are installed globally and available in all termin
 
 ## Sync Across Machines
 
-Your package list is just a text file (`~/.config/nix/flake.nix`). Back it up, version control it, or sync it with dotfiles:
+Your package list is just a text file (`~/.config/nixy/flake.nix`). Back it up, version control it, or sync it with dotfiles:
 
 ```bash
 # Back up your package list
-cp ~/.config/nix/flake.nix ~/dotfiles/
+cp ~/.config/nixy/flake.nix ~/dotfiles/
 
 # On a new machine:
 mkdir -p ~/.config/nix
-cp ~/dotfiles/flake.nix ~/.config/nix/
+cp ~/dotfiles/flake.nix ~/.config/nixy/
 nixy sync    # Installs everything from flake.nix
 ```
 
@@ -189,7 +189,7 @@ Yes. They don't conflict. You can migrate gradually or use both.
 Use `nixy search <keyword>`. Package names sometimes differ from what you expect (e.g., `ripgrep` not `rg`).
 
 **Where are packages actually installed?**
-In the Nix store (`/nix/store/`). nixy builds a combined environment and creates a symlink at `~/.local/state/nixy/result` pointing to it. The `nixy config` command sets up your PATH to include this location.
+In the Nix store (`/nix/store/`). nixy builds a combined environment and creates a symlink at `~/.local/state/nixy/env` pointing to it. The `nixy config` command sets up your PATH to include this location.
 
 **Can I edit the flake.nix manually?**
 Yes, but with care. nixy regenerates the entire flake.nix when you install/uninstall packages, preserving only what's inside the `# [nixy:...]` markers. For heavy customization, consider managing flake.nix manually and using `nix` commands directly.
@@ -229,17 +229,17 @@ Format for `my-package.nix`:
 
 | Path | Description |
 |------|-------------|
-| `~/.config/nix/flake.nix` | Global packages (default) |
+| `~/.config/nixy/flake.nix` | Global packages (default) |
 | `./flake.nix` | Project-local packages (with `--local`) |
-| `~/.config/nix/packages/` | Custom package definitions |
-| `~/.local/state/nixy/result` | Symlink to built environment (add `bin/` to PATH) |
+| `~/.config/nixy/packages/` | Custom package definitions |
+| `~/.local/state/nixy/env` | Symlink to built environment (add `bin/` to PATH) |
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NIXY_CONFIG_DIR` | `~/.config/nix` | Location of global flake.nix |
-| `NIXY_ENV` | `~/.local/state/nixy/result` | Symlink to built environment |
+| `NIXY_CONFIG_DIR` | `~/.config/nixy` | Location of global flake.nix |
+| `NIXY_ENV` | `~/.local/state/nixy/env` | Symlink to built environment |
 
 ### Limitations
 
