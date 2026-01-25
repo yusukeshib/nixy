@@ -93,6 +93,27 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_multiple_packages() {
+        let content = "# [nixy:packages]\n# [/nixy:packages]\n";
+        let result = insert_after_marker(content, "nixy:packages", "          ripgrep = pkgs.ripgrep;");
+        let result = insert_after_marker(&result, "nixy:packages", "          fzf = pkgs.fzf;");
+
+        assert!(result.contains("ripgrep = pkgs.ripgrep;"));
+        assert!(result.contains("fzf = pkgs.fzf;"));
+    }
+
+    #[test]
+    fn test_insert_preserves_existing_content() {
+        let content = "before\n# [nixy:packages]\n          existing = pkgs.existing;\n# [/nixy:packages]\nafter\n";
+        let result = insert_after_marker(content, "nixy:packages", "          new = pkgs.new;");
+
+        assert!(result.contains("before"));
+        assert!(result.contains("after"));
+        assert!(result.contains("existing = pkgs.existing;"));
+        assert!(result.contains("new = pkgs.new;"));
+    }
+
+    #[test]
     fn test_remove_from_section() {
         let content = "# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\n";
         let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
@@ -101,9 +122,64 @@ mod tests {
     }
 
     #[test]
+    fn test_remove_preserves_other_packages() {
+        let content = "# [nixy:packages]\n          ripgrep = pkgs.ripgrep;\n          fzf = pkgs.fzf;\n          bat = pkgs.bat;\n# [/nixy:packages]\n";
+        let pattern = Regex::new(r"^\s*fzf = pkgs\.fzf;").unwrap();
+        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+
+        assert!(!result.contains("fzf = pkgs.fzf;"));
+        assert!(result.contains("ripgrep = pkgs.ripgrep;"));
+        assert!(result.contains("bat = pkgs.bat;"));
+    }
+
+    #[test]
+    fn test_remove_preserves_content_outside_section() {
+        let content = "before section\n# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\nafter section\n";
+        let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
+        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+
+        assert!(result.contains("before section"));
+        assert!(result.contains("after section"));
+    }
+
+    #[test]
+    fn test_remove_only_in_correct_section() {
+        let content = "# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\n# [nixy:custom-packages]\n          hello = custom.hello;\n# [/nixy:custom-packages]\n";
+        let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
+        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+
+        // Should remove from nixy:packages
+        assert!(!result.contains("hello = pkgs.hello;"));
+        // Should NOT remove from custom-packages (different pattern)
+        assert!(result.contains("hello = custom.hello;"));
+    }
+
+    #[test]
     fn test_extract_marker_content() {
         let content = "# [nixy:custom-inputs]\n    foo.url = \"github:foo/bar\";\n# [/nixy:custom-inputs]\n";
         let result = extract_marker_content(content, "nixy:custom-inputs");
         assert_eq!(result.trim(), "foo.url = \"github:foo/bar\";");
+    }
+
+    #[test]
+    fn test_extract_empty_marker_content() {
+        let content = "# [nixy:custom-inputs]\n# [/nixy:custom-inputs]\n";
+        let result = extract_marker_content(content, "nixy:custom-inputs");
+        assert!(result.trim().is_empty());
+    }
+
+    #[test]
+    fn test_extract_multiline_content() {
+        let content = "# [nixy:custom-inputs]\n    foo.url = \"github:foo/bar\";\n    bar.url = \"github:bar/baz\";\n# [/nixy:custom-inputs]\n";
+        let result = extract_marker_content(content, "nixy:custom-inputs");
+        assert!(result.contains("foo.url"));
+        assert!(result.contains("bar.url"));
+    }
+
+    #[test]
+    fn test_extract_nonexistent_marker() {
+        let content = "# [nixy:packages]\nhello = pkgs.hello;\n# [/nixy:packages]\n";
+        let result = extract_marker_content(content, "nixy:nonexistent");
+        assert!(result.is_empty());
     }
 }

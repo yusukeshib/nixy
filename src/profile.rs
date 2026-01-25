@@ -195,3 +195,200 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_config(temp: &TempDir) -> Config {
+        Config {
+            config_dir: temp.path().join("config"),
+            profiles_dir: temp.path().join("config/profiles"),
+            active_file: temp.path().join("config/active"),
+            env_link: temp.path().join("env"),
+            legacy_flake: temp.path().join("config/flake.nix"),
+        }
+    }
+
+    #[test]
+    fn test_validate_profile_name_valid() {
+        assert!(validate_profile_name("default").is_ok());
+        assert!(validate_profile_name("work").is_ok());
+        assert!(validate_profile_name("my-profile").is_ok());
+        assert!(validate_profile_name("profile_123").is_ok());
+        assert!(validate_profile_name("Profile-Test_123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_profile_name_invalid() {
+        assert!(validate_profile_name("invalid name").is_err());
+        assert!(validate_profile_name("invalid!name").is_err());
+        assert!(validate_profile_name("invalid@name").is_err());
+        assert!(validate_profile_name("invalid/name").is_err());
+        assert!(validate_profile_name("").is_err());
+    }
+
+    #[test]
+    fn test_get_active_profile_default() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Without active file, should return default
+        let active = get_active_profile(&config);
+        assert_eq!(active, DEFAULT_PROFILE);
+    }
+
+    #[test]
+    fn test_get_active_profile_custom() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create active file
+        fs::create_dir_all(&config.config_dir).unwrap();
+        fs::write(&config.active_file, "work").unwrap();
+
+        let active = get_active_profile(&config);
+        assert_eq!(active, "work");
+    }
+
+    #[test]
+    fn test_set_active_profile() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        set_active_profile(&config, "work").unwrap();
+
+        let content = fs::read_to_string(&config.active_file).unwrap();
+        assert_eq!(content, "work");
+    }
+
+    #[test]
+    fn test_profile_create_and_exists() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        let profile = Profile::new("test", &config);
+        assert!(!profile.exists());
+
+        profile.create().unwrap();
+        assert!(profile.exists());
+        assert!(profile.dir.exists());
+    }
+
+    #[test]
+    fn test_profile_delete() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        let profile = Profile::new("test", &config);
+        profile.create().unwrap();
+        assert!(profile.exists());
+
+        profile.delete().unwrap();
+        assert!(!profile.exists());
+    }
+
+    #[test]
+    fn test_list_profiles_empty() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        let profiles = list_profiles(&config).unwrap();
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_list_profiles_multiple() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create some profiles
+        let profile1 = Profile::new("work", &config);
+        let profile2 = Profile::new("personal", &config);
+        let profile3 = Profile::new("default", &config);
+        profile1.create().unwrap();
+        profile2.create().unwrap();
+        profile3.create().unwrap();
+
+        let profiles = list_profiles(&config).unwrap();
+        assert_eq!(profiles.len(), 3);
+        // Should be sorted
+        assert_eq!(profiles, vec!["default", "personal", "work"]);
+    }
+
+    #[test]
+    fn test_has_legacy_flake() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // No legacy flake
+        assert!(!has_legacy_flake(&config));
+
+        // Create legacy flake
+        fs::create_dir_all(&config.config_dir).unwrap();
+        fs::write(&config.legacy_flake, "{}").unwrap();
+        assert!(has_legacy_flake(&config));
+
+        // Create default profile - should no longer be legacy
+        let default_profile = Profile::new(DEFAULT_PROFILE, &config);
+        default_profile.create().unwrap();
+        assert!(!has_legacy_flake(&config));
+    }
+
+    #[test]
+    fn test_get_flake_path_profile() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create profile with flake
+        let profile = Profile::new(DEFAULT_PROFILE, &config);
+        profile.create().unwrap();
+        fs::write(&profile.flake_path, "{}").unwrap();
+
+        let flake_path = get_flake_path(&config);
+        assert_eq!(flake_path, profile.flake_path);
+    }
+
+    #[test]
+    fn test_get_flake_path_legacy_fallback() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create only legacy flake
+        fs::create_dir_all(&config.config_dir).unwrap();
+        fs::write(&config.legacy_flake, "{}").unwrap();
+
+        let flake_path = get_flake_path(&config);
+        assert_eq!(flake_path, config.legacy_flake);
+    }
+
+    #[test]
+    fn test_migrate_legacy_flake() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create legacy flake and lock
+        fs::create_dir_all(&config.config_dir).unwrap();
+        fs::write(&config.legacy_flake, "{ legacy = true; }").unwrap();
+        fs::write(config.config_dir.join("flake.lock"), "{}").unwrap();
+
+        // Create legacy packages directory
+        let legacy_packages = config.config_dir.join("packages");
+        fs::create_dir_all(&legacy_packages).unwrap();
+        fs::write(legacy_packages.join("test.nix"), "{}").unwrap();
+
+        // Migrate
+        migrate_legacy_flake(&config).unwrap();
+
+        // Check profile was created
+        let profile = Profile::new(DEFAULT_PROFILE, &config);
+        assert!(profile.flake_path.exists());
+        assert!(profile.dir.join("flake.lock").exists());
+        assert!(profile.packages_dir.join("test.nix").exists());
+
+        // Check content was copied
+        let content = fs::read_to_string(&profile.flake_path).unwrap();
+        assert!(content.contains("legacy = true"));
+    }
+}
