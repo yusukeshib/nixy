@@ -1889,11 +1889,12 @@ test_install_from_adds_to_custom_packages() {
     "$NIXY" install --from nixpkgs hello 2>&1 || true
 
     # Verify the package was added to custom-packages section
-    # Note: nixpkgs uses legacyPackages, not packages
+    # Note: nixpkgs uses legacyPackages, and we reuse the existing nixpkgs input
     local packages_section
     packages_section=$(sed -n '/# \[nixy:custom-packages\]/,/# \[\/nixy:custom-packages\]/p' "$profile_dir/flake.nix")
     if ! echo "$packages_section" | grep -q "hello = inputs.nixpkgs.legacyPackages"; then
         echo "  ASSERTION FAILED: hello package should be in custom-packages section with legacyPackages"
+        echo "  Got: $packages_section"
         return 1
     fi
     return 0
@@ -1958,6 +1959,37 @@ test_lookup_registry_function() {
         return 1
     fi
 
+    return 0
+}
+
+test_install_from_direct_url_detected() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    # Direct URL should be detected (contains ':')
+    local output exit_code
+    output=$("$NIXY" install --from github:NixOS/nixpkgs hello 2>&1) && exit_code=0 || exit_code=$?
+
+    # Should show "Using flake URL" message (not "Looking up in registry")
+    assert_output_contains "$output" "Using flake URL"
+}
+
+test_install_from_direct_url_generates_input_name() {
+    cd "$TEST_DIR"
+    "$NIXY" profile switch -c default >/dev/null 2>&1 || true
+
+    local profile_dir="$NIXY_CONFIG_DIR/profiles/default"
+
+    # Install from direct URL (using nixpkgs which already exists as default input)
+    "$NIXY" install --from github:NixOS/nixpkgs hello 2>&1 || true
+
+    # For NixOS/nixpkgs URLs, we reuse the existing nixpkgs input
+    # Verify the package references inputs.nixpkgs
+    if ! grep -q "inputs.nixpkgs.legacyPackages" "$profile_dir/flake.nix"; then
+        echo "  ASSERTION FAILED: flake.nix should reference inputs.nixpkgs"
+        cat "$profile_dir/flake.nix"
+        return 1
+    fi
     return 0
 }
 
@@ -2097,6 +2129,8 @@ main() {
     run_test "install --from validates package" test_install_from_validates_package || true
     run_test "help shows --from option" test_help_shows_from_option || true
     run_test "lookup_registry function works" test_lookup_registry_function || true
+    run_test "install --from direct URL detected" test_install_from_direct_url_detected || true
+    run_test "install --from direct URL uses existing nixpkgs" test_install_from_direct_url_generates_input_name || true
 
     echo ""
     echo "======================================"

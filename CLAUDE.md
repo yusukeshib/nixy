@@ -19,6 +19,7 @@ This keeps the main worktree clean and allows parallel development.
 ### 2. Make Changes
 - Edit `nixy` (the main script)
 - Follow existing code patterns and style
+- **Update documentation**: If adding new commands or options, update both `README.md` and `README_ja.md`
 
 ### 3. Add Tests
 - Add tests to `test_nixy.sh`

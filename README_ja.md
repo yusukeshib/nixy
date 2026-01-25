@@ -103,7 +103,8 @@ nixy upgrade            # 全パッケージをアップグレード
 
 | コマンド | 説明 |
 |---------|------|
-| `nixy install <pkg>` | パッケージをグローバルにインストール |
+| `nixy install <pkg>` | nixpkgs からパッケージをインストール |
+| `nixy install --from <flake> <pkg>` | flake からインストール（レジストリ名または URL） |
 | `nixy uninstall <pkg>` | パッケージをアンインストール |
 | `nixy list` | インストール済みパッケージを一覧表示 |
 | `nixy search <query>` | パッケージを検索 |
@@ -261,6 +262,20 @@ nixy と `nix profile` は別のパスを使用するため、競合しません
 - nix profile: `~/.nix-profile/bin`
 
 両方が PATH にある場合、先にリストされた方が、両方にインストールされたパッケージで優先されます。異なる目的で両方のツールを使用できます。
+
+### 外部 flake からのインストール
+
+`--from` を使って任意の flake からパッケージをインストールできます：
+
+```bash
+# 直接 flake URL を指定
+nixy install --from github:nix-community/neovim-nightly-overlay neovim
+
+# または nix レジストリ名を使用
+nixy install --from nixpkgs hello
+```
+
+flake はカスタム input として `flake.nix` に追加され、再現性のために完全な URL が保存されます。パッケージをエクスポートする任意の flake で動作します。
 
 ### カスタムパッケージ定義
 

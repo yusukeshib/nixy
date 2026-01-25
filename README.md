@@ -108,7 +108,8 @@ Packages are installed globally and available in all terminal sessions.
 
 | Command | Description |
 |---------|-------------|
-| `nixy install <pkg>` | Install a package globally |
+| `nixy install <pkg>` | Install a package from nixpkgs |
+| `nixy install --from <flake> <pkg>` | Install from a flake (registry name or URL) |
 | `nixy uninstall <pkg>` | Uninstall a package |
 | `nixy list` | List packages in flake.nix |
 | `nixy search <query>` | Search for packages |
@@ -266,6 +267,20 @@ nixy and `nix profile` use separate paths and don't conflict:
 - nix profile: `~/.nix-profile/bin`
 
 If you have both in your PATH, the one listed first takes precedence for packages installed in both. You can use both tools for different purposes.
+
+### Installing from External Flakes
+
+Install packages from any flake using `--from`:
+
+```bash
+# Direct flake URL
+nixy install --from github:nix-community/neovim-nightly-overlay neovim
+
+# Or use nix registry names
+nixy install --from nixpkgs hello
+```
+
+The flake is added as a custom input to your `flake.nix`, and the full URL is stored for reproducibility. This works with any flake that exports packages.
 
 ### Custom Package Definitions
 
