@@ -8,11 +8,31 @@ fn nixy_cmd() -> Command {
     cmd
 }
 
-fn setup_test_env() -> TempDir {
-    let temp = TempDir::new().unwrap();
-    std::env::set_var("NIXY_CONFIG_DIR", temp.path().join("config"));
-    std::env::set_var("NIXY_ENV", temp.path().join("env"));
-    temp
+/// Test environment that passes config via subprocess environment variables
+/// instead of modifying global process state (avoids race conditions in parallel tests)
+struct TestEnv {
+    _temp: TempDir,
+    config_dir: std::path::PathBuf,
+    env_path: std::path::PathBuf,
+}
+
+impl TestEnv {
+    fn new() -> Self {
+        let temp = TempDir::new().unwrap();
+        Self {
+            config_dir: temp.path().join("config"),
+            env_path: temp.path().join("env"),
+            _temp: temp,
+        }
+    }
+
+    /// Create a nixy command with test environment variables set
+    fn cmd(&self) -> Command {
+        let mut cmd = nixy_cmd();
+        cmd.env("NIXY_CONFIG_DIR", &self.config_dir);
+        cmd.env("NIXY_ENV", &self.env_path);
+        cmd
+    }
 }
 
 // =============================================================================
@@ -105,8 +125,8 @@ fn test_config_no_shell() {
 
 #[test]
 fn test_list_no_flake() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("list").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("list").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
@@ -118,8 +138,8 @@ fn test_list_no_flake() {
 
 #[test]
 fn test_sync_no_flake() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("sync").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("sync").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
@@ -131,8 +151,8 @@ fn test_sync_no_flake() {
 
 #[test]
 fn test_profile_shows_default() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("profile").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("profile").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Active profile: default"));
@@ -140,8 +160,8 @@ fn test_profile_shows_default() {
 
 #[test]
 fn test_profile_list_empty() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().args(["profile", "list"]).output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().args(["profile", "list"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("no profiles") || stdout.contains("Available profiles"));
@@ -149,10 +169,11 @@ fn test_profile_list_empty() {
 
 #[test]
 fn test_profile_switch_create() {
-    let _temp = setup_test_env();
+    let env = TestEnv::new();
 
     // Create a new profile
-    let output = nixy_cmd()
+    let output = env
+        .cmd()
         .args(["profile", "switch", "-c", "test-profile"])
         .output()
         .unwrap();
@@ -181,9 +202,10 @@ fn test_profile_switch_create() {
 
 #[test]
 fn test_profile_switch_nonexistent() {
-    let _temp = setup_test_env();
+    let env = TestEnv::new();
 
-    let output = nixy_cmd()
+    let output = env
+        .cmd()
         .args(["profile", "switch", "nonexistent"])
         .output()
         .unwrap();
@@ -198,9 +220,10 @@ fn test_profile_switch_nonexistent() {
 
 #[test]
 fn test_profile_delete_nonexistent() {
-    let _temp = setup_test_env();
+    let env = TestEnv::new();
 
-    let output = nixy_cmd()
+    let output = env
+        .cmd()
         .args(["profile", "delete", "nonexistent", "--force"])
         .output()
         .unwrap();
@@ -210,9 +233,10 @@ fn test_profile_delete_nonexistent() {
 
 #[test]
 fn test_invalid_profile_name() {
-    let _temp = setup_test_env();
+    let env = TestEnv::new();
 
-    let output = nixy_cmd()
+    let output = env
+        .cmd()
         .args(["profile", "switch", "-c", "invalid name!"])
         .output()
         .unwrap();
@@ -228,15 +252,16 @@ fn test_invalid_profile_name() {
 
 #[test]
 fn test_install_requires_package() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("install").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("install").output().unwrap();
     assert!(!output.status.success());
 }
 
 #[test]
 fn test_install_from_requires_package() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd()
+    let env = TestEnv::new();
+    let output = env
+        .cmd()
         .args(["install", "--from", "nixpkgs"])
         .output()
         .unwrap();
@@ -247,8 +272,9 @@ fn test_install_from_requires_package() {
 
 #[test]
 fn test_install_file_not_found() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd()
+    let env = TestEnv::new();
+    let output = env
+        .cmd()
         .args(["install", "--file", "nonexistent.nix"])
         .output()
         .unwrap();
@@ -263,8 +289,8 @@ fn test_install_file_not_found() {
 
 #[test]
 fn test_upgrade_no_flake() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("upgrade").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("upgrade").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
@@ -276,15 +302,15 @@ fn test_upgrade_no_flake() {
 
 #[test]
 fn test_uninstall_requires_package() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().arg("uninstall").output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().arg("uninstall").output().unwrap();
     assert!(!output.status.success());
 }
 
 #[test]
 fn test_uninstall_no_flake() {
-    let _temp = setup_test_env();
-    let output = nixy_cmd().args(["uninstall", "hello"]).output().unwrap();
+    let env = TestEnv::new();
+    let output = env.cmd().args(["uninstall", "hello"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
@@ -508,12 +534,13 @@ fn test_empty_command_shows_help() {
 
 #[test]
 fn test_install_validates_file_extension() {
-    let _temp = setup_test_env();
+    let env = TestEnv::new();
     // Create a non-.nix file
     let temp_file = std::env::temp_dir().join("test.txt");
     std::fs::write(&temp_file, "not a nix file").unwrap();
 
-    let output = nixy_cmd()
+    let output = env
+        .cmd()
         .args(["install", "--file", temp_file.to_str().unwrap()])
         .output()
         .unwrap();

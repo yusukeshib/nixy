@@ -20,7 +20,8 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("~/.config"))
+                    .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+                    .unwrap_or_else(|| PathBuf::from(".config"))
                     .join("nixy")
             });
 
@@ -28,11 +29,8 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 dirs::state_dir()
-                    .unwrap_or_else(|| {
-                        dirs::home_dir()
-                            .unwrap_or_else(|| PathBuf::from("~"))
-                            .join(".local/state")
-                    })
+                    .or_else(|| dirs::home_dir().map(|h| h.join(".local/state")))
+                    .unwrap_or_else(|| PathBuf::from(".local/state"))
                     .join("nixy/env")
             });
 

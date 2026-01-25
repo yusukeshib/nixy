@@ -2,6 +2,7 @@
 name = "nixy-rs"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80"
 description = "Homebrew-style wrapper for Nix using flake.nix"
 license = "MIT"
 repository = "https://github.com/yusukeshib/nixy"
