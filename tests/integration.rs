@@ -561,7 +561,12 @@ fn test_upgrade_help() {
     let output = nixy_cmd().args(["upgrade", "--help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("nixpkgs") || stdout.contains("input") || stdout.contains("Usage"));
+    // Check for upgrade-specific content, not generic "Usage"
+    assert!(
+        stdout.contains("nixpkgs") || stdout.contains("input") || stdout.contains("flake"),
+        "Upgrade help should mention nixpkgs, input, or flake: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -587,7 +592,10 @@ fn test_upgrade_requires_lock_file_for_specific_input() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("flake.lock") || stderr.contains("lock") || stderr.contains("sync"),
+        stderr.contains("flake.lock")
+            || stderr.contains("lock file")
+            || stderr.contains("lockfile")
+            || stderr.contains("sync"),
         "Should mention lock file: {}",
         stderr
     );
@@ -616,8 +624,9 @@ fn test_upgrade_handles_corrupted_lock_file() {
     let output = env.cmd().args(["upgrade", "nixpkgs"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_lower = stderr.to_lowercase();
     assert!(
-        stderr.contains("parse") || stderr.contains("invalid") || stderr.contains("Failed"),
+        stderr.contains("parse") || stderr.contains("invalid") || stderr_lower.contains("failed"),
         "Should mention parse failure: {}",
         stderr
     );
@@ -639,16 +648,26 @@ fn test_sync_with_profile() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should mention building environment or fail gracefully
-    assert!(
-        stdout.contains("Building")
-            || stdout.contains("environment")
-            || stderr.contains("build")
-            || output.status.success(),
-        "Sync should attempt to build: stdout={}, stderr={}",
-        stdout,
-        stderr
-    );
+    // Sync should either succeed (build completed) or fail with build-related message
+    // Not just accepting any success - must show evidence of sync attempt
+    if output.status.success() {
+        // If successful, should show building/syncing messages
+        assert!(
+            stdout.contains("Building")
+                || stdout.contains("environment")
+                || stdout.contains("Syncing")
+                || stdout.contains("nix"),
+            "Sync success should show progress: stdout={}",
+            stdout
+        );
+    } else {
+        // If failed, should be a build-related failure
+        assert!(
+            stderr.contains("build") || stderr.contains("nix") || stderr.contains("flake"),
+            "Sync failure should be build-related: stderr={}",
+            stderr
+        );
+    }
 }
 
 // =============================================================================
@@ -694,7 +713,7 @@ fn test_profile_delete_requires_force() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--force") || stderr.contains("force"),
+        stderr.contains("--force"),
         "Should mention --force: {}",
         stderr
     );
@@ -716,8 +735,12 @@ fn test_profile_delete_active_fails() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_lower = stderr.to_lowercase();
     assert!(
-        stderr.contains("active") || stderr.contains("Cannot delete"),
+        stderr_lower.contains("active")
+            || stderr_lower.contains("cannot delete")
+            || stderr_lower.contains("can't delete")
+            || stderr_lower.contains("unable to delete"),
         "Should prevent deleting active profile: {}",
         stderr
     );
@@ -727,15 +750,12 @@ fn test_profile_delete_active_fails() {
 fn test_profile_delete_with_force_success() {
     let env = TestEnv::new();
 
-    // Create two profiles
+    // Create two profiles and end up on default so work is not active
     let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
     let _ = env
         .cmd()
         .args(["profile", "switch", "-c", "default"])
         .output();
-
-    // Switch to default so work is not active
-    let _ = env.cmd().args(["profile", "switch", "default"]).output();
 
     // Delete work with --force
     let output = env
@@ -744,14 +764,21 @@ fn test_profile_delete_with_force_success() {
         .output()
         .unwrap();
 
-    // Should succeed or at least attempt to delete
+    // Should succeed with a confirmation message
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_lower = stdout.to_lowercase();
     assert!(
-        output.status.success() || stdout.contains("Deleted") || stderr.contains("Deleted"),
-        "Should delete profile: stdout={}, stderr={}",
+        output.status.success(),
+        "Profile delete with --force should succeed: stdout={}, stderr={}",
         stdout,
-        stderr
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout_lower.contains("deleted")
+            || stdout_lower.contains("removed")
+            || stdout.contains("work"),
+        "Should confirm deletion: {}",
+        stdout
     );
 }
 
@@ -776,10 +803,20 @@ fn test_profile_switch_with_existing() {
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should switch successfully
+    // Should switch successfully - verify both success and mention of work profile
     assert!(
-        output.status.success() || stdout.contains("Switched") || stdout.contains("work"),
-        "Should switch to existing profile"
+        output.status.success(),
+        "Should switch to existing profile: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Verify that the profile switch was acknowledged
+    let stdout_lower = stdout.to_lowercase();
+    assert!(
+        stdout_lower.contains("switched")
+            || stdout.contains("work")
+            || stdout_lower.contains("profile"),
+        "Should confirm switch to work profile: {}",
+        stdout
     );
 }
 
@@ -861,8 +898,14 @@ pkgs.stdenv.mkDerivation {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_lower = stderr.to_lowercase();
     assert!(
-        stderr.contains("name") || stderr.contains("pname") || stderr.contains("Could not find"),
+        stderr.contains("name")
+            || stderr.contains("pname")
+            || stderr_lower.contains("could not find")
+            || stderr_lower.contains("cannot find")
+            || stderr_lower.contains("unable to find")
+            || stderr_lower.contains("missing"),
         "Should mention missing name: {}",
         stderr
     );
@@ -903,11 +946,17 @@ fn test_install_file_detects_flake() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_lower = stdout.to_lowercase();
+    let stderr_lower = stderr.to_lowercase();
 
-    // Should detect and process as flake
+    // Should detect and process as flake (not as a regular package file)
+    // The key indicator is that it recognizes this as a flake format with inputs/outputs
     assert!(
-        stdout.contains("flake") || stdout.contains("my-flake") || stderr.contains("flake"),
-        "Should detect flake file: stdout={}, stderr={}",
+        stdout_lower.contains("flake")
+            || stderr_lower.contains("flake")
+            || stdout.contains("inputs")
+            || stderr.contains("inputs"),
+        "Should detect flake file format: stdout={}, stderr={}",
         stdout,
         stderr
     );
@@ -918,48 +967,33 @@ fn test_install_file_detects_flake() {
 // =============================================================================
 
 #[test]
-fn test_self_upgrade_help() {
+fn test_self_upgrade_help_and_flags() {
+    // Single comprehensive test for self-upgrade help output
     let output = nixy_cmd()
         .args(["self-upgrade", "--help"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("force") || stdout.contains("upgrade"));
-}
 
-#[test]
-fn test_self_upgrade_accepts_force_flag() {
-    // Test that --force is a valid option by checking help output
-    let output = nixy_cmd()
-        .args(["self-upgrade", "--help"])
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should show --force in help
+    // Verify specific self-upgrade content
     assert!(
-        stdout.contains("--force") || stdout.contains("-f"),
-        "Should show --force in help: {}",
+        stdout.contains("self-upgrade") || stdout.contains("Self"),
+        "Help should mention self-upgrade: {}",
         stdout
     );
-}
 
-#[test]
-fn test_self_upgrade_accepts_short_force_flag() {
-    // Test that -f short flag is shown in help
-    let output = nixy_cmd()
-        .args(["self-upgrade", "--help"])
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should show -f short flag in help
+    // Verify --force flag is documented
     assert!(
-        stdout.contains("-f") || stdout.contains("force"),
-        "Should show -f in help: {}",
+        stdout.contains("--force"),
+        "Help should show --force flag: {}",
+        stdout
+    );
+
+    // Verify -f short flag is documented
+    assert!(
+        stdout.contains("-f"),
+        "Help should show -f short flag: {}",
         stdout
     );
 }
@@ -980,14 +1014,22 @@ fn test_list_shows_none_for_empty_flake() {
 
     let output = env.cmd().arg("list").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_lower = stdout.to_lowercase();
 
-    // Should show (none) or empty list message
+    // Command should succeed for an empty flake
+    assert!(
+        output.status.success(),
+        "List should succeed for empty flake: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Should show indication of empty/no packages
     assert!(
         stdout.contains("(none)")
-            || stdout.contains("No packages")
-            || stdout.contains("Packages in")
-            || output.status.success(),
-        "Should handle empty flake: {}",
+            || stdout_lower.contains("no packages")
+            || stdout_lower.contains("empty")
+            || stdout.contains("Packages in"),
+        "Should indicate empty package list: {}",
         stdout
     );
 }
@@ -1006,18 +1048,42 @@ fn test_uninstall_package_not_installed() {
         .args(["profile", "switch", "-c", "default"])
         .output();
 
-    // This test verifies that uninstalling a non-existent package doesn't crash
-    // The behavior may vary: it could succeed silently (no-op) or fail with an error
+    // Uninstalling a non-existent package
     let output = env
         .cmd()
         .args(["uninstall", "nonexistent-package"])
         .output()
         .unwrap();
 
-    // The command completed without panicking - that's what we're testing
-    let _ = String::from_utf8_lossy(&output.stdout);
-    let _ = String::from_utf8_lossy(&output.stderr);
-    // Test passes if we get here without panicking
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_lower = stderr.to_lowercase();
+
+    // The implementation may either:
+    // 1. Succeed silently (no-op) - package wasn't there, nothing to uninstall
+    // 2. Fail with an error message
+    if output.status.success() {
+        // If it succeeds, it should indicate the package wasn't found or is a no-op
+        // This is acceptable behavior - graceful handling of non-existent packages
+        assert!(
+            stdout.contains("not installed")
+                || stdout.contains("nonexistent-package")
+                || stdout.is_empty()
+                || stdout.contains("No changes"),
+            "No-op uninstall should indicate status or be silent: stdout={}",
+            stdout
+        );
+    } else {
+        // If it fails, it should provide a helpful error message
+        assert!(
+            stderr_lower.contains("not installed")
+                || stderr_lower.contains("not found")
+                || stderr_lower.contains("does not exist")
+                || stderr.contains("nonexistent-package"),
+            "Failed uninstall should indicate package not found: {}",
+            stderr
+        );
+    }
 }
 
 // =============================================================================
@@ -1042,9 +1108,13 @@ fn test_install_from_unknown_registry() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_lower = stderr.to_lowercase();
     assert!(
-        stderr.contains("not found") || stderr.contains("registry") || stderr.contains("Unknown"),
-        "Should fail for unknown registry: {}",
+        stderr_lower.contains("registry")
+            && (stderr_lower.contains("unknown")
+                || stderr_lower.contains("not found")
+                || stderr_lower.contains("invalid")),
+        "Should fail for unknown registry with appropriate message: {}",
         stderr
     );
 }
@@ -1067,15 +1137,27 @@ fn test_install_from_detects_direct_url() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_lower = stdout.to_lowercase();
+    let stderr_lower = stderr.to_lowercase();
 
-    // Should detect as direct URL (not lookup in registry)
-    assert!(
-        stdout.contains("URL")
-            || stdout.contains("flake")
-            || stderr.contains("URL")
-            || output.status.success(),
-        "Should detect direct URL: stdout={}, stderr={}",
-        stdout,
-        stderr
-    );
+    // Should detect as direct URL (github: prefix) rather than looking up in registry
+    // If successful, it means it recognized the URL format
+    // If it fails, it should be a nix-related failure, not "unknown registry"
+    if output.status.success() {
+        // Success means it detected and processed the direct URL
+        assert!(
+            stdout.contains("hello")
+                || stdout_lower.contains("install")
+                || stdout_lower.contains("adding"),
+            "Successful install should acknowledge the package: stdout={}",
+            stdout
+        );
+    } else {
+        // Failure should NOT be about unknown registry (since github: is a valid URL format)
+        assert!(
+            !stderr_lower.contains("unknown registry"),
+            "Should detect github: as direct URL, not unknown registry: stderr={}",
+            stderr
+        );
+    }
 }
