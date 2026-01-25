@@ -34,7 +34,9 @@ impl Nix {
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
-            return Err(Error::NixCommand("Failed to get current system".to_string()));
+            return Err(Error::NixCommand(
+                "Failed to get current system".to_string(),
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
