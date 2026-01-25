@@ -10,7 +10,7 @@
 nixy install ripgrep    # That's it. Nix made simple.
 ```
 
-nixy manages your Nix packages through a declarative `flake.nix`. Unlike `nix profile` which lacks built-in reproducibility, nixy ensures the same packages and versions on every machine. It's just a thin bash wrapper - no lock-in, no magic.
+nixy manages your Nix packages through a declarative `flake.nix`. Unlike `nix profile` which lacks built-in reproducibility, nixy ensures the same packages and versions on every machine. Written in Rust for reliability and performance.
 
 ## Motivation
 
@@ -70,8 +70,33 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 
 ### 2. Install nixy
 
+**Quick install (recommended):**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
+```
+
+This will try (in order): pre-built binary, cargo install, or nix build.
+
+**With cargo:**
+
+```bash
+cargo install --git https://github.com/yusukeshib/nixy.git
+```
+
+**With nix:**
+
+```bash
+nix profile install github:yusukeshib/nixy
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/yusukeshib/nixy.git
+cd nixy
+cargo build --release
+cp target/release/nixy ~/.local/bin/
 ```
 
 ### 3. Set up your shell
@@ -118,7 +143,6 @@ Packages are installed globally and available in all terminal sessions.
 | `nixy gc` | Clean up old package versions |
 | `nixy config <shell>` | Output shell config (for PATH setup) |
 | `nixy version` | Show nixy version |
-| `nixy self-upgrade` | Upgrade nixy to the latest version |
 | `nixy profile` | Show current profile |
 | `nixy profile switch <name>` | Switch to a different profile |
 | `nixy profile switch -c <name>` | Create and switch to a new profile |
@@ -197,10 +221,10 @@ my-overlay.url = "github:user/my-overlay";
 Any content outside these markers will be overwritten when nixy regenerates the flake. For heavy customization, see "Customizing flake.nix" in the Appendix.
 
 **How do I update nixy?**
-Run `nixy self-upgrade`. It checks for updates, downloads the latest version, and replaces itself. Use `--force` to reinstall even if already up to date.
+Rebuild from source or run `cargo install --git https://github.com/yusukeshib/nixy.git --force`.
 
 **How do I uninstall nixy?**
-Just delete the `nixy` script. Your flake.nix files remain and work with standard `nix` commands.
+Delete the `nixy` binary (typically `/usr/local/bin/nixy` or `~/.cargo/bin/nixy`). Your flake.nix files remain and work with standard `nix` commands.
 
 **Why not use `nix profile` directly?**
 `nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `flake.nix` as the source of truth, which can be copied, version-controlled, and shared.
@@ -322,6 +346,19 @@ Format for `my-package.nix`:
 - Package names use Nix naming (search with `nixy search` to find exact names)
 - No GUI app support (like Homebrew Cask) yet
 - Requires Nix with flakes enabled (the Determinate installer enables this by default)
+
+## Development
+
+```bash
+# Build
+cargo build --release
+
+# Run tests
+cargo test
+
+# Run with debug output
+RUST_LOG=debug cargo run -- install hello
+```
 
 ## License
 

@@ -1,0 +1,22 @@
+[package]
+name = "nixy-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Homebrew-style wrapper for Nix using flake.nix"
+license = "MIT"
+repository = "https://github.com/yusukeshib/nixy"
+
+[[bin]]
+name = "nixy"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+thiserror = "2"
+colored = "2"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
