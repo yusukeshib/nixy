@@ -289,7 +289,8 @@ lookup_registry() {
     # nix registry list format: "global flake:nixpkgs github:NixOS/nixpkgs/nixpkgs-unstable"
     # We need to extract the URL for the given name
     # Use awk for literal string matching to avoid regex metacharacter issues
-    nix "${NIX_FLAGS[@]}" registry list 2>/dev/null | awk -v n="$name" '$2=="flake:" n {print $3; exit}'
+    # Build target string in BEGIN block for consistent behavior across awk implementations
+    nix "${NIX_FLAGS[@]}" registry list 2>/dev/null | awk -v name="$name" 'BEGIN {target = "flake:" name} $2 == target {print $3; exit}'
 }
 
 # Validate that a package exists in a flake
