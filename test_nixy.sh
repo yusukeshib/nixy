@@ -879,6 +879,154 @@ EOF
     assert_file_exists "./packages/no-git-pkg.nix" "Package should be copied even without git"
 }
 
+test_install_flake_file_creates_directory() {
+    cd "$TEST_DIR"
+
+    # Create a flake file (has inputs and outputs)
+    cat > my-flake.nix <<'EOF'
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }:
+    let
+      systems = [ "x86_64-linux" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+    in {
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          default = pkgs.hello;
+        });
+    };
+}
+EOF
+
+    # Create global flake
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Install the flake file with -g flag
+    "$NIXY" install --file my-flake.nix -g 2>&1 || true
+
+    # Verify flake was copied to a subdirectory
+    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" "Flake should be in subdirectory"
+}
+
+test_install_flake_file_adds_input() {
+    cd "$TEST_DIR"
+
+    # Create a flake file
+    cat > gke-plugin.nix <<'EOF'
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }:
+    let
+      systems = [ "x86_64-linux" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+    in {
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          default = pkgs.hello;
+        });
+    };
+}
+EOF
+
+    # Create global flake
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Install the flake file
+    "$NIXY" install --file gke-plugin.nix -g 2>&1 || true
+
+    # Verify flake.nix has the input
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin.url = "path:./packages/gke-plugin"' && \
+
+    # Verify flake.nix has the package expression
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" 'gke-plugin = gke-plugin.packages'
+}
+
+test_install_flake_file_detected_correctly() {
+    cd "$TEST_DIR"
+
+    # Create a regular package file (should NOT be treated as flake)
+    cat > regular-pkg.nix <<'EOF'
+{ lib, stdenv }:
+
+stdenv.mkDerivation {
+  pname = "regular-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+EOF
+
+    # Create a flake file (SHOULD be treated as flake)
+    cat > flake-pkg.nix <<'EOF'
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }: {
+    packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;
+  };
+}
+EOF
+
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Install regular package
+    "$NIXY" install --file regular-pkg.nix -g 2>&1 || true
+
+    # Install flake package
+    "$NIXY" install --file flake-pkg.nix -g 2>&1 || true
+
+    # Regular package should be a .nix file
+    assert_file_exists "$NIXY_CONFIG_DIR/packages/regular-pkg.nix" && \
+
+    # Flake package should be in a subdirectory
+    assert_file_exists "$NIXY_CONFIG_DIR/packages/flake-pkg/flake.nix"
+}
+
+test_uninstall_flake_package() {
+    cd "$TEST_DIR"
+
+    # Create a flake file
+    cat > my-flake.nix <<'EOF'
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  };
+
+  outputs = { self, nixpkgs }: {
+    packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;
+  };
+}
+EOF
+
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Install the flake
+    "$NIXY" install --file my-flake.nix -g 2>&1 || true
+
+    # Verify it was installed
+    assert_file_exists "$NIXY_CONFIG_DIR/packages/my-flake/flake.nix" || return 1
+
+    # Uninstall it
+    "$NIXY" uninstall my-flake -g 2>&1 || true
+
+    # Verify directory was removed
+    if [[ -d "$NIXY_CONFIG_DIR/packages/my-flake" ]]; then
+        echo "  ASSERTION FAILED: Flake directory should be removed after uninstall"
+        return 1
+    fi
+    return 0
+}
+
 # =============================================================================
 # Test: Package validation
 # =============================================================================
@@ -1138,6 +1286,10 @@ main() {
     run_test "install --file copies to flake dir packages" test_install_file_copies_to_flake_dir_packages || true
     run_test "install --file adds to git in git repo" test_install_file_adds_to_git_in_git_repo || true
     run_test "install --file works without git" test_install_file_works_without_git || true
+    run_test "install --file flake creates directory" test_install_flake_file_creates_directory || true
+    run_test "install --file flake adds input" test_install_flake_file_adds_input || true
+    run_test "install --file detects flake vs package" test_install_flake_file_detected_correctly || true
+    run_test "uninstall removes flake directory" test_uninstall_flake_package || true
 
     # Package validation tests
     run_test "validate rejects invalid package" test_validate_package_rejects_invalid_package || true
