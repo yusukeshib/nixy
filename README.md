@@ -61,7 +61,6 @@ If you only use one machine and don't need reproducibility, `nix profile` is sim
 | `brew list` | `nixy list` |
 | `brew search git` | `nixy search git` |
 | `brew upgrade` | `nixy upgrade` |
-| `brew upgrade ripgrep` | `nixy upgrade nixpkgs` |
 
 Familiar interface, but with Nix's reproducibility underneath. No lock-in - it's just standard Nix.
 

@@ -528,6 +528,20 @@ test_upgrade_requires_lock_file_for_specific_input() {
     assert_output_contains "$output" "nixy sync"
 }
 
+test_upgrade_handles_corrupted_lock_file() {
+    cd "$TEST_DIR"
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Create a corrupted flake.lock
+    echo "not valid json" > "$NIXY_CONFIG_DIR/flake.lock"
+
+    local output exit_code
+    output=$("$NIXY" upgrade nixpkgs 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Failed to parse flake.lock"
+}
+
 test_install_fails_on_non_nixy_local_flake() {
     cd "$TEST_DIR"
     # Create a non-nixy flake.nix (no markers)
@@ -2089,6 +2103,7 @@ main() {
     run_test "upgrade validates input name" test_upgrade_validates_input_name || true
     run_test "upgrade shows available inputs on error" test_upgrade_shows_available_inputs_on_error || true
     run_test "upgrade requires lock file for specific input" test_upgrade_requires_lock_file_for_specific_input || true
+    run_test "upgrade handles corrupted lock file" test_upgrade_handles_corrupted_lock_file || true
     run_test "install --local fails on non-nixy flake" test_install_fails_on_non_nixy_local_flake || true
     run_test "uninstall --local fails on non-nixy flake" test_uninstall_fails_on_non_nixy_local_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true

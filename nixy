@@ -656,9 +656,13 @@ cmd_upgrade() {
             die "No flake.lock found. Run 'nixy sync' first."
         fi
 
+        # First check if we can parse the lock file
+        local available
+        if ! available=$(get_flake_inputs "$lock_file" | tr '\n' ' '); then
+            die "Failed to parse flake.lock. The file may be corrupted."
+        fi
+
         if ! validate_flake_inputs "$lock_file" "${inputs[@]}"; then
-            local available
-            available=$(get_flake_inputs "$lock_file" | tr '\n' ' ')
             error "Unknown input(s): ${INVALID_INPUTS[*]}"
             die "Available inputs: $available"
         fi
