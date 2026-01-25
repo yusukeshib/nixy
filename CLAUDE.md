@@ -8,11 +8,19 @@ nixy is a Homebrew-style wrapper for Nix using flake.nix. It's a bash script tha
 
 When adding new features or fixing bugs, follow this workflow:
 
-### 1. Make Changes
+### 1. Create a Feature Branch with Worktree
+For new features, use git worktree to work in an isolated directory:
+```bash
+git worktree add ../nixy-<feature-name> -b <username>/<feature-name>
+cd ../nixy-<feature-name>
+```
+This keeps the main worktree clean and allows parallel development.
+
+### 2. Make Changes
 - Edit `nixy` (the main script)
 - Follow existing code patterns and style
 
-### 2. Add Tests
+### 3. Add Tests
 - Add tests to `test_nixy.sh`
 - Tests use a simple assertion-based framework
 - Place tests in the appropriate section (create new section if needed)
@@ -32,23 +40,37 @@ test_feature_name() {
 }
 ```
 
-### 3. Run Tests
+### 4. Run Tests
 ```bash
 ./test_nixy.sh
 ```
 All tests must pass before committing.
 
-### 4. Update Version
-- Bump `NIXY_VERSION` in `nixy` (line ~16)
+### 5. Update Version
+- Bump `NIXY_VERSION` in `nixy` (line ~19)
 - Use semantic versioning (MAJOR.MINOR.PATCH)
 
-### 5. Commit and Push
+### 6. Commit, Push, and Create PR
 ```bash
-git add nixy test_nixy.sh
+git add nixy test_nixy.sh CLAUDE.md
 git commit -m "Description of change, bump to X.Y.Z
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-git push origin main
+git push -u origin <username>/<feature-name>
+gh pr create --title "Feature description" --body "## Summary
+- Change 1
+- Change 2
+
+## Test plan
+- [ ] Run ./test_nixy.sh
+"
+```
+
+### 7. Cleanup Worktree (after PR is merged)
+```bash
+cd ../nixy
+git worktree remove ../nixy-<feature-name>
+git branch -d <username>/<feature-name>
 ```
 
 Commit message style:
