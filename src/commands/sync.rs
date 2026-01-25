@@ -16,7 +16,10 @@ pub fn run(config: &Config) -> Result<()> {
         return Err(Error::NoFlakeFound(flake_path.display().to_string()));
     }
 
-    info(&format!("Syncing packages with {}...", flake_path.display()));
+    info(&format!(
+        "Syncing packages with {}...",
+        flake_path.display()
+    ));
 
     // Check if flake has buildEnv default output (upgrade from old nixy version)
     if !Nix::has_default_output(&flake_dir) {

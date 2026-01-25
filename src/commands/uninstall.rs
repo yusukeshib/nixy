@@ -71,7 +71,11 @@ fn remove_package_from_flake(config: &Config, pkg: &str) -> Result<()> {
     let content = fs::read_to_string(&flake_path)?;
 
     // Remove from packages section
-    let pkg_pattern = Regex::new(&format!(r"^\s*{} = pkgs\.{};", regex::escape(pkg), regex::escape(pkg)))?;
+    let pkg_pattern = Regex::new(&format!(
+        r"^\s*{} = pkgs\.{};",
+        regex::escape(pkg),
+        regex::escape(pkg)
+    ))?;
     let content = remove_from_section(
         &content,
         "# [nixy:packages]",

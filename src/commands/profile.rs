@@ -71,7 +71,10 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             }
         }
     } else {
-        success(&format!("Switched to profile '{}' (no packages installed)", name));
+        success(&format!(
+            "Switched to profile '{}' (no packages installed)",
+            name
+        ));
     }
 
     Ok(())

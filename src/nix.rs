@@ -23,7 +23,13 @@ impl Nix {
     pub fn current_system() -> Result<String> {
         let output = Command::new("nix")
             .args(NIX_FLAGS)
-            .args(["eval", "--impure", "--expr", "builtins.currentSystem", "--raw"])
+            .args([
+                "eval",
+                "--impure",
+                "--expr",
+                "builtins.currentSystem",
+                "--raw",
+            ])
             .output()
             .map_err(|e| Error::NixError(e.to_string()))?;
 

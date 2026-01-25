@@ -81,9 +81,17 @@ fn add_package_to_flake(config: &Config, pkg: &str) -> Result<()> {
 
     // Check if package already exists
     let content = fs::read_to_string(&flake_path)?;
-    let pattern = format!(r"^\s*{} = pkgs\.{};", regex::escape(pkg), regex::escape(pkg));
+    let pattern = format!(
+        r"^\s*{} = pkgs\.{};",
+        regex::escape(pkg),
+        regex::escape(pkg)
+    );
     if Regex::new(&pattern)?.is_match(&content) {
-        success(&format!("Package {} already in {}", pkg, flake_path.display()));
+        success(&format!(
+            "Package {} already in {}",
+            pkg,
+            flake_path.display()
+        ));
         return Ok(());
     }
 
@@ -125,24 +133,26 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     };
 
     // Validate the package exists
-    info(&format!("Validating package '{}' in {}...", pkg, input_name));
-    let pkg_output = Nix::validate_flake_package(&flake_url, pkg)?
-        .ok_or_else(|| {
-            let available = Nix::list_flake_packages(&flake_url, None)
-                .unwrap_or_default()
-                .into_iter()
-                .take(10)
-                .collect::<Vec<_>>()
-                .join(" ");
-            if available.is_empty() {
-                Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
-            } else {
-                Error::Usage(format!(
-                    "Package '{}' not found in '{}'. Available packages: {}...",
-                    pkg, input_name, available
-                ))
-            }
-        })?;
+    info(&format!(
+        "Validating package '{}' in {}...",
+        pkg, input_name
+    ));
+    let pkg_output = Nix::validate_flake_package(&flake_url, pkg)?.ok_or_else(|| {
+        let available = Nix::list_flake_packages(&flake_url, None)
+            .unwrap_or_default()
+            .into_iter()
+            .take(10)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if available.is_empty() {
+            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+        } else {
+            Error::Usage(format!(
+                "Package '{}' not found in '{}'. Available packages: {}...",
+                pkg, input_name, available
+            ))
+        }
+    })?;
 
     // Get or create flake
     let flake_dir = get_flake_dir(config)?;
@@ -159,13 +169,7 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     }
 
     // Add the flake as an input and the package
-    add_registry_package_to_flake(
-        config,
-        &input_name,
-        &flake_url,
-        pkg,
-        &pkg_output,
-    )?;
+    add_registry_package_to_flake(config, &input_name, &flake_url, pkg, &pkg_output)?;
 
     info(&format!("Installing {} from {}...", pkg, input_name));
     super::sync::run(config)?;
@@ -186,14 +190,13 @@ fn add_registry_package_to_flake(
     let mut content = fs::read_to_string(&flake_path)?;
 
     // Check if we should reuse existing nixpkgs input
-    let (final_input_name, use_existing_nixpkgs) = if flake_url.contains("NixOS/nixpkgs")
-        && content.contains("nixpkgs.url")
-    {
-        info("Using existing nixpkgs input");
-        ("nixpkgs".to_string(), true)
-    } else {
-        (input_name.to_string(), false)
-    };
+    let (final_input_name, use_existing_nixpkgs) =
+        if flake_url.contains("NixOS/nixpkgs") && content.contains("nixpkgs.url") {
+            info("Using existing nixpkgs input");
+            ("nixpkgs".to_string(), true)
+        } else {
+            (input_name.to_string(), false)
+        };
 
     // Add input if needed
     if !use_existing_nixpkgs {
@@ -230,7 +233,10 @@ fn add_registry_package_to_flake(
     content = insert_after_marker(&content, "nixy:custom-paths", &path_entry);
 
     fs::write(&flake_path, content)?;
-    success(&format!("Added {} from {} to flake.nix", pkg, final_input_name));
+    success(&format!(
+        "Added {} from {} to flake.nix",
+        pkg, final_input_name
+    ));
 
     Ok(())
 }
@@ -252,7 +258,11 @@ fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
         .or_else(|| parse_local_package_attr(&content, "name"))
         .ok_or_else(|| Error::NoPackageName(file.display().to_string()))?;
 
-    info(&format!("Installing local package: {} from {}", pkg_name, file.display()));
+    info(&format!(
+        "Installing local package: {} from {}",
+        pkg_name,
+        file.display()
+    ));
 
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
@@ -312,7 +322,11 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
         return Err(Error::InvalidFilename(file.display().to_string()));
     }
 
-    info(&format!("Installing local flake: {} from {}", pkg_name, file.display()));
+    info(&format!(
+        "Installing local flake: {} from {}",
+        pkg_name,
+        file.display()
+    ));
 
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
@@ -363,7 +377,13 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
 fn sanitize_input_name(s: &str) -> String {
     let sanitized: String = s
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     sanitized.trim_matches('-').to_string()
 }

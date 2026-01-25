@@ -24,7 +24,12 @@ pub fn insert_after_marker(content: &str, marker: &str, line: &str) -> String {
 }
 
 /// Remove lines matching a pattern from between two markers
-pub fn remove_from_section(content: &str, start_marker: &str, end_marker: &str, pattern: &Regex) -> String {
+pub fn remove_from_section(
+    content: &str,
+    start_marker: &str,
+    end_marker: &str,
+    pattern: &Regex,
+) -> String {
     let mut result = String::new();
     let mut in_section = false;
 
@@ -95,7 +100,11 @@ mod tests {
     #[test]
     fn test_insert_multiple_packages() {
         let content = "# [nixy:packages]\n# [/nixy:packages]\n";
-        let result = insert_after_marker(content, "nixy:packages", "          ripgrep = pkgs.ripgrep;");
+        let result = insert_after_marker(
+            content,
+            "nixy:packages",
+            "          ripgrep = pkgs.ripgrep;",
+        );
         let result = insert_after_marker(&result, "nixy:packages", "          fzf = pkgs.fzf;");
 
         assert!(result.contains("ripgrep = pkgs.ripgrep;"));
@@ -117,7 +126,8 @@ mod tests {
     fn test_remove_from_section() {
         let content = "# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\n";
         let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
-        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+        let result =
+            remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
         assert!(!result.contains("hello = pkgs.hello"));
     }
 
@@ -125,7 +135,8 @@ mod tests {
     fn test_remove_preserves_other_packages() {
         let content = "# [nixy:packages]\n          ripgrep = pkgs.ripgrep;\n          fzf = pkgs.fzf;\n          bat = pkgs.bat;\n# [/nixy:packages]\n";
         let pattern = Regex::new(r"^\s*fzf = pkgs\.fzf;").unwrap();
-        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+        let result =
+            remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
 
         assert!(!result.contains("fzf = pkgs.fzf;"));
         assert!(result.contains("ripgrep = pkgs.ripgrep;"));
@@ -136,7 +147,8 @@ mod tests {
     fn test_remove_preserves_content_outside_section() {
         let content = "before section\n# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\nafter section\n";
         let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
-        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+        let result =
+            remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
 
         assert!(result.contains("before section"));
         assert!(result.contains("after section"));
@@ -146,7 +158,8 @@ mod tests {
     fn test_remove_only_in_correct_section() {
         let content = "# [nixy:packages]\n          hello = pkgs.hello;\n# [/nixy:packages]\n# [nixy:custom-packages]\n          hello = custom.hello;\n# [/nixy:custom-packages]\n";
         let pattern = Regex::new(r"^\s*hello = pkgs\.hello;").unwrap();
-        let result = remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
+        let result =
+            remove_from_section(content, "# [nixy:packages]", "# [/nixy:packages]", &pattern);
 
         // Should remove from nixy:packages
         assert!(!result.contains("hello = pkgs.hello;"));
@@ -156,7 +169,8 @@ mod tests {
 
     #[test]
     fn test_extract_marker_content() {
-        let content = "# [nixy:custom-inputs]\n    foo.url = \"github:foo/bar\";\n# [/nixy:custom-inputs]\n";
+        let content =
+            "# [nixy:custom-inputs]\n    foo.url = \"github:foo/bar\";\n# [/nixy:custom-inputs]\n";
         let result = extract_marker_content(content, "nixy:custom-inputs");
         assert_eq!(result.trim(), "foo.url = \"github:foo/bar\";");
     }

@@ -92,7 +92,8 @@ pub fn generate_flake(
             local_overlays.push_str(&format!("          {}\n", overlay));
         }
 
-        local_packages_entries.push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
+        local_packages_entries
+            .push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
     }
 
     // Build buildEnv paths
@@ -238,11 +239,7 @@ pub fn generate_flake(
 }
 
 /// Check if flake has custom modifications outside nixy markers
-pub fn has_custom_modifications(
-    flake_path: &Path,
-    packages: &[String],
-    flake_dir: &Path,
-) -> bool {
+pub fn has_custom_modifications(flake_path: &Path, packages: &[String], flake_dir: &Path) -> bool {
     let actual_content = match std::fs::read_to_string(flake_path) {
         Ok(c) => c,
         Err(_) => return false,
@@ -298,7 +295,8 @@ mod tests {
         assert!(flake.contains("bat = pkgs.bat;"));
 
         // Should have packages in env-paths
-        let env_paths_section = extract_section(&flake, "# [nixy:env-paths]", "# [/nixy:env-paths]");
+        let env_paths_section =
+            extract_section(&flake, "# [nixy:env-paths]", "# [/nixy:env-paths]");
         assert!(env_paths_section.contains("ripgrep"));
         assert!(env_paths_section.contains("fzf"));
         assert!(env_paths_section.contains("bat"));
@@ -319,7 +317,8 @@ mod tests {
         assert!(flake.contains("my-pkg = pkgs.hello"));
 
         // Check custom-paths section
-        let custom_paths_section = extract_section(&flake, "# [nixy:custom-paths]", "# [/nixy:custom-paths]");
+        let custom_paths_section =
+            extract_section(&flake, "# [nixy:custom-paths]", "# [/nixy:custom-paths]");
         assert!(custom_paths_section.contains("my-pkg"));
     }
 

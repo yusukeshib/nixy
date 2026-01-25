@@ -2,7 +2,10 @@ use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "nixy", about = "Homebrew-style wrapper for Nix using flake.nix")]
+#[command(
+    name = "nixy",
+    about = "Homebrew-style wrapper for Nix using flake.nix"
+)]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]

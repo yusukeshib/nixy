@@ -142,7 +142,10 @@ mod tests {
             overlay-name.url = "github:user/repo";
         };
         "#;
-        assert_eq!(extract_input_name(content), Some("overlay-name".to_string()));
+        assert_eq!(
+            extract_input_name(content),
+            Some("overlay-name".to_string())
+        );
     }
 
     #[test]
