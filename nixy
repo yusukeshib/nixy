@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.11"
+NIXY_VERSION="0.1.12"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -829,6 +829,16 @@ cmd_sync() {
     fi
 
     info "Syncing packages with $flake..."
+
+    # Check if flake has buildEnv default output (upgrade from old nixy version)
+    if ! nix "${NIX_FLAGS[@]}" eval "$flake_dir#default" &>/dev/null; then
+        info "Upgrading flake.nix to buildEnv format..."
+        local -a packages=()
+        while IFS= read -r p; do
+            [[ -n "$p" ]] && packages+=("$p")
+        done < <(get_packages_from_flake "$flake")
+        generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
+    fi
 
     # Check if migration from individual packages is needed
     if needs_migration; then

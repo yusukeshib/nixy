@@ -1355,6 +1355,55 @@ test_flake_structure_has_env_paths_markers() {
     assert_file_contains "./flake.nix" "# \[/nixy:env-paths\]"
 }
 
+test_sync_upgrades_old_flake_without_buildenv() {
+    cd "$TEST_DIR"
+
+    # Create an old-style flake without buildEnv (simulating pre-0.1.11 nixy)
+    mkdir -p "$NIXY_CONFIG_DIR"
+    cat > "$NIXY_CONFIG_DIR/flake.nix" <<'EOF'
+{
+  description = "nixy managed packages";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # [nixy:local-inputs]
+    # [/nixy:local-inputs]
+  };
+
+  outputs = { self, nixpkgs }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+    in {
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          # [nixy:packages]
+          ripgrep = pkgs.ripgrep;
+          # [/nixy:packages]
+          # [nixy:local-packages]
+          # [/nixy:local-packages]
+        });
+    };
+}
+EOF
+
+    # Run sync - it should upgrade the flake to include buildEnv
+    local output
+    output=$("$NIXY" sync --global 2>&1) || true
+
+    # Should mention upgrading
+    if ! echo "$output" | grep -q "Upgrading flake.nix to buildEnv format"; then
+        echo "  ASSERTION FAILED: sync should upgrade old flake"
+        echo "  Output: $output"
+        return 1
+    fi
+
+    # Flake should now have buildEnv
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" "default = pkgs.buildEnv" && \
+    assert_file_contains "$NIXY_CONFIG_DIR/flake.nix" "# \[nixy:env-paths\]"
+}
+
 # =============================================================================
 # Run all tests
 # =============================================================================
@@ -1458,6 +1507,7 @@ main() {
     run_test "empty flake has empty buildEnv" test_empty_flake_has_empty_buildenv || true
     run_test "buildEnv has extra outputs" test_buildenv_has_extra_outputs || true
     run_test "flake has env-paths markers" test_flake_structure_has_env_paths_markers || true
+    run_test "sync upgrades old flake without buildEnv" test_sync_upgrades_old_flake_without_buildenv || true
 
     echo ""
     echo "======================================"
