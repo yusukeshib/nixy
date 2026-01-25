@@ -14,17 +14,26 @@ nixy manages your Nix packages through a declarative `flake.nix`. Unlike `nix pr
 
 ## Motivation
 
-Nix is powerful, but managing packages shouldn't be complicated. You want the benefits of Nix without writing flake files by hand.
+**For users frustrated with Homebrew, asdf, or similar tools** who want:
+- Reproducible environments across machines (not just "it works on my machine")
+- Atomic upgrades that never leave your system in a broken state
+- A single lockfile for all packages (no more version drift)
 
-nixy gives you:
-- **Simple commands**: `nixy install`, `nixy uninstall`, `nixy upgrade` - that's it
-- **Reproducibility**: Same packages, same versions, on every machine
-- **No hidden state**: Your `flake.nix` is the single source of truth
-- **Atomic upgrades & rollbacks**: Updates either fully succeed or nothing changes
-- **Cross-platform**: Same workflow on macOS and Linux
+**nixy is a package management layer on top of Nix.** It doesn't replace Nix's full capabilities (dev shells, builds, NixOS) - it focuses solely on managing globally installed packages, like Homebrew does.
+
+### What nixy gives you:
+- **Simple commands**: `nixy install`, `nixy uninstall`, `nixy upgrade`
+- **True reproducibility**: `flake.nix` + `flake.lock` = identical environments everywhere
 - **Multiple profiles**: Separate package sets for work, personal, projects
+- **No lock-in**: Plain Nix underneath - eject anytime
+- **Cross-platform**: Same workflow on macOS and Linux
 
-Unlike `nix profile`, nixy uses `flake.nix` + `flake.lock` for full reproducibility. Copy your config to a new machine, run `nixy sync`, done.
+### What nixy is NOT:
+- A replacement for Home Manager or NixOS
+- A development environment tool (use `nix develop` for that)
+- A build system
+
+If you want Homebrew's simplicity with Nix's reproducibility for your CLI tools, nixy is for you.
 
 ## How it works
 
@@ -37,18 +46,17 @@ nixy is **purely declarative** - your `flake.nix` is the single source of truth.
 
 nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it generates is plain Nix - you can read it, edit it manually, or use `nix` commands directly anytime.
 
-## Why not nix profile?
+## nixy and nix profile
 
-`nix profile` is the standard Nix tool for imperative package management. It works well for single-machine use, but falls short for reproducibility:
+nixy is not a replacement for `nix profile` - it's a complement that adds reproducibility.
 
-| | nix profile | nixy |
-|---|-------------|------|
-| Package list | Hidden in `manifest.json` | Readable `flake.nix` |
-| Version locking | Per-package only, no unified lock | Single `flake.lock` for all packages |
-| Sync to new machine | Manual re-installation | `nixy sync` |
-| Rollback | Profile generations only | Git + `flake.lock` |
+`nix profile` is great for quick, single-machine package management. nixy adds a declarative layer on top of Nix for when you need:
 
-If you only use one machine and don't need reproducibility, `nix profile` is simpler. If you want the same environment everywhere, use nixy.
+- **A unified lockfile**: All packages pinned to the same nixpkgs version
+- **Easy sync**: Copy `flake.nix` to a new machine, run `nixy sync`, done
+- **Version-controlled config**: `flake.nix` is designed for git
+
+nixy and `nix profile` use separate paths (`~/.local/state/nixy/env` vs `~/.nix-profile`) and don't interfere with each other. Use `nix profile` for quick experiments, nixy for your reproducible base environment - or use both together.
 
 ## Quick Start
 
