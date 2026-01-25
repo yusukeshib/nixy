@@ -29,8 +29,13 @@ Start with `nixy install <package>`, then read the generated flake.nix when you'
 
 nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup:
 
-- **Global packages** (default): `flake.nix` + `nix profile` at `~/.config/nix/`
+- **Global packages** (default): `flake.nix` at `~/.config/nix/`, built with `nix build`
 - **Project packages** (`--local`): Just a `flake.nix` in your project directory
+
+nixy is **purely declarative** - your `flake.nix` is the single source of truth. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/result`) pointing to your built environment. This means:
+- No hidden profile state to get out of sync
+- What's in `flake.nix` is exactly what's installed
+- Easy to understand, debug, and version control
 
 nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it generates is plain Nix - you can read it, edit it manually, or use `nix` commands directly anytime.
 
@@ -60,7 +65,21 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
 
-### 3. Start using it like Homebrew
+### 3. Set up your shell
+
+Add to your shell config (`.bashrc`, `.zshrc`, etc.):
+
+```bash
+eval "$(nixy config zsh)"
+```
+
+For fish, add to `~/.config/fish/config.fish`:
+
+```fish
+nixy config fish | source
+```
+
+### 4. Start using it like Homebrew
 
 ```bash
 nixy install ripgrep    # First run auto-creates ~/.config/nix/flake.nix
@@ -81,11 +100,12 @@ Just like Homebrew - packages are installed globally and available in all termin
 |---------|-------------|
 | `nixy install <pkg>` | Install a package globally |
 | `nixy uninstall <pkg>` | Uninstall a package |
-| `nixy list` | List installed packages |
+| `nixy list` | List packages in flake.nix |
 | `nixy search <query>` | Search for packages |
 | `nixy upgrade` | Upgrade all packages |
-| `nixy sync` | Sync profile with flake.nix (for new machines) |
+| `nixy sync` | Build environment from flake.nix (for new machines) |
 | `nixy gc` | Clean up old package versions |
+| `nixy config <shell>` | Output shell config (for PATH setup) |
 | `nixy version` | Show nixy version |
 | `nixy self-upgrade` | Upgrade nixy to the latest version |
 
@@ -156,7 +176,7 @@ Yes. They don't conflict. You can migrate gradually or use both.
 Use `nixy search <keyword>`. Package names sometimes differ from what you expect (e.g., `ripgrep` not `rg`).
 
 **Where are packages actually installed?**
-In the Nix store (`/nix/store/`). nixy just manages which packages are available in your PATH.
+In the Nix store (`/nix/store/`). nixy builds a combined environment and creates a symlink at `~/.local/state/nixy/result` pointing to it. The `nixy config` command sets up your PATH to include this location.
 
 **Can I edit the flake.nix manually?**
 Yes, but with care. nixy regenerates the entire flake.nix when you install/uninstall packages, preserving only what's inside the `# [nixy:...]` markers. For heavy customization, consider managing flake.nix manually and using `nix` commands directly.
@@ -196,12 +216,14 @@ Format for `my-package.nix`:
 | `~/.config/nix/flake.nix` | Global packages (default) |
 | `./flake.nix` | Project-local packages (with `--local`) |
 | `~/.config/nix/packages/` | Custom package definitions |
+| `~/.local/state/nixy/result` | Symlink to built environment (add `bin/` to PATH) |
 
 ### Environment Variables
 
-| Variable | Default |
-|----------|---------|
-| `NIXY_CONFIG_DIR` | `~/.config/nix` |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NIXY_CONFIG_DIR` | `~/.config/nix` | Location of global flake.nix |
+| `NIXY_ENV` | `~/.local/state/nixy/result` | Symlink to built environment |
 
 ### Limitations
 

@@ -11,7 +11,7 @@ set -euo pipefail
 NIXY="$(cd "$(dirname "$0")" && pwd)/nixy"
 ORIGINAL_DIR="$(pwd)"
 ORIGINAL_NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-}"
-ORIGINAL_NIXY_PROFILE="${NIXY_PROFILE:-}"
+ORIGINAL_NIXY_ENV="${NIXY_ENV:-}"
 TEST_DIR=""
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -26,10 +26,10 @@ cleanup_on_exit() {
     else
         unset NIXY_CONFIG_DIR 2>/dev/null || true
     fi
-    if [[ -n "$ORIGINAL_NIXY_PROFILE" ]]; then
-        export NIXY_PROFILE="$ORIGINAL_NIXY_PROFILE"
+    if [[ -n "$ORIGINAL_NIXY_ENV" ]]; then
+        export NIXY_ENV="$ORIGINAL_NIXY_ENV"
     else
-        unset NIXY_PROFILE 2>/dev/null || true
+        unset NIXY_ENV 2>/dev/null || true
     fi
 }
 trap cleanup_on_exit EXIT
@@ -44,7 +44,7 @@ NC='\033[0m'
 setup() {
     TEST_DIR=$(mktemp -d)
     export NIXY_CONFIG_DIR="$TEST_DIR/config"
-    export NIXY_PROFILE="$TEST_DIR/profile"
+    export NIXY_ENV="$TEST_DIR/result"
     mkdir -p "$NIXY_CONFIG_DIR"
 }
 
@@ -56,10 +56,10 @@ teardown() {
     else
         unset NIXY_CONFIG_DIR
     fi
-    if [[ -n "$ORIGINAL_NIXY_PROFILE" ]]; then
-        export NIXY_PROFILE="$ORIGINAL_NIXY_PROFILE"
+    if [[ -n "$ORIGINAL_NIXY_ENV" ]]; then
+        export NIXY_ENV="$ORIGINAL_NIXY_ENV"
     else
-        unset NIXY_PROFILE
+        unset NIXY_ENV
     fi
 }
 
@@ -258,6 +258,44 @@ test_default_ignores_local_flake() {
     assert_file_not_contains "$NIXY_CONFIG_DIR/flake.nix" "LOCAL_MARKER"
 }
 
+test_list_shows_flake_packages() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Add some packages to the flake
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+
+    local output
+    output=$("$NIXY" list --local 2>&1)
+
+    # Should show packages from flake
+    assert_output_contains "$output" "ripgrep" && \
+    assert_output_contains "$output" "fzf" && \
+    assert_output_contains "$output" "Packages in"
+}
+
+test_list_shows_none_for_empty_flake() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    local output
+    output=$("$NIXY" list --local 2>&1)
+
+    # Should show (none) for empty flake
+    assert_output_contains "$output" "(none)"
+}
+
+test_init_global_shows_path_hint() {
+    cd "$TEST_DIR"
+
+    local output
+    output=$("$NIXY" init "$NIXY_CONFIG_DIR" 2>&1)
+
+    # Should show PATH setup hint with eval syntax
+    assert_output_contains "$output" "Add to your shell config" && \
+    assert_output_contains "$output" 'eval "$(nixy config zsh)"'
+}
+
 # =============================================================================
 # Test: Global vs Local flake structure (devShells)
 # =============================================================================
@@ -412,13 +450,15 @@ test_uninstall_fails_cleanly_without_local_flake() {
     assert_file_not_exists "./flake.nix"
 }
 
-test_upgrade_fails_cleanly_without_local_flake() {
+test_upgrade_rejects_local_flag() {
     cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
     local output exit_code
     output=$("$NIXY" upgrade --local 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
-    assert_file_not_exists "./flake.nix"
+    assert_output_contains "$output" "upgrade only works with global flake"
 }
 
 test_install_fails_on_non_nixy_local_flake() {
@@ -504,14 +544,14 @@ test_sync_with_packages_no_unbound_variable() {
 
     # Add packages to flake (simulating a flake with packages defined)
     awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp" && mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
+    awk '/# \[nixy:env-paths\]/{print; print "              ripgrep"; print "              fzf"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp" && mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
 
-    # Sync should not fail with unbound variable even when to_remove array is empty
-    # (packages in flake but nothing to remove from nix profile)
+    # Sync should not fail with unbound variable
     local output exit_code
     output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     # Should not have unbound variable error regardless of exit code
-    # (exit code may be non-zero if nix commands fail, but that's not what we're testing)
+    # (exit code may be non-zero if nix build fails, but that's not what we're testing)
     if echo "$output" | grep -q "unbound variable"; then
         echo "  ASSERTION FAILED: sync should not have unbound variable error"
         echo "  Output: $output"
@@ -577,21 +617,18 @@ test_sync_preserves_local_packages() {
     return 0
 }
 
-test_sync_without_remove_only_warns() {
+test_sync_builds_environment() {
     cd "$TEST_DIR"
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Sync with empty flake should warn about extra packages (but not fail)
-    # We need to mock the installed packages, but since nix profile is isolated,
-    # this will just test that sync doesn't error with unbound variables
+    # Sync should attempt to build environment
     local output exit_code
     output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
-    # Should succeed
-    assert_exit_code 0 "$exit_code" && \
-    # Output should mention "in sync" or have no removal messages
-    if echo "$output" | grep -q "Removing"; then
-        echo "  ASSERTION FAILED: sync without --remove should NOT remove packages"
+    # Should mention building environment
+    if ! echo "$output" | grep -q "Building nixy environment"; then
+        echo "  ASSERTION FAILED: sync should mention building environment"
+        echo "  Output: $output"
         return 1
     fi
     return 0
@@ -601,12 +638,10 @@ test_sync_remove_flag_accepted() {
     cd "$TEST_DIR"
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Test that --remove flag is accepted (doesn't cause unknown option error)
+    # Test that --remove flag is accepted (backward compat, no-op)
     local output exit_code
     output=$("$NIXY" sync --remove 2>&1) && exit_code=0 || exit_code=$?
 
-    # Should succeed (empty flake, nothing to remove)
-    assert_exit_code 0 "$exit_code" && \
     # Should not have "Unknown option" error
     if echo "$output" | grep -q "Unknown option"; then
         echo "  ASSERTION FAILED: --remove should be a valid option"
@@ -619,12 +654,10 @@ test_sync_short_remove_flag_accepted() {
     cd "$TEST_DIR"
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
-    # Test that -r short flag is accepted
+    # Test that -r short flag is accepted (backward compat, no-op)
     local output exit_code
     output=$("$NIXY" sync -r 2>&1) && exit_code=0 || exit_code=$?
 
-    # Should succeed (empty flake, nothing to remove)
-    assert_exit_code 0 "$exit_code" && \
     # Should not have "Unknown option" error
     if echo "$output" | grep -q "Unknown option"; then
         echo "  ASSERTION FAILED: -r should be a valid option"
@@ -637,7 +670,7 @@ test_help_shows_sync_command() {
     local output
     output=$("$NIXY" help 2>&1)
     assert_output_contains "$output" "sync" && \
-    assert_output_contains "$output" "Sync installed packages"
+    assert_output_contains "$output" "Build environment from flake.nix"
 }
 
 test_shell_fails_cleanly_without_flake() {
@@ -1267,6 +1300,51 @@ test_help_shows_maintenance_section() {
 }
 
 # =============================================================================
+# Test: Config command
+# =============================================================================
+
+test_config_zsh_outputs_path() {
+    local output
+    output=$("$NIXY" config zsh 2>&1)
+    assert_output_contains "$output" 'export PATH=' && \
+    assert_output_contains "$output" '.local/state/nixy/result/bin'
+}
+
+test_config_bash_outputs_path() {
+    local output
+    output=$("$NIXY" config bash 2>&1)
+    assert_output_contains "$output" 'export PATH='
+}
+
+test_config_fish_outputs_path() {
+    local output
+    output=$("$NIXY" config fish 2>&1)
+    assert_output_contains "$output" 'set -gx PATH' && \
+    assert_output_contains "$output" '.local/state/nixy/result/bin'
+}
+
+test_config_without_shell_fails() {
+    local output exit_code
+    output=$("$NIXY" config 2>&1) && exit_code=0 || exit_code=$?
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Usage: nixy config"
+}
+
+test_config_unknown_shell_fails() {
+    local output exit_code
+    output=$("$NIXY" config powershell 2>&1) && exit_code=0 || exit_code=$?
+    assert_exit_code 1 "$exit_code" && \
+    assert_output_contains "$output" "Unknown shell"
+}
+
+test_help_shows_config_command() {
+    local output
+    output=$("$NIXY" help 2>&1)
+    assert_output_contains "$output" "config <shell>" && \
+    assert_output_contains "$output" "Output shell config"
+}
+
+# =============================================================================
 # Test: buildEnv atomic install
 # =============================================================================
 
@@ -1672,6 +1750,13 @@ main() {
     run_test "-l short form works" test_local_short_form || true
     run_test "default ignores local flake" test_default_ignores_local_flake || true
 
+    # List command tests
+    run_test "list shows flake packages" test_list_shows_flake_packages || true
+    run_test "list shows none for empty flake" test_list_shows_none_for_empty_flake || true
+
+    # Init PATH hint test
+    run_test "init global shows PATH hint" test_init_global_shows_path_hint || true
+
     # Global vs Local flake structure tests
     run_test "local flake has devShells" test_local_flake_has_devshells || true
     run_test "global flake has no devShells" test_global_flake_has_no_devshells || true
@@ -1684,7 +1769,7 @@ main() {
     # Error propagation tests (the subshell exit bug)
     run_test "install fails cleanly without flake" test_install_fails_cleanly_without_flake || true
     run_test "uninstall --local fails without flake" test_uninstall_fails_cleanly_without_local_flake || true
-    run_test "upgrade --local fails without flake" test_upgrade_fails_cleanly_without_local_flake || true
+    run_test "upgrade --local rejects local flag" test_upgrade_rejects_local_flag || true
     run_test "install --local fails on non-nixy flake" test_install_fails_on_non_nixy_local_flake || true
     run_test "uninstall --local fails on non-nixy flake" test_uninstall_fails_on_non_nixy_local_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
@@ -1692,7 +1777,7 @@ main() {
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "sync preserves local packages" test_sync_preserves_local_packages || true
-    run_test "sync without --remove only warns" test_sync_without_remove_only_warns || true
+    run_test "sync builds environment" test_sync_builds_environment || true
     run_test "sync --remove flag accepted" test_sync_remove_flag_accepted || true
     run_test "sync -r short flag accepted" test_sync_short_remove_flag_accepted || true
     run_test "help shows sync command" test_help_shows_sync_command || true
@@ -1740,6 +1825,14 @@ main() {
     run_test "help shows version command" test_help_shows_version_command || true
     run_test "help shows self-upgrade command" test_help_shows_self_upgrade_command || true
     run_test "help shows MAINTENANCE section" test_help_shows_maintenance_section || true
+
+    # Config command tests
+    run_test "config zsh outputs PATH" test_config_zsh_outputs_path || true
+    run_test "config bash outputs PATH" test_config_bash_outputs_path || true
+    run_test "config fish outputs PATH" test_config_fish_outputs_path || true
+    run_test "config without shell fails" test_config_without_shell_fails || true
+    run_test "config unknown shell fails" test_config_unknown_shell_fails || true
+    run_test "help shows config command" test_help_shows_config_command || true
 
     # buildEnv atomic install tests
     run_test "flake has buildEnv default" test_flake_has_buildenv_default || true

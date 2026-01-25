@@ -7,13 +7,13 @@ set -euo pipefail
 
 # Configuration
 NIXY_CONFIG_DIR="${NIXY_CONFIG_DIR:-$HOME/.config/nix}"
-NIXY_PROFILE="${NIXY_PROFILE:-}"
+NIXY_ENV="${NIXY_ENV:-$HOME/.local/state/nixy/result}"
 GLOBAL_FLAKE="$NIXY_CONFIG_DIR/flake.nix"
 LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.19"
+NIXY_VERSION="0.1.21"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -30,11 +30,9 @@ warn() { echo -e "${YELLOW}Warning:${NC} $*"; }
 error() { echo -e "${RED}Error:${NC} $*" >&2; }
 die() { error "$@"; exit 1; }
 
-# Get profile flags for nix profile commands
-get_profile_flags() {
-    if [[ -n "$NIXY_PROFILE" ]]; then
-        echo "--profile" "$NIXY_PROFILE"
-    fi
+# Check if nixy environment symlink exists
+is_nixy_env_linked() {
+    [[ -L "$NIXY_ENV" ]]
 }
 
 # Check dependencies
@@ -195,58 +193,6 @@ is_flake_file() {
     grep -q '^[[:space:]]*outputs[[:space:]]*=' "$file" 2>/dev/null
 }
 
-# Get list of installed packages from nix profile
-# Extracts package name from "Flake attribute:" line (e.g., "legacyPackages.aarch64-darwin.fzf" -> "fzf")
-# This works for both nixpkgs packages and local flake packages
-get_installed_packages() {
-    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
-        { grep "^Flake attribute:" || true; } | \
-        sed 's/Flake attribute:[[:space:]]*//' | \
-        sed 's/.*\.//' | \
-        sort -u
-}
-
-# Check if nixy-env (buildEnv) is installed
-is_nixy_env_installed() {
-    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
-        grep -q "nixy-env"
-}
-
-# Get the profile element name for nixy-env (for use with nix profile upgrade)
-get_nixy_env_name() {
-    nix "${NIX_FLAGS[@]}" profile list --json $(get_profile_flags) 2>/dev/null | \
-        grep -o '"[^"]*":{"active":true,"attrPath":"packages\.[^"]*\.default"' | \
-        head -1 | sed 's/^"\([^"]*\)".*/\1/'
-}
-
-# Check if migration from individual packages to buildEnv is needed
-needs_migration() {
-    local profile_list
-    profile_list=$(nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null)
-    # Migration needed if we have nixpkgs# packages but no nixy-env
-    echo "$profile_list" | grep -q "nixpkgs#" && \
-        ! echo "$profile_list" | grep -q "nixy-env"
-}
-
-# Migrate from individual packages to buildEnv
-migrate_to_buildenv() {
-    local flake_dir="$1"
-    info "Migrating from individual packages to atomic environment..."
-
-    # Remove all individually installed packages
-    local pkgs
-    pkgs=$(nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
-        { grep "^Flake attribute:" || true; } | \
-        sed 's/Flake attribute:[[:space:]]*//' | \
-        sed 's/.*\.//')
-
-    for pkg in $pkgs; do
-        nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg" 2>/dev/null || true
-    done
-
-    info "Installing unified environment..."
-    nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default"
-}
 
 # Install a package and track in flake.nix
 cmd_install() {
@@ -505,7 +451,7 @@ cmd_search() {
     nix "${NIX_FLAGS[@]}" search nixpkgs "$query"
 }
 
-# List installed packages
+# List installed packages (from flake.nix)
 cmd_list() {
     local use_local=false
 
@@ -517,11 +463,23 @@ cmd_list() {
         esac
     done
 
-    # Validate flake exists (to give helpful error message)
-    get_flake "$use_local" >/dev/null || exit 1
+    local flake
+    flake=$(get_flake "$use_local") || exit 1
 
-    info "Installed packages:"
-    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags)
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake. Run 'nixy init' to create one."
+    fi
+
+    info "Packages in $flake:"
+    local packages
+    packages=$(get_packages_from_flake "$flake")
+    if [[ -z "$packages" ]]; then
+        echo "  (none)"
+    else
+        echo "$packages" | while read -r pkg; do
+            echo "  $pkg"
+        done
+    fi
 }
 
 # Upgrade all packages
@@ -536,18 +494,27 @@ cmd_upgrade() {
         esac
     done
 
+    # Upgrade only works in global mode
+    if [[ "$use_local" == "true" ]]; then
+        die "upgrade only works with global flake. Use 'nix flake update' for local flakes."
+    fi
+
     local flake_dir
     flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
 
-    # Update flake.lock if flake.nix exists
-    if [[ -f "$flake" ]]; then
-        info "Updating flake.lock..."
-        nix "${NIX_FLAGS[@]}" flake update --flake "$flake_dir"
+    if [[ ! -f "$flake" ]]; then
+        die "No flake.nix found at $flake. Run 'nixy install <package>' to create one."
     fi
 
-    info "Upgrading all packages..."
-    nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) --all
+    info "Updating flake.lock..."
+    nix "${NIX_FLAGS[@]}" flake update --flake "$flake_dir"
+
+    info "Rebuilding environment..."
+    mkdir -p "$(dirname "$NIXY_ENV")"
+    nix "${NIX_FLAGS[@]}" build "$flake_dir#default" --out-link "$NIXY_ENV" || \
+        die "Failed to rebuild environment"
+
     success "All packages upgraded"
 }
 
@@ -846,7 +813,7 @@ ${buildenv_paths}              # [/nixy:env-paths]
 EOF
 }
 
-# Sync installed packages with flake.nix (atomic mode using buildEnv)
+# Sync installed packages with flake.nix (using nix build --out-link)
 cmd_sync() {
     local use_local=false
 
@@ -854,7 +821,7 @@ cmd_sync() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --local|-l) use_local=true; shift ;;
-            --remove|-r) shift ;; # Kept for backward compatibility (no-op in atomic mode)
+            --remove|-r) shift ;; # Kept for backward compatibility (no-op)
             *) shift ;;
         esac
     done
@@ -884,33 +851,11 @@ cmd_sync() {
         generate_flake --flake-dir "$flake_dir" --global "${packages[@]+"${packages[@]}"}" > "$flake"
     fi
 
-    # Check if migration from individual packages is needed
-    if needs_migration; then
-        warn "Migrating from individual packages to atomic environment..."
-        migrate_to_buildenv "$flake_dir"
-        success "Sync complete (migrated to atomic mode)"
-        return 0
-    fi
-
-    # Atomic sync using buildEnv
-    if is_nixy_env_installed; then
-        local env_name
-        env_name=$(get_nixy_env_name)
-        if [[ -n "$env_name" ]]; then
-            info "Upgrading nixy environment..."
-            nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) "$env_name" || \
-                die "Failed to upgrade environment"
-        else
-            # Fallback: reinstall if can't find the profile name
-            info "Reinstalling nixy environment..."
-            nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default" || \
-                die "Failed to install environment"
-        fi
-    else
-        info "Installing nixy environment..."
-        nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default" || \
-            die "Failed to install environment"
-    fi
+    # Build environment and create symlink
+    info "Building nixy environment..."
+    mkdir -p "$(dirname "$NIXY_ENV")"
+    nix "${NIX_FLAGS[@]}" build "$flake_dir#default" --out-link "$NIXY_ENV" || \
+        die "Failed to build environment"
 
     success "Sync complete"
 }
@@ -996,44 +941,6 @@ remove_package_from_flake() {
     success "Removed $pkg from $flake"
 }
 
-# Bundle dump - export ALL installed packages to flake.nix (use with --global)
-cmd_bundle_dump() {
-    local use_global="${1:-false}"
-    local flake_dir
-    flake_dir=$(get_flake_dir "$use_global") || exit 1
-    local flake="$flake_dir/flake.nix"
-
-    # Check if existing flake.nix is nixy-managed
-    if [[ -f "$flake" ]] && ! is_nixy_managed_flake "$flake"; then
-        die "Existing flake.nix is not managed by nixy. Use 'nixy init' in a different directory or backup your flake.nix first."
-    fi
-
-    info "Dumping installed packages to $flake..."
-
-    # Ensure directory exists
-    mkdir -p "$flake_dir"
-
-    # Get installed packages
-    local -a packages=()
-    while IFS= read -r pkg; do
-        [[ -n "$pkg" ]] && packages+=("$pkg")
-    done < <(get_installed_packages)
-
-    if [[ ${#packages[@]} -eq 0 ]]; then
-        warn "No packages installed"
-    fi
-
-    # Generate and write flake.nix
-    if [[ "$use_global" == "true" ]]; then
-        generate_flake --flake-dir "$flake_dir" --global "${packages[@]}" > "$flake"
-    else
-        generate_flake --flake-dir "$flake_dir" "${packages[@]}" > "$flake"
-    fi
-
-    success "Dumped ${#packages[@]} package(s) to $flake"
-    info "Run 'cd $flake_dir && git init && git add flake.nix' to track with git"
-}
-
 # Enter dev shell (local by default for shell command)
 cmd_shell() {
     local use_local=true
@@ -1069,6 +976,14 @@ cmd_init() {
     info "Initializing flake.nix at $flake..."
     generate_flake --flake-dir "$dir" > "$flake"
     success "Created $flake"
+
+    # Show PATH setup hint for global config
+    if [[ "$dir" == "$NIXY_CONFIG_DIR" || "$dir" == "$HOME/.config/nix" ]]; then
+        echo ""
+        info "Add to your shell config:"
+        echo "  bash/zsh: eval \"\$(nixy config zsh)\""
+        echo "  fish:     nixy config fish | source"
+    fi
 }
 
 # Self-upgrade nixy to latest version
@@ -1170,6 +1085,37 @@ cmd_self_upgrade() {
     success "Successfully upgraded to version $remote_version!"
 }
 
+# Output shell configuration for eval
+cmd_config() {
+    local shell="${1:-}"
+
+    case "$shell" in
+        bash|zsh|sh)
+            cat << 'EOF'
+# nixy shell configuration
+export PATH="$HOME/.local/state/nixy/result/bin:$PATH"
+EOF
+            ;;
+        fish)
+            cat << 'EOF'
+# nixy shell configuration
+set -gx PATH $HOME/.local/state/nixy/result/bin $PATH
+EOF
+            ;;
+        "")
+            die "Usage: nixy config <shell>
+Supported shells: bash, zsh, fish
+
+Add to your shell config:
+  bash/zsh: eval \"\$(nixy config zsh)\"
+  fish:     nixy config fish | source"
+            ;;
+        *)
+            die "Unknown shell: $shell. Supported: bash, zsh, fish"
+            ;;
+    esac
+}
+
 # Show version
 cmd_version() {
     echo "nixy version $NIXY_VERSION"
@@ -1185,17 +1131,17 @@ USAGE:
 
 BASIC COMMANDS:
     init [dir]              Initialize a local flake.nix (default: current dir)
-    install <pkg>           Install a package to global profile
+    install <pkg>           Install a package globally
     install --local <pkg>   Install a package to local flake.nix
     install --file <path>   Install from local nix file
     uninstall <pkg>         Uninstall a package
     search <query>          Search for packages
-    list                    List installed packages
-    upgrade                 Upgrade all packages
+    list                    List packages in flake.nix
+    upgrade                 Upgrade all packages (update flake.lock & rebuild)
     version                 Show nixy version
 
 SYNC COMMANDS:
-    sync                    Sync installed packages with global flake.nix
+    sync                    Build environment from flake.nix and create symlink
                             (use on new machine to restore packages)
 
 ENVIRONMENT COMMANDS:
@@ -1204,6 +1150,7 @@ ENVIRONMENT COMMANDS:
 
 MAINTENANCE COMMANDS:
     self-upgrade [--force]  Upgrade nixy to the latest version
+    config <shell>          Output shell config (for eval in rc files)
 
 FLAGS:
     --local, -l             Use local flake.nix (in current dir or parents)
@@ -1213,6 +1160,12 @@ CONFIG FILES:
     Global: ~/.config/nix/flake.nix (default for install/uninstall/sync)
     Local:  ./flake.nix or parent directories (use with --local)
     Local packages: ~/.config/nix/packages/
+    Environment symlink: ~/.local/state/nixy/result
+
+PATH SETUP:
+    Add to your shell config:
+      bash/zsh: eval "$(nixy config zsh)"
+      fish:     nixy config fish | source
 
 LOCAL PACKAGE FORMAT:
     {
@@ -1223,11 +1176,12 @@ LOCAL PACKAGE FORMAT:
     }
 
 EXAMPLES:
-    nixy install ripgrep                # Install to global profile
+    nixy install ripgrep                # Install globally
     nixy install --local webpack        # Add to local project flake.nix
-    nixy uninstall ripgrep              # Remove from global profile
+    nixy uninstall ripgrep              # Remove from flake.nix
     nixy install --file neovim.nix      # Install from local nix file
-    nixy sync                           # Restore packages on new machine
+    nixy sync                           # Build/restore environment
+    nixy upgrade                        # Update nixpkgs and rebuild
     nixy init                           # Initialize local flake.nix
     nixy shell                          # Enter local dev shell
     nixy version                        # Show current version
@@ -1273,6 +1227,9 @@ main() {
             ;;
         self-upgrade)
             cmd_self_upgrade "$@"
+            ;;
+        config)
+            cmd_config "${1:-}"
             ;;
         version|--version|-v)
             cmd_version
