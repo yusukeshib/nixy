@@ -8,9 +8,6 @@ pub enum Error {
     #[error("Profile '{0}' does not exist")]
     ProfileNotFound(String),
 
-    #[error("Profile '{0}' already exists")]
-    ProfileExists(String),
-
     #[error("Cannot delete the active profile. Switch to another profile first.")]
     CannotDeleteActiveProfile,
 
@@ -24,7 +21,7 @@ pub enum Error {
     NoFlakeFound(String),
 
     #[error("Nix command failed: {0}")]
-    NixError(String),
+    NixCommand(String),
 
     #[error("Nix is not installed")]
     NixNotInstalled,
@@ -55,18 +52,6 @@ pub enum Error {
 
     #[error("flake.nix has modifications outside nixy markers. Use --force to proceed.")]
     CustomModifications,
-
-    #[error("No write permission to {0}. Try: sudo nixy self-upgrade")]
-    NoWritePermission(String),
-
-    #[error("Failed to download latest version. Check your network connection.")]
-    DownloadFailed,
-
-    #[error("Downloaded file is invalid (unexpected content)")]
-    InvalidDownload,
-
-    #[error("Could not determine remote version")]
-    NoRemoteVersion,
 
     #[error("Unknown shell: {0}. Supported: bash, zsh, fish")]
     UnknownShell(String),

@@ -8,7 +8,6 @@ use crate::error::{Error, Result};
 
 /// Profile management
 pub struct Profile {
-    pub name: String,
     pub dir: PathBuf,
     pub flake_path: PathBuf,
     pub packages_dir: PathBuf,
@@ -19,7 +18,6 @@ impl Profile {
     pub fn new(name: &str, config: &Config) -> Self {
         let dir = config.profiles_dir.join(name);
         Self {
-            name: name.to_string(),
             flake_path: dir.join("flake.nix"),
             packages_dir: dir.join("packages"),
             dir,
@@ -43,21 +41,6 @@ impl Profile {
             fs::remove_dir_all(&self.dir)?;
         }
         Ok(())
-    }
-
-    /// Get the flake directory (resolves symlinks)
-    pub fn get_flake_dir(&self) -> Result<PathBuf> {
-        if self.flake_path.is_symlink() {
-            let target = fs::read_link(&self.flake_path)?;
-            let resolved = if target.is_absolute() {
-                target
-            } else {
-                self.flake_path.parent().unwrap().join(&target)
-            };
-            Ok(resolved.parent().unwrap().to_path_buf())
-        } else {
-            Ok(self.dir.clone())
-        }
     }
 }
 

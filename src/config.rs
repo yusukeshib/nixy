@@ -58,9 +58,6 @@ pub const DEFAULT_PROFILE: &str = "default";
 /// nixy version
 pub const VERSION: &str = "0.1.0";
 
-/// Repository URL for self-upgrade
-pub const REPO_URL: &str = "https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy";
-
 /// Nix experimental features flags
 pub const NIX_FLAGS: &[&str] = &[
     "--extra-experimental-features",

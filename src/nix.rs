@@ -31,10 +31,10 @@ impl Nix {
                 "--raw",
             ])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
-            return Err(Error::NixError("Failed to get current system".to_string()));
+            return Err(Error::NixCommand("Failed to get current system".to_string()));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -49,10 +49,10 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["build", &flake_ref, "--out-link", &out_link_str])
             .status()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixError("Failed to build environment".to_string()));
+            return Err(Error::NixCommand("Failed to build environment".to_string()));
         }
 
         Ok(())
@@ -73,7 +73,7 @@ impl Nix {
                 "--raw",
             ])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
             // flake.lock might not exist yet
@@ -109,10 +109,10 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["search", "nixpkgs", query])
             .status()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixError("Search failed".to_string()));
+            return Err(Error::NixCommand("Search failed".to_string()));
         }
 
         Ok(())
@@ -129,10 +129,10 @@ impl Nix {
 
         cmd.arg("--flake").arg(flake_dir);
 
-        let status = cmd.status().map_err(|e| Error::NixError(e.to_string()))?;
+        let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixError("Failed to update flake".to_string()));
+            return Err(Error::NixCommand("Failed to update flake".to_string()));
         }
 
         Ok(())
@@ -145,10 +145,10 @@ impl Nix {
             .args(["flake", "update", "--flake"])
             .arg(flake_dir)
             .status()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixError("Failed to update flake".to_string()));
+            return Err(Error::NixCommand("Failed to update flake".to_string()));
         }
 
         Ok(())
@@ -160,7 +160,7 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["registry", "list"])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
             return Ok(None);
@@ -187,7 +187,7 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["eval", &attr])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
             return Ok(false);
@@ -208,7 +208,7 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["eval", &attr])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if output.status.success() && String::from_utf8_lossy(&output.stdout).contains("derivation")
         {
@@ -221,7 +221,7 @@ impl Nix {
             .args(NIX_FLAGS)
             .args(["eval", &attr])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if output.status.success() && String::from_utf8_lossy(&output.stdout).contains("derivation")
         {
@@ -255,7 +255,7 @@ impl Nix {
                     "--raw",
                 ])
                 .output()
-                .map_err(|e| Error::NixError(e.to_string()))?;
+                .map_err(|e| Error::NixCommand(e.to_string()))?;
 
             if output.status.success() {
                 return Ok(String::from_utf8_lossy(&output.stdout)
@@ -288,7 +288,7 @@ impl Nix {
                 "--raw",
             ])
             .output()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
             return Err(Error::InvalidFlakeLock);
@@ -306,10 +306,10 @@ impl Nix {
         let status = Command::new("nix-collect-garbage")
             .arg("-d")
             .status()
-            .map_err(|e| Error::NixError(e.to_string()))?;
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixError("Garbage collection failed".to_string()));
+            return Err(Error::NixCommand("Garbage collection failed".to_string()));
         }
 
         Ok(())
