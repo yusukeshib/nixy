@@ -7,6 +7,18 @@ use crate::error::{Error, Result};
 /// Wrapper for Nix command execution
 pub struct Nix;
 
+/// Format a path as a flake reference with optional output
+/// Handles paths with spaces by using proper escaping
+fn flake_ref(path: &Path, output: Option<&str>) -> String {
+    let path_str = path.to_string_lossy();
+    // URL-encode spaces for nix flake references
+    let encoded = path_str.replace(' ', "%20");
+    match output {
+        Some(out) => format!("{}#{}", encoded, out),
+        None => encoded.to_string(),
+    }
+}
+
 impl Nix {
     /// Check if nix is installed
     pub fn check_installed() -> Result<()> {
@@ -44,12 +56,12 @@ impl Nix {
 
     /// Build a flake and create an out-link
     pub fn build(flake_dir: &Path, output: &str, out_link: &Path) -> Result<()> {
-        let flake_ref = format!("{}#{}", flake_dir.display(), output);
+        let ref_str = flake_ref(flake_dir, Some(output));
         let out_link_str = out_link.to_string_lossy();
 
         let status = Command::new("nix")
             .args(NIX_FLAGS)
-            .args(["build", &flake_ref, "--out-link", &out_link_str])
+            .args(["build", &ref_str, "--out-link", &out_link_str])
             .status()
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
@@ -63,13 +75,13 @@ impl Nix {
     /// Evaluate packages from a flake using nix eval
     pub fn eval_packages(flake_dir: &Path) -> Result<Vec<String>> {
         let system = Self::current_system()?;
-        let flake_ref = format!("{}#packages.{}", flake_dir.display(), system);
+        let ref_str = flake_ref(flake_dir, Some(&format!("packages.{}", system)));
 
         let output = Command::new("nix")
             .args(NIX_FLAGS)
             .args([
                 "eval",
-                &flake_ref,
+                &ref_str,
                 "--apply",
                 r#"pkgs: builtins.concatStringsSep "\n" (builtins.filter (n: n != "default") (builtins.attrNames pkgs))"#,
                 "--raw",
@@ -93,11 +105,11 @@ impl Nix {
 
     /// Check if a flake has a default output
     pub fn has_default_output(flake_dir: &Path) -> bool {
-        let flake_ref = format!("{}#default", flake_dir.display());
+        let ref_str = flake_ref(flake_dir, Some("default"));
 
         Command::new("nix")
             .args(NIX_FLAGS)
-            .args(["eval", &flake_ref])
+            .args(["eval", &ref_str])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -315,5 +327,50 @@ impl Nix {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_flake_ref_simple_path() {
+        let path = PathBuf::from("/home/user/.config/nixy");
+        let result = flake_ref(&path, Some("default"));
+        assert_eq!(result, "/home/user/.config/nixy#default");
+    }
+
+    #[test]
+    fn test_flake_ref_path_with_spaces() {
+        // Paths like ~/Library/Application Support/nixy should have spaces encoded
+        let path = PathBuf::from("/Users/user/Library/Application Support/nixy");
+        let result = flake_ref(&path, Some("default"));
+        assert_eq!(
+            result,
+            "/Users/user/Library/Application%20Support/nixy#default"
+        );
+    }
+
+    #[test]
+    fn test_flake_ref_without_output() {
+        let path = PathBuf::from("/home/user/.config/nixy");
+        let result = flake_ref(&path, None);
+        assert_eq!(result, "/home/user/.config/nixy");
+    }
+
+    #[test]
+    fn test_flake_ref_with_nested_output() {
+        let path = PathBuf::from("/home/user/.config/nixy");
+        let result = flake_ref(&path, Some("packages.x86_64-linux"));
+        assert_eq!(result, "/home/user/.config/nixy#packages.x86_64-linux");
+    }
+
+    #[test]
+    fn test_flake_ref_multiple_spaces() {
+        let path = PathBuf::from("/tmp/nixy test dir/config");
+        let result = flake_ref(&path, Some("default"));
+        assert_eq!(result, "/tmp/nixy%20test%20dir/config#default");
     }
 }
