@@ -100,3 +100,30 @@ Commit message style:
 - Tests run in subshells to avoid polluting environment
 - Use `|| true` after `run_test` calls in main() to continue on failure
 - Validation tests that need valid packages should use `hello` (always available in nixpkgs)
+
+## Claude Code Commands
+
+### pr-watch
+Monitor a PR for new feedback. Run in background and notify when new comments arrive.
+```
+PR=<number> REPO="owner/repo" INTERVAL=300; LAST=$(gh api repos/$REPO/pulls/$PR/comments --jq 'length'); while true; do sleep $INTERVAL; C=$(gh api repos/$REPO/pulls/$PR/comments --jq 'length'); if [ "$C" -gt "$LAST" ]; then echo "🔔 NEW FEEDBACK"; gh api repos/$REPO/pulls/$PR/comments --jq '.[-'$((C-LAST))':] | .[] | "File: \(.path):\(.line)\n\(.body)\n---"'; LAST=$C; fi; done
+```
+
+### pr-feedback-loop
+When user asks to monitor and resolve PR feedback automatically:
+1. Start pr-watch in background
+2. When new feedback arrives:
+   - Read the comments
+   - Fix the code issues
+   - Run tests (`cargo test --test integration`)
+   - Commit and push changes
+   - Resolve review threads via GraphQL:
+     ```
+     gh api graphql -f query='query { repository(owner: "OWNER", name: "REPO") { pullRequest(number: NUM) { reviewThreads(first: 50) { nodes { id isResolved } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id'
+     ```
+     Then for each thread_id:
+     ```
+     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } } }'
+     ```
+   - Copilot automatically re-reviews on new commits (no manual trigger needed)
+3. Continue monitoring
