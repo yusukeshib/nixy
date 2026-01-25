@@ -66,8 +66,22 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 
 ### 2. nixy をインストール
 
+**クイックインストール（推奨）:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
+```
+
+**cargo でインストール（crates.io から）:**
+
+```bash
+cargo install nixy
+```
+
+**nix でインストール:**
+
+```bash
+nix profile install github:yusukeshib/nixy
 ```
 
 ### 3. シェルを設定
@@ -192,7 +206,7 @@ my-overlay.url = "github:user/my-overlay";
 これらのマーカー外のコンテンツは、nixy が flake を再生成する際に上書きされます。詳細なカスタマイズについては、付録の「flake.nix のカスタマイズ」を参照してください。
 
 **nixy をアップデートするには？**
-`nixy self-upgrade` を実行します。更新を確認し、最新版をダウンロードして自動的に置き換えます。すでに最新版でも再インストールしたい場合は `--force` オプションを使用してください。
+`cargo install nixy` で crates.io から最新版を取得するか、インストールスクリプトを再実行してください。
 
 **nixy をアンインストールするには？**
 `nixy` スクリプトを削除するだけ。flake.nix ファイルはそのまま残り、標準の `nix` コマンドで使えます。
