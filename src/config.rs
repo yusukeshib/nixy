@@ -16,22 +16,22 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Self {
+        // Use ~/.config/nixy to match bash script behavior (XDG-style, not platform-specific)
         let config_dir = std::env::var("NIXY_CONFIG_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                dirs::config_dir()
-                    .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-                    .unwrap_or_else(|| PathBuf::from(".config"))
-                    .join("nixy")
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".config/nixy")
             });
 
+        // Use ~/.local/state/nixy/env to match bash script behavior
         let env_link = std::env::var("NIXY_ENV")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                dirs::state_dir()
-                    .or_else(|| dirs::home_dir().map(|h| h.join(".local/state")))
-                    .unwrap_or_else(|| PathBuf::from(".local/state"))
-                    .join("nixy/env")
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".local/state/nixy/env")
             });
 
         Self {
@@ -63,3 +63,68 @@ pub const NIX_FLAGS: &[&str] = &[
     "--extra-experimental-features",
     "flakes",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn test_config_uses_dot_config_not_platform_specific() {
+        // Ensure we use ~/.config/nixy, not platform-specific paths like
+        // ~/Library/Application Support on macOS
+        env::remove_var("NIXY_CONFIG_DIR");
+        env::remove_var("NIXY_ENV");
+
+        let config = Config::new();
+        let config_str = config.config_dir.to_string_lossy();
+
+        // Should contain .config/nixy, not "Application Support" or other platform paths
+        assert!(
+            config_str.contains(".config/nixy"),
+            "Config dir should be ~/.config/nixy, got: {}",
+            config_str
+        );
+        assert!(
+            !config_str.contains("Application Support"),
+            "Should not use macOS Application Support dir"
+        );
+    }
+
+    #[test]
+    fn test_config_env_uses_local_state() {
+        env::remove_var("NIXY_CONFIG_DIR");
+        env::remove_var("NIXY_ENV");
+
+        let config = Config::new();
+        let env_str = config.env_link.to_string_lossy();
+
+        assert!(
+            env_str.contains(".local/state/nixy/env"),
+            "Env link should be ~/.local/state/nixy/env, got: {}",
+            env_str
+        );
+    }
+
+    #[test]
+    fn test_config_respects_env_vars() {
+        env::set_var("NIXY_CONFIG_DIR", "/custom/config");
+        env::set_var("NIXY_ENV", "/custom/env");
+
+        let config = Config::new();
+
+        assert_eq!(
+            config.config_dir,
+            PathBuf::from("/custom/config"),
+            "Should respect NIXY_CONFIG_DIR"
+        );
+        assert_eq!(
+            config.env_link,
+            PathBuf::from("/custom/env"),
+            "Should respect NIXY_ENV"
+        );
+
+        env::remove_var("NIXY_CONFIG_DIR");
+        env::remove_var("NIXY_ENV");
+    }
+}
