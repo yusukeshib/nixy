@@ -129,6 +129,7 @@ fn download_binary(url: &str) -> Result<PathBuf> {
         .map_err(|e| Error::SelfUpdate(e.to_string()))?;
 
     tmp_file.flush()?;
+    drop(tmp_file); // Explicitly close file before modifying permissions
 
     // Make the file executable on Unix
     #[cfg(unix)]
