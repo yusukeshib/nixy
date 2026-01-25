@@ -59,6 +59,9 @@ pub enum Error {
     #[error("{0}")]
     Usage(String),
 
+    #[error("Self-update error: {0}")]
+    SelfUpdate(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
