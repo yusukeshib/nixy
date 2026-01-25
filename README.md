@@ -119,8 +119,8 @@ Packages are installed globally and available in all terminal sessions.
 | `nixy version` | Show nixy version |
 | `nixy self-upgrade` | Upgrade nixy to the latest version |
 | `nixy profile` | Show current profile |
-| `nixy profile create <name>` | Create a new profile |
 | `nixy profile switch <name>` | Switch to a different profile |
+| `nixy profile switch -c <name>` | Create and switch to a new profile |
 | `nixy profile list` | List all profiles |
 | `nixy profile delete <name>` | Delete a profile (requires `--force`) |
 
@@ -129,12 +129,10 @@ Packages are installed globally and available in all terminal sessions.
 Maintain separate package sets for different contexts (work, personal, projects):
 
 ```bash
-nixy profile create work      # Create a new profile
-nixy profile switch work      # Switch to it
+nixy profile switch -c work   # Create and switch to a new profile
 nixy install slack terraform  # Install work-specific packages
 
-nixy profile create personal  # Create another profile
-nixy profile switch personal
+nixy profile switch -c personal  # Create another profile
 nixy install spotify games    # Different packages here
 
 nixy profile list             # See all profiles
