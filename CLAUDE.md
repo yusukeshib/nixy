@@ -9,11 +9,11 @@ nixy is a Homebrew-style wrapper for Nix using flake.nix. It's a bash script tha
 When adding new features or fixing bugs, follow this workflow:
 
 ### 1. Create a Feature Branch with Worktree
-For new features, use git worktree to work in an isolated directory:
+For new features, use `git wt` to work in an isolated directory:
 ```bash
-git worktree add ../nixy-<feature-name> -b <username>/<feature-name>
-cd ../nixy-<feature-name>
+git wt <username>/<feature-name>
 ```
+This creates the branch and worktree automatically, then switches to the worktree directory.
 This keeps the main worktree clean and allows parallel development.
 
 ### 2. Make Changes
@@ -69,10 +69,9 @@ gh pr create --title "Feature description" --body "## Summary
 
 ### 7. Cleanup Worktree (after PR is merged)
 ```bash
-cd ../nixy
-git worktree remove ../nixy-<feature-name>
-git branch -d <username>/<feature-name>
+git wt -d <username>/<feature-name>
 ```
+This removes both the worktree and the branch.
 
 Commit message style:
 - Start with verb (Add, Fix, Update, Make, etc.)
