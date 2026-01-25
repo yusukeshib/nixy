@@ -61,6 +61,7 @@ If you only use one machine and don't need reproducibility, `nix profile` is sim
 | `brew list` | `nixy list` |
 | `brew search git` | `nixy search git` |
 | `brew upgrade` | `nixy upgrade` |
+| `brew upgrade ripgrep` | `nixy upgrade nixpkgs` |
 
 Familiar interface, but with Nix's reproducibility underneath. No lock-in - it's just standard Nix.
 
@@ -102,7 +103,8 @@ nixy install git
 nixy list               # See what's installed
 nixy search python      # Find packages
 nixy uninstall nodejs   # Remove a package
-nixy upgrade            # Upgrade all packages
+nixy upgrade            # Upgrade all inputs
+nixy upgrade nixpkgs    # Upgrade only nixpkgs
 ```
 
 Just like Homebrew - packages are installed globally and available in all terminal sessions.
@@ -115,7 +117,7 @@ Just like Homebrew - packages are installed globally and available in all termin
 | `nixy uninstall <pkg>` | Uninstall a package |
 | `nixy list` | List packages in flake.nix |
 | `nixy search <query>` | Search for packages |
-| `nixy upgrade` | Upgrade all packages |
+| `nixy upgrade [input...]` | Upgrade all inputs or specific ones |
 | `nixy sync` | Build environment from flake.nix (for new machines) |
 | `nixy gc` | Clean up old package versions |
 | `nixy config <shell>` | Output shell config (for PATH setup) |
