@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.16"
+NIXY_VERSION="0.1.17"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -511,7 +511,7 @@ cmd_upgrade() {
     fi
 
     info "Upgrading all packages..."
-    nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*'
+    nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) --all
     success "All packages upgraded"
 }
 
