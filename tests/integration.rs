@@ -632,10 +632,7 @@ fn test_sync_with_profile() {
     let env = TestEnv::new();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "test"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "test"]).output();
 
     // Sync should attempt to build
     let output = env.cmd().arg("sync").output().unwrap();
@@ -663,10 +660,7 @@ fn test_profile_list_shows_active() {
     let env = TestEnv::new();
 
     // Create and switch to a profile
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
 
     let output = env.cmd().args(["profile", "list"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -684,10 +678,7 @@ fn test_profile_delete_requires_force() {
     let env = TestEnv::new();
 
     // Create two profiles
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
     let _ = env
         .cmd()
         .args(["profile", "switch", "-c", "default"])
@@ -714,10 +705,7 @@ fn test_profile_delete_active_fails() {
     let env = TestEnv::new();
 
     // Create a profile and stay on it (it becomes active)
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
 
     // Try to delete the active profile
     let output = env
@@ -740,20 +728,14 @@ fn test_profile_delete_with_force_success() {
     let env = TestEnv::new();
 
     // Create two profiles
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
     let _ = env
         .cmd()
         .args(["profile", "switch", "-c", "default"])
         .output();
 
     // Switch to default so work is not active
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "default"]).output();
 
     // Delete work with --force
     let output = env
@@ -778,10 +760,7 @@ fn test_profile_switch_with_existing() {
     let env = TestEnv::new();
 
     // Create a profile
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output();
+    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
 
     // Create another profile
     let _ = env
