@@ -4,26 +4,26 @@
 
 ![nixy demo](demo.gif)
 
-**Start using Nix today, learn as you go.** Install packages with a single command, just like Homebrew.
+**Reproducible Nix packages, Homebrew simplicity.** Install packages with a single command, sync them across all your machines.
 
 ```bash
 nixy install ripgrep    # That's it. Nix made simple.
 ```
 
-nixy gives you the power of Nix (reproducible builds, rollbacks, no dependency conflicts) with the simplicity of Homebrew. It's just a thin bash wrapper - no lock-in, no magic.
+nixy manages your Nix packages through a declarative `flake.nix`. Unlike `nix profile` which lacks built-in reproducibility, nixy ensures the same packages and versions on every machine. It's just a thin bash wrapper - no lock-in, no magic.
 
 ## Motivation
 
-Nix is powerful, but the learning curve is steep. You want to learn Nix, but writing flake.nix just to install a package feels overwhelming at first.
+Nix is powerful, but managing packages shouldn't be complicated. You want the benefits of Nix without writing flake files by hand.
 
-nixy makes the transition easier. Start with simple commands, and the generated `flake.nix` teaches you Nix patterns along the way. You get all the benefits of Nix:
-- **Reproducibility**: Same packages, same versions, everywhere
-- **No conflicts**: Different projects can use different versions of the same tool
-- **Atomic upgrades**: Updates either fully succeed or nothing changes
-- **Rollbacks**: Instantly revert if an upgrade breaks something
+nixy gives you:
+- **Homebrew-like commands**: `nixy install`, `nixy uninstall`, `nixy upgrade` - that's it
+- **Reproducibility**: Same packages, same versions, on every machine
+- **No hidden state**: Your `flake.nix` is the single source of truth
+- **Atomic upgrades & rollbacks**: Updates either fully succeed or nothing changes
 - **Cross-platform**: Same workflow on macOS and Linux
 
-Start with `nixy install <package>`, then read the generated flake.nix when you're ready to learn more.
+Unlike `nix profile`, nixy uses `flake.nix` + `flake.lock` for full reproducibility. Copy your config to a new machine, run `nixy sync`, done.
 
 ## How it works
 
@@ -39,6 +39,19 @@ nixy is **purely declarative** - your `flake.nix` is the single source of truth.
 
 nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it generates is plain Nix - you can read it, edit it manually, or use `nix` commands directly anytime.
 
+## Why not nix profile?
+
+`nix profile` is the standard Nix tool for imperative package management. It works well for single-machine use, but falls short for reproducibility:
+
+| | nix profile | nixy |
+|---|-------------|------|
+| Package list | Hidden in `manifest.json` | Readable `flake.nix` |
+| Version locking | No `flake.lock` | Full `flake.lock` support |
+| Sync to new machine | Manual re-installation | `nixy sync` |
+| Rollback | Profile generations only | Git + `flake.lock` |
+
+If you only use one machine and don't need reproducibility, `nix profile` is simpler. If you want the same environment everywhere, use nixy.
+
 ## Homebrew vs nixy
 
 | Homebrew | nixy |
@@ -49,7 +62,7 @@ nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it gene
 | `brew search git` | `nixy search git` |
 | `brew upgrade` | `nixy upgrade` |
 
-Same simplicity, but with Nix's reliability underneath. No lock-in - it's just standard Nix.
+Familiar interface, but with Nix's reproducibility underneath. No lock-in - it's just standard Nix.
 
 ## Quick Start
 
@@ -186,6 +199,9 @@ Run `nixy self-upgrade`. It checks for updates, downloads the latest version, an
 
 **How do I uninstall nixy?**
 Just delete the `nixy` script. Your flake.nix files remain and work with standard `nix` commands.
+
+**Why not use `nix profile` directly?**
+`nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `flake.nix` as the source of truth, which can be copied, version-controlled, and shared.
 
 ---
 
