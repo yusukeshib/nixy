@@ -131,23 +131,51 @@ Packages are installed globally and available in all terminal sessions.
 
 ## Commands
 
+### Package Management
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `nixy install <pkg>` | `add` | Install a package from nixpkgs |
+| `nixy install --from <flake> <pkg>` | | Install from a flake (registry name or URL) |
+| `nixy install --file <path>` | | Install from a custom nix file |
+| `nixy uninstall <pkg>` | `remove` | Uninstall a package |
+| `nixy list` | `ls` | List packages in flake.nix |
+| `nixy search <query>` | | Search for packages |
+| `nixy upgrade [input...]` | | Upgrade all inputs or specific ones |
+| `nixy sync` | | Build environment from flake.nix (for new machines) |
+| `nixy gc` | | Clean up old package versions |
+
+### Profile Management
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `nixy profile` | | Show current profile |
+| `nixy profile switch <name>` | `use` | Switch to a different profile |
+| `nixy profile switch -c <name>` | | Create and switch to a new profile |
+| `nixy profile list` | `ls` | List all profiles |
+| `nixy profile delete <name>` | `rm` | Delete a profile (requires `--force`) |
+
+### Utilities
+
 | Command | Description |
 |---------|-------------|
-| `nixy install <pkg>` | Install a package from nixpkgs |
-| `nixy install --from <flake> <pkg>` | Install from a flake (registry name or URL) |
-| `nixy uninstall <pkg>` | Uninstall a package |
-| `nixy list` | List packages in flake.nix |
-| `nixy search <query>` | Search for packages |
-| `nixy upgrade [input...]` | Upgrade all inputs or specific ones |
-| `nixy sync` | Build environment from flake.nix (for new machines) |
-| `nixy gc` | Clean up old package versions |
 | `nixy config <shell>` | Output shell config (for PATH setup) |
 | `nixy version` | Show nixy version |
-| `nixy profile` | Show current profile |
-| `nixy profile switch <name>` | Switch to a different profile |
-| `nixy profile switch -c <name>` | Create and switch to a new profile |
-| `nixy profile list` | List all profiles |
-| `nixy profile delete <name>` | Delete a profile (requires `--force`) |
+| `nixy self-upgrade` | Upgrade nixy to the latest version |
+| `nixy self-upgrade --force` | Force reinstall even if already at latest |
+
+### Install Options
+
+The `install` command supports several options:
+
+```bash
+nixy install ripgrep              # Install from nixpkgs (default)
+nixy install --from <flake> <pkg> # Install from external flake
+nixy install --file my-pkg.nix    # Install from custom nix file
+nixy install --force <pkg>        # Force regeneration of flake.nix
+```
+
+Use `--force` when you've made manual edits outside the nixy markers and want to proceed anyway (your custom changes will be lost).
 
 ## Multiple Profiles
 
@@ -221,7 +249,7 @@ my-overlay.url = "github:user/my-overlay";
 Any content outside these markers will be overwritten when nixy regenerates the flake. For heavy customization, see "Customizing flake.nix" in the Appendix.
 
 **How do I update nixy?**
-Run `cargo install nixy` to get the latest version from crates.io, or re-run the install script.
+Run `nixy self-upgrade` to automatically update to the latest version. Alternatively, use `cargo install nixy` or re-run the install script.
 
 **How do I uninstall nixy?**
 Delete the `nixy` binary (typically `~/.local/bin/nixy` or `~/.cargo/bin/nixy`). Your flake.nix files remain and work with standard `nix` commands.
