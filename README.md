@@ -70,19 +70,33 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 
 ### 2. Install nixy
 
-**From source (recommended):**
+**Quick install (recommended):**
 
 ```bash
-git clone https://github.com/yusukeshib/nixy.git
-cd nixy
-cargo build --release
-sudo cp target/release/nixy /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
+
+This will try (in order): pre-built binary, cargo install, or nix build.
 
 **With cargo:**
 
 ```bash
 cargo install --git https://github.com/yusukeshib/nixy.git
+```
+
+**With nix:**
+
+```bash
+nix profile install github:yusukeshib/nixy
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/yusukeshib/nixy.git
+cd nixy
+cargo build --release
+cp target/release/nixy ~/.local/bin/
 ```
 
 ### 3. Set up your shell

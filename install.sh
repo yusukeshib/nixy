@@ -11,37 +11,46 @@ info() { echo -e "${GREEN}==>${NC} $1"; }
 warn() { echo -e "${YELLOW}Warning:${NC} $1"; }
 error() { echo -e "${RED}Error:${NC} $1"; exit 1; }
 
-# Default install directory
+# Configuration
+REPO="yusukeshib/nixy"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
+BINARY_NAME="nixy"
 
-# Check dependencies
-check_dependencies() {
-    local missing=()
+# Detect OS and architecture
+detect_platform() {
+    local os arch
 
-    if ! command -v nix &> /dev/null; then
-        missing+=("nix")
-    fi
+    case "$(uname -s)" in
+        Linux*)  os="linux" ;;
+        Darwin*) os="darwin" ;;
+        *)       error "Unsupported OS: $(uname -s)" ;;
+    esac
 
-    if ! command -v jq &> /dev/null; then
-        missing+=("jq")
-    fi
+    case "$(uname -m)" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        arm64)   arch="aarch64" ;;
+        *)       error "Unsupported architecture: $(uname -m)" ;;
+    esac
 
-    if [ ${#missing[@]} -ne 0 ]; then
-        warn "Missing dependencies: ${missing[*]}"
-        echo "  Please install them before using nixy:"
-        echo "  - Nix: https://nixos.org/download.html"
-        echo "  - jq: Install via your package manager or 'nix profile install nixpkgs#jq'"
-        echo ""
-    fi
+    echo "${arch}-${os}"
 }
 
-# Create install directory if needed
-ensure_install_dir() {
-    if [ ! -d "$INSTALL_DIR" ]; then
-        info "Creating $INSTALL_DIR"
-        mkdir -p "$INSTALL_DIR"
+# Check if nix is installed
+check_nix() {
+    if ! command -v nix &> /dev/null; then
+        warn "Nix is not installed"
+        echo "  nixy requires Nix to function. Install it from:"
+        echo "  https://nixos.org/download.html"
+        echo ""
+        return 1
     fi
+    return 0
+}
+
+# Check if cargo is available
+has_cargo() {
+    command -v cargo &> /dev/null
 }
 
 # Check if directory is in PATH
@@ -56,42 +65,83 @@ check_path() {
         echo "  # For zsh (~/.zshrc)"
         echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
         echo ""
+        echo "  # For fish (~/.config/fish/config.fish)"
+        echo "  set -gx PATH \$HOME/.local/bin \$PATH"
+        echo ""
     fi
 }
 
-# Download and install nixy
-install_nixy() {
-    local target="$INSTALL_DIR/nixy"
+# Try to download pre-built binary from GitHub releases
+try_download_binary() {
+    local platform="$1"
+    local target="$INSTALL_DIR/$BINARY_NAME"
+    local release_url="https://github.com/$REPO/releases/latest/download/nixy-${platform}"
 
-    # Check if nixy is already installed somewhere
-    if command -v nixy &> /dev/null; then
-        local existing=$(command -v nixy)
-        existing=$(realpath "$existing" 2>/dev/null || echo "$existing")
+    info "Attempting to download pre-built binary..."
 
-        # If installed elsewhere, update that location instead
-        if [[ "$existing" != "$target" ]]; then
-            info "Found existing nixy at $existing"
-            target="$existing"
-        fi
-    fi
+    # Create install directory
+    mkdir -p "$INSTALL_DIR"
 
-    info "Downloading nixy to $target"
-
-    # Ensure target directory exists
-    local target_dir=$(dirname "$target")
-    if [[ ! -d "$target_dir" ]]; then
-        mkdir -p "$target_dir"
-    fi
-
+    # Try to download
+    local http_code
     if command -v curl &> /dev/null; then
-        curl -fsSL "$REPO_URL" -o "$target"
+        http_code=$(curl -fsSL -w "%{http_code}" -o "$target.tmp" "$release_url" 2>/dev/null) || http_code="000"
     elif command -v wget &> /dev/null; then
-        wget -qO "$target" "$REPO_URL"
+        if wget -q -O "$target.tmp" "$release_url" 2>/dev/null; then
+            http_code="200"
+        else
+            http_code="000"
+        fi
     else
-        error "Neither curl nor wget found. Please install one of them."
+        return 1
     fi
 
-    chmod +x "$target"
+    if [[ "$http_code" == "200" ]] && [[ -f "$target.tmp" ]]; then
+        mv "$target.tmp" "$target"
+        chmod +x "$target"
+        return 0
+    else
+        rm -f "$target.tmp"
+        return 1
+    fi
+}
+
+# Build from source using cargo
+build_with_cargo() {
+    info "Building from source with cargo..."
+
+    if ! has_cargo; then
+        return 1
+    fi
+
+    # Install using cargo
+    cargo install --git "https://github.com/$REPO" --root "$HOME/.local" 2>&1
+
+    return $?
+}
+
+# Build from source using nix
+build_with_nix() {
+    info "Building from source with nix..."
+
+    if ! command -v nix &> /dev/null; then
+        return 1
+    fi
+
+    # Create install directory
+    mkdir -p "$INSTALL_DIR"
+
+    # Build with nix and copy binary
+    local result
+    result=$(nix --extra-experimental-features "nix-command flakes" build "github:$REPO" --no-link --print-out-paths 2>&1) || return 1
+
+    if [[ -f "$result/bin/nixy" ]]; then
+        cp "$result/bin/nixy" "$INSTALL_DIR/$BINARY_NAME"
+        chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        return 0
+    fi
+
+    return 1
 }
 
 main() {
@@ -99,20 +149,75 @@ main() {
     echo "Installing nixy - Homebrew-style wrapper for Nix"
     echo ""
 
-    check_dependencies
-    ensure_install_dir
-    install_nixy
+    # Check nix first (required for nixy to work)
+    check_nix || true
+
+    local platform
+    platform=$(detect_platform)
+    info "Detected platform: $platform"
+
+    # Try installation methods in order of preference
+    local installed=false
+
+    # 1. Try pre-built binary (fastest)
+    if try_download_binary "$platform"; then
+        installed=true
+        info "Installed pre-built binary"
+    fi
+
+    # 2. Try cargo (if available)
+    if [[ "$installed" == "false" ]] && has_cargo; then
+        if build_with_cargo; then
+            installed=true
+            info "Built and installed with cargo"
+        fi
+    fi
+
+    # 3. Try nix build (if nix available)
+    if [[ "$installed" == "false" ]] && command -v nix &> /dev/null; then
+        if build_with_nix; then
+            installed=true
+            info "Built and installed with nix"
+        fi
+    fi
+
+    # 4. Provide manual instructions if all methods failed
+    if [[ "$installed" == "false" ]]; then
+        error "Could not install nixy automatically.
+
+Please install manually using one of these methods:
+
+  # Using cargo (requires Rust 1.80+)
+  cargo install --git https://github.com/$REPO
+
+  # Using nix
+  nix profile install github:$REPO
+
+  # Build from source
+  git clone https://github.com/$REPO
+  cd nixy
+  cargo build --release
+  cp target/release/nixy ~/.local/bin/
+"
+    fi
+
     check_path
 
     echo ""
     info "nixy installed successfully!"
     echo ""
+    echo "  Setup your shell (add to your shell's rc file):"
+    echo "    eval \"\$(nixy config bash)\"   # for bash"
+    echo "    eval \"\$(nixy config zsh)\"    # for zsh"
+    echo "    nixy config fish | source     # for fish"
+    echo ""
     echo "  Get started:"
     echo "    nixy install <package>   # Install a package"
     echo "    nixy search <query>      # Search for packages"
+    echo "    nixy list                # List installed packages"
     echo ""
-    echo "  For more info: https://github.com/yusukeshib/nixy"
+    echo "  For more info: https://github.com/$REPO"
     echo ""
 }
 
-main
+main "$@"
