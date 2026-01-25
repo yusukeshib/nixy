@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.8"
+NIXY_VERSION="0.1.9"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -747,6 +747,11 @@ cmd_sync() {
             *) shift ;;
         esac
     done
+
+    # Sync only works in global mode
+    if [[ "$use_global" != "true" ]]; then
+        die "sync only works with --global flag. Use 'nixy sync --global' to sync global packages."
+    fi
 
     local flake_dir
     flake_dir=$(get_flake_dir "$use_global") || exit 1

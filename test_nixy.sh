@@ -462,19 +462,30 @@ EOF
 test_sync_fails_cleanly_without_flake() {
     cd "$TEST_DIR"
     local output exit_code
+    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
+
+    assert_exit_code 1 "$exit_code" && \
+    assert_file_not_exists "$NIXY_CONFIG_DIR/flake.nix"
+}
+
+test_sync_requires_global_flag() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    local output exit_code
     output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
 
     assert_exit_code 1 "$exit_code" && \
-    assert_file_not_exists "./flake.nix"
+    assert_output_contains "$output" "sync only works with --global flag"
 }
 
 test_sync_with_empty_flake() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
     # Sync with empty flake (no packages) should not fail with unbound variable
     local output exit_code
-    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (already in sync)
     assert_exit_code 0 "$exit_code" && \
@@ -488,15 +499,15 @@ test_sync_with_empty_flake() {
 
 test_sync_with_packages_no_unbound_variable() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
     # Add packages to flake (simulating a flake with packages defined)
-    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' flake.nix > flake.nix.tmp && mv flake.nix.tmp flake.nix
+    awk '/# \[nixy:packages\]/{print; print "          ripgrep = pkgs.ripgrep;"; print "          fzf = pkgs.fzf;"; next}1' "$NIXY_CONFIG_DIR/flake.nix" > "$NIXY_CONFIG_DIR/flake.nix.tmp" && mv "$NIXY_CONFIG_DIR/flake.nix.tmp" "$NIXY_CONFIG_DIR/flake.nix"
 
     # Sync should not fail with unbound variable even when to_remove array is empty
     # (packages in flake but nothing to remove from nix profile)
     local output exit_code
-    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
 
     # Should not have unbound variable error regardless of exit code
     # (exit code may be non-zero if nix commands fail, but that's not what we're testing)
@@ -567,13 +578,13 @@ test_sync_preserves_local_packages() {
 
 test_sync_without_remove_only_warns() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
     # Sync with empty flake should warn about extra packages (but not fail)
     # We need to mock the installed packages, but since nix profile is isolated,
     # this will just test that sync doesn't error with unbound variables
     local output exit_code
-    output=$("$NIXY" sync 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --global 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed
     assert_exit_code 0 "$exit_code" && \
@@ -587,11 +598,11 @@ test_sync_without_remove_only_warns() {
 
 test_sync_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
     # Test that --remove flag is accepted (doesn't cause unknown option error)
     local output exit_code
-    output=$("$NIXY" sync --remove 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync --global --remove 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (empty flake, nothing to remove)
     assert_exit_code 0 "$exit_code" && \
@@ -605,11 +616,11 @@ test_sync_remove_flag_accepted() {
 
 test_sync_short_remove_flag_accepted() {
     cd "$TEST_DIR"
-    "$NIXY" init >/dev/null 2>&1
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
 
     # Test that -r short flag is accepted
     local output exit_code
-    output=$("$NIXY" sync -r 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$NIXY" sync -g -r 2>&1) && exit_code=0 || exit_code=$?
 
     # Should succeed (empty flake, nothing to remove)
     assert_exit_code 0 "$exit_code" && \
@@ -1267,6 +1278,7 @@ main() {
     run_test "install fails on non-nixy flake" test_install_fails_on_non_nixy_flake || true
     run_test "uninstall fails on non-nixy flake" test_uninstall_fails_on_non_nixy_flake || true
     run_test "sync fails cleanly without flake" test_sync_fails_cleanly_without_flake || true
+    run_test "sync requires --global flag" test_sync_requires_global_flag || true
     run_test "sync with empty flake succeeds" test_sync_with_empty_flake || true
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "sync preserves local packages" test_sync_preserves_local_packages || true
