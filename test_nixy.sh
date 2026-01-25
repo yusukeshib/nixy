@@ -1266,6 +1266,96 @@ test_help_shows_maintenance_section() {
 }
 
 # =============================================================================
+# Test: buildEnv atomic install
+# =============================================================================
+
+test_flake_has_buildenv_default() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Generated flake should have buildEnv default output
+    assert_file_contains "./flake.nix" "default = pkgs.buildEnv" && \
+    assert_file_contains "./flake.nix" 'name = "nixy-env"' && \
+    assert_file_contains "./flake.nix" "# \[nixy:env-paths\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:env-paths\]"
+}
+
+test_buildenv_contains_all_packages() {
+    cd "$TEST_DIR"
+
+    # Source nixy to test generate_flake directly
+    source "$NIXY"
+
+    # Generate a flake with multiple packages
+    local flake_content
+    flake_content=$(generate_flake --flake-dir "$TEST_DIR" ripgrep fzf bat)
+
+    # Check that buildEnv paths contains all packages
+    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.ripgrep"; then
+        echo "  ASSERTION FAILED: buildEnv paths should contain ripgrep"
+        return 1
+    fi
+    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.fzf"; then
+        echo "  ASSERTION FAILED: buildEnv paths should contain fzf"
+        return 1
+    fi
+    if ! echo "$flake_content" | grep -A 20 "default = pkgs.buildEnv" | grep -q "pkgs.bat"; then
+        echo "  ASSERTION FAILED: buildEnv paths should contain bat"
+        return 1
+    fi
+    return 0
+}
+
+test_individual_packages_still_accessible() {
+    cd "$TEST_DIR"
+
+    # Source nixy to test generate_flake directly
+    source "$NIXY"
+
+    # Generate a flake with packages
+    local flake_content
+    flake_content=$(generate_flake --flake-dir "$TEST_DIR" ripgrep fzf)
+
+    # Individual package attributes should still exist
+    if ! echo "$flake_content" | grep -q "ripgrep = pkgs.ripgrep;"; then
+        echo "  ASSERTION FAILED: Individual ripgrep attribute should still exist"
+        return 1
+    fi
+    if ! echo "$flake_content" | grep -q "fzf = pkgs.fzf;"; then
+        echo "  ASSERTION FAILED: Individual fzf attribute should still exist"
+        return 1
+    fi
+    return 0
+}
+
+test_empty_flake_has_empty_buildenv() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Empty flake should have buildEnv structure with empty paths
+    assert_file_contains "./flake.nix" "default = pkgs.buildEnv" && \
+    assert_file_contains "./flake.nix" "paths = \[" && \
+    assert_file_contains "./flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
+}
+
+test_buildenv_has_extra_outputs() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # buildEnv should include man, doc, and info outputs
+    assert_file_contains "./flake.nix" 'extraOutputsToInstall = \[ "man" "doc" "info" \]'
+}
+
+test_flake_structure_has_env_paths_markers() {
+    cd "$TEST_DIR"
+    "$NIXY" init >/dev/null 2>&1
+
+    # Verify env-paths section markers exist
+    assert_file_contains "./flake.nix" "# \[nixy:env-paths\]" && \
+    assert_file_contains "./flake.nix" "# \[/nixy:env-paths\]"
+}
+
+# =============================================================================
 # Run all tests
 # =============================================================================
 
@@ -1360,6 +1450,14 @@ main() {
     run_test "help shows version command" test_help_shows_version_command || true
     run_test "help shows self-upgrade command" test_help_shows_self_upgrade_command || true
     run_test "help shows MAINTENANCE section" test_help_shows_maintenance_section || true
+
+    # buildEnv atomic install tests
+    run_test "flake has buildEnv default" test_flake_has_buildenv_default || true
+    run_test "buildEnv contains all packages" test_buildenv_contains_all_packages || true
+    run_test "individual packages still accessible" test_individual_packages_still_accessible || true
+    run_test "empty flake has empty buildEnv" test_empty_flake_has_empty_buildenv || true
+    run_test "buildEnv has extra outputs" test_buildenv_has_extra_outputs || true
+    run_test "flake has env-paths markers" test_flake_structure_has_env_paths_markers || true
 
     echo ""
     echo "======================================"

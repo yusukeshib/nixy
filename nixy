@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.10"
+NIXY_VERSION="0.1.11"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -168,6 +168,41 @@ get_installed_packages() {
         sed 's/Flake attribute:[[:space:]]*//' | \
         sed 's/.*\.//' | \
         sort -u
+}
+
+# Check if nixy-env (buildEnv) is installed
+is_nixy_env_installed() {
+    nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
+        grep -q "nixy-env"
+}
+
+# Check if migration from individual packages to buildEnv is needed
+needs_migration() {
+    local profile_list
+    profile_list=$(nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null)
+    # Migration needed if we have nixpkgs# packages but no nixy-env
+    echo "$profile_list" | grep -q "nixpkgs#" && \
+        ! echo "$profile_list" | grep -q "nixy-env"
+}
+
+# Migrate from individual packages to buildEnv
+migrate_to_buildenv() {
+    local flake_dir="$1"
+    info "Migrating from individual packages to atomic environment..."
+
+    # Remove all individually installed packages
+    local pkgs
+    pkgs=$(nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
+        { grep "^Flake attribute:" || true; } | \
+        sed 's/Flake attribute:[[:space:]]*//' | \
+        sed 's/.*\.//')
+
+    for pkg in $pkgs; do
+        nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg" 2>/dev/null || true
+    done
+
+    info "Installing unified environment..."
+    nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default"
 }
 
 # Install a package and track in flake.nix
@@ -409,16 +444,10 @@ cmd_uninstall() {
     # Remove from flake.nix (source of truth)
     remove_package_from_flake "$pkg" "$use_global"
 
-    # Only remove from profile for global uninstalls
+    # For global uninstalls, rebuild the environment
     if [[ "$use_global" == "true" ]]; then
-        # Check if installed
-        local installed
-        installed=$(get_installed_packages)
-        if ! echo "$installed" | grep -qx "$pkg"; then
-            die "Package $pkg is not installed"
-        fi
-        nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg"
-        success "Uninstalled $pkg"
+        info "Rebuilding environment..."
+        cmd_sync --global
     else
         success "Removed $pkg from flake.nix"
     fi
@@ -660,6 +689,28 @@ generate_flake() {
         done
     fi
 
+    # Build buildEnv paths array (for atomic install)
+    local buildenv_paths=""
+    for pkg in "${filtered_packages[@]+"${filtered_packages[@]}"}"; do
+        [[ -z "$pkg" ]] && continue
+        buildenv_paths+="              pkgs.$pkg"$'\n'
+    done
+
+    # Add local package expressions to buildenv paths
+    if [[ ${#LOCAL_PKG_NAMES[@]} -gt 0 ]]; then
+        for i in "${!LOCAL_PKG_NAMES[@]}"; do
+            local pkg_expr="${LOCAL_PKG_EXPRS[$i]}"
+            [[ -n "$pkg_expr" ]] && buildenv_paths+="              $pkg_expr"$'\n'
+        done
+    fi
+
+    # Add flake-type packages to buildenv paths
+    if [[ ${#LOCAL_FLAKE_NAMES[@]} -gt 0 ]]; then
+        for name in "${LOCAL_FLAKE_NAMES[@]}"; do
+            buildenv_paths+="              $name.packages.\${system}.default"$'\n'
+        done
+    fi
+
     # Build outputs function parameters
     local output_params="self, nixpkgs"
     if [[ -n "$local_input_params" ]]; then
@@ -735,22 +786,31 @@ ${local_inputs}    # [/nixy:local-inputs]
 ${pkg_entries}          # [/nixy:packages]
           # [nixy:local-packages]
 ${local_packages}          # [/nixy:local-packages]
+
+          # Unified environment for atomic install (nixy sync)
+          default = pkgs.buildEnv {
+            name = "nixy-env";
+            paths = [
+              # [nixy:env-paths]
+${buildenv_paths}              # [/nixy:env-paths]
+            ];
+            extraOutputsToInstall = [ "man" "doc" "info" ];
+          };
         });$dev_shells_section
     };
 }
 EOF
 }
 
-# Sync installed packages with flake.nix
+# Sync installed packages with flake.nix (atomic mode using buildEnv)
 cmd_sync() {
     local use_global=false
-    local do_remove=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --global|-g) use_global=true; shift ;;
-            --remove|-r) do_remove=true; shift ;;
+            --remove|-r) shift ;; # Kept for backward compatibility (no-op in atomic mode)
             *) shift ;;
         esac
     done
@@ -770,65 +830,23 @@ cmd_sync() {
 
     info "Syncing packages with $flake..."
 
-    local packages
-    packages=$(get_packages_from_flake "$flake")
-
-    local local_packages
-    local_packages=$(get_local_packages_from_flake "$flake")
-
-    local installed
-    installed=$(get_installed_packages)
-
-    # Find packages to install (in flake but not installed)
-    local -a to_install
-    to_install=()
-    for pkg in $packages; do
-        if ! echo "$installed" | grep -qx "$pkg"; then
-            to_install+=("$pkg")
-        fi
-    done
-
-    # Find packages that are installed but not in flake
-    local -a extra_packages
-    extra_packages=()
-    for pkg in $installed; do
-        if ! echo "$packages" | grep -qx "$pkg"; then
-            extra_packages+=("$pkg")
-        fi
-    done
-
-    if [[ ${#to_install[@]} -eq 0 ]] && [[ ${#extra_packages[@]} -eq 0 ]]; then
-        success "Already in sync"
+    # Check if migration from individual packages is needed
+    if needs_migration; then
+        warn "Migrating from individual packages to atomic environment..."
+        migrate_to_buildenv "$flake_dir"
+        success "Sync complete (migrated to atomic mode)"
         return 0
     fi
 
-    # Install missing packages
-    for pkg in "${to_install[@]+"${to_install[@]}"}"; do
-        info "Installing $pkg..."
-        # Check if this is a local package (needs to be installed from flake)
-        if echo "$local_packages" | grep -qx "$pkg"; then
-            nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "$flake_dir#$pkg" || warn "Failed to install $pkg"
-        else
-            nix "${NIX_FLAGS[@]}" profile add $(get_profile_flags) "nixpkgs#$pkg" || warn "Failed to install $pkg"
-        fi
-    done
-
-    # Handle extra packages (installed but not in flake)
-    if [[ ${#extra_packages[@]} -gt 0 ]]; then
-        if [[ "$do_remove" == "true" ]]; then
-            # Remove extra packages when --remove flag is passed
-            for pkg in "${extra_packages[@]+"${extra_packages[@]}"}"; do
-                info "Removing $pkg..."
-                nix "${NIX_FLAGS[@]}" profile remove $(get_profile_flags) "$pkg" || warn "Failed to remove $pkg"
-            done
-        else
-            # Just warn about extra packages
-            warn "The following packages are installed but not in $flake:"
-            for pkg in "${extra_packages[@]+"${extra_packages[@]}"}"; do
-                echo "  - $pkg"
-            done
-            info "Use 'nixy sync --remove' to remove them, or 'nixy uninstall <pkg>' individually."
-        fi
+    # Atomic sync using buildEnv
+    if is_nixy_env_installed; then
+        info "Upgrading nixy environment..."
+        nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*nixy-env.*' || \
+            die "Failed to upgrade environment"
+    else
+        info "Installing nixy environment..."
+        nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default" || \
+            die "Failed to install environment"
     fi
 
     success "Sync complete"
