@@ -48,6 +48,8 @@ nixy は flake.nix を編集して標準の `nix` コマンドを実行するだ
 
 ## クイックスタート
 
+nixy は**プロファイル**を使ってパッケージを整理します。初回使用時に「default」プロファイルが自動作成されます。後から仕事用、個人用、プロジェクト用など、追加のプロファイルを作成できます。
+
 ### 1. Nix をインストール（まだの場合）
 
 ```bash
@@ -60,7 +62,21 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 ```
 
-### 3. パッケージをインストール
+### 3. シェルを設定
+
+シェル設定ファイル（`.bashrc`、`.zshrc` など）に追加：
+
+```bash
+eval "$(nixy config zsh)"
+```
+
+fish の場合は `~/.config/fish/config.fish` に追加：
+
+```fish
+nixy config fish | source
+```
+
+### 4. パッケージをインストール
 
 ```bash
 nixy install ripgrep    # 初回実行時にデフォルトプロファイルを自動作成
@@ -83,12 +99,53 @@ nixy upgrade            # 全パッケージをアップグレード
 | `nixy uninstall <pkg>` | パッケージをアンインストール |
 | `nixy list` | インストール済みパッケージを一覧表示 |
 | `nixy search <query>` | パッケージを検索 |
-| `nixy upgrade` | 全パッケージをアップグレード |
+| `nixy upgrade [input...]` | 全 input または指定した input をアップグレード |
 | `nixy sync` | flake.nix から環境をビルド（新しいマシン用） |
 | `nixy gc` | 古いパッケージを削除 |
 | `nixy config <shell>` | シェル設定を出力（PATH 設定用） |
 | `nixy version` | nixy のバージョンを表示 |
 | `nixy self-upgrade` | nixy を最新版にアップグレード |
+| `nixy profile` | 現在のプロファイルを表示 |
+| `nixy profile create <name>` | 新しいプロファイルを作成 |
+| `nixy profile switch <name>` | プロファイルを切り替え |
+| `nixy profile list` | 全プロファイルを一覧表示 |
+| `nixy profile delete <name>` | プロファイルを削除（`--force` 必須） |
+
+## 複数プロファイル
+
+異なる用途（仕事、個人、プロジェクト）ごとに別々のパッケージセットを管理できます：
+
+```bash
+nixy profile create work      # 新しいプロファイルを作成
+nixy profile switch work      # 切り替え
+nixy install slack terraform  # 仕事用パッケージをインストール
+
+nixy profile create personal  # 別のプロファイルを作成
+nixy profile switch personal
+nixy install spotify games    # ここには別のパッケージ
+
+nixy profile list             # 全プロファイルを表示
+nixy profile                  # 現在のプロファイルを表示
+```
+
+各プロファイルは `~/.config/nixy/profiles/<name>/` に独自の `flake.nix` を持ちます。プロファイルを切り替えると、環境のシンボリックリンクがそのプロファイルのパッケージを指すように再構築されます。
+
+**ユースケース：**
+- **仕事 vs 個人**: 仕事用ツールと個人用アプリを分離
+- **クライアントプロジェクト**: クライアントごとに異なるツールチェーン
+- **実験**: メインのセットアップに影響を与えずに新しいパッケージを試す
+
+**dotfiles でプロファイルを管理：**
+
+```bash
+# 全プロファイルを dotfiles にバックアップ
+cp -r ~/.config/nixy/profiles ~/dotfiles/nixy-profiles
+
+# 新しいマシンで復元して同期
+cp -r ~/dotfiles/nixy-profiles ~/.config/nixy/profiles
+nixy profile switch work      # 目的のプロファイルに切り替え
+nixy sync                     # 環境をビルド
+```
 
 ## 複数マシンで同期
 

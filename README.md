@@ -52,6 +52,8 @@ If you only use one machine and don't need reproducibility, `nix profile` is sim
 
 ## Quick Start
 
+nixy uses **profiles** to organize packages. A "default" profile is created automatically on first use. You can create additional profiles later for different contexts (work, personal, projects).
+
 ### 1. Install Nix (if you haven't)
 
 ```bash
@@ -114,22 +116,6 @@ Packages are installed globally and available in all terminal sessions.
 | `nixy profile list` | List all profiles |
 | `nixy profile delete <name>` | Delete a profile (requires `--force`) |
 
-## Sync Across Machines
-
-Your package list is just a text file. Back it up, version control it, or sync it with dotfiles:
-
-```bash
-# Back up your package list (default profile)
-cp ~/.config/nixy/profiles/default/flake.nix ~/dotfiles/
-
-# On a new machine:
-mkdir -p ~/.config/nixy/profiles/default
-cp ~/dotfiles/flake.nix ~/.config/nixy/profiles/default/
-nixy sync    # Installs everything from flake.nix
-```
-
-Same packages, same versions, on every machine.
-
 ## Multiple Profiles
 
 Maintain separate package sets for different contexts (work, personal, projects):
@@ -153,6 +139,34 @@ Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`. Switc
 - **Work vs Personal**: Keep work tools separate from personal apps
 - **Client projects**: Different toolchains for different clients
 - **Experimentation**: Try new packages without affecting your main setup
+
+**Managing profiles with dotfiles:**
+
+```bash
+# Back up all profiles to dotfiles
+cp -r ~/.config/nixy/profiles ~/dotfiles/nixy-profiles
+
+# On a new machine, restore and sync
+cp -r ~/dotfiles/nixy-profiles ~/.config/nixy/profiles
+nixy profile switch work      # Switch to desired profile
+nixy sync                     # Build the environment
+```
+
+## Sync Across Machines
+
+Your package list is just a text file. Back it up, version control it, or sync it with dotfiles:
+
+```bash
+# Back up your package list (default profile)
+cp ~/.config/nixy/profiles/default/flake.nix ~/dotfiles/
+
+# On a new machine:
+mkdir -p ~/.config/nixy/profiles/default
+cp ~/dotfiles/flake.nix ~/.config/nixy/profiles/default/
+nixy sync    # Installs everything from flake.nix
+```
+
+Same packages, same versions, on every machine.
 
 ---
 
