@@ -127,3 +127,4 @@ When user asks to monitor and resolve PR feedback automatically:
      ```
    - Copilot automatically re-reviews on new commits (no manual trigger needed)
 3. Continue monitoring
+4. When Copilot review has no new change feedback, the task is complete
