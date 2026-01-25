@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.15"
+NIXY_VERSION="0.1.16"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -174,6 +174,13 @@ get_installed_packages() {
 is_nixy_env_installed() {
     nix "${NIX_FLAGS[@]}" profile list $(get_profile_flags) 2>/dev/null | \
         grep -q "nixy-env"
+}
+
+# Get the profile element name for nixy-env (for use with nix profile upgrade)
+get_nixy_env_name() {
+    nix "${NIX_FLAGS[@]}" profile list --json $(get_profile_flags) 2>/dev/null | \
+        grep -o '"[^"]*":{"active":true,"attrPath":"packages\.[^"]*\.default"' | \
+        head -1 | sed 's/^"\([^"]*\)".*/\1/'
 }
 
 # Check if migration from individual packages to buildEnv is needed
@@ -851,9 +858,18 @@ cmd_sync() {
 
     # Atomic sync using buildEnv
     if is_nixy_env_installed; then
-        info "Upgrading nixy environment..."
-        nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*#default$' || \
-            die "Failed to upgrade environment"
+        local env_name
+        env_name=$(get_nixy_env_name)
+        if [[ -n "$env_name" ]]; then
+            info "Upgrading nixy environment..."
+            nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) "$env_name" || \
+                die "Failed to upgrade environment"
+        else
+            # Fallback: reinstall if can't find the profile name
+            info "Reinstalling nixy environment..."
+            nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default" || \
+                die "Failed to install environment"
+        fi
     else
         info "Installing nixy environment..."
         nix "${NIX_FLAGS[@]}" profile install $(get_profile_flags) "$flake_dir#default" || \
