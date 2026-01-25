@@ -655,15 +655,14 @@ fn test_sync_with_profile() {
         assert!(
             stdout.contains("Building")
                 || stdout.contains("environment")
-                || stdout.contains("Syncing")
-                || stdout.contains("nix"),
+                || stdout.contains("Syncing"),
             "Sync success should show progress: stdout={}",
             stdout
         );
     } else {
         // If failed, should be a build-related failure
         assert!(
-            stderr.contains("build") || stderr.contains("nix") || stderr.contains("flake"),
+            stderr.contains("build") || stderr.contains("flake"),
             "Sync failure should be build-related: stderr={}",
             stderr
         );
@@ -809,12 +808,11 @@ fn test_profile_switch_with_existing() {
         "Should switch to existing profile: stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // Verify that the profile switch was acknowledged
+    // Verify that the profile switch was acknowledged with specific confirmation
     let stdout_lower = stdout.to_lowercase();
     assert!(
-        stdout_lower.contains("switched")
-            || stdout.contains("work")
-            || stdout_lower.contains("profile"),
+        (stdout_lower.contains("switched") || stdout_lower.contains("active"))
+            && stdout_lower.contains("work"),
         "Should confirm switch to work profile: {}",
         stdout
     );
@@ -858,13 +856,25 @@ stdenv.mkDerivation {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should find the package name
+    // Command should succeed (or fail due to nix build, not parsing)
+    // First verify it parsed the pname correctly by checking output
     assert!(
         stdout.contains("my-package") || stderr.contains("my-package"),
-        "Should detect package name: stdout={}, stderr={}",
+        "Should detect package name from pname: stdout={}, stderr={}",
         stdout,
         stderr
     );
+
+    // If the command failed, it should be due to nix build issues, not parsing
+    if !output.status.success() {
+        assert!(
+            !stderr.contains("Could not find")
+                && !stderr.contains("missing name")
+                && !stderr.contains("pname"),
+            "Failure should not be due to missing pname (parsing should succeed): stderr={}",
+            stderr
+        );
+    }
 }
 
 #[test]
@@ -950,12 +960,9 @@ fn test_install_file_detects_flake() {
     let stderr_lower = stderr.to_lowercase();
 
     // Should detect and process as flake (not as a regular package file)
-    // The key indicator is that it recognizes this as a flake format with inputs/outputs
+    // The key indicator is that it recognizes this as a flake
     assert!(
-        stdout_lower.contains("flake")
-            || stderr_lower.contains("flake")
-            || stdout.contains("inputs")
-            || stderr.contains("inputs"),
+        stdout_lower.contains("flake") || stderr_lower.contains("flake"),
         "Should detect flake file format: stdout={}, stderr={}",
         stdout,
         stderr
@@ -1064,15 +1071,25 @@ fn test_uninstall_package_not_installed() {
     // 2. Fail with an error message
     if output.status.success() {
         // If it succeeds, it should indicate the package wasn't found or is a no-op
-        // This is acceptable behavior - graceful handling of non-existent packages
-        assert!(
-            stdout.contains("not installed")
-                || stdout.contains("nonexistent-package")
-                || stdout.is_empty()
-                || stdout.contains("No changes"),
-            "No-op uninstall should indicate status or be silent: stdout={}",
-            stdout
-        );
+        if stdout.is_empty() {
+            // Silent success is acceptable for a no-op uninstall of a non-existent package,
+            // but it must also be truly silent (no stderr output) and exit successfully.
+            assert!(
+                stderr.is_empty(),
+                "Silent no-op uninstall should not produce stderr: {}",
+                stderr
+            );
+        } else {
+            // If it succeeds with output, it should indicate the package wasn't found or that
+            // there were no changes to apply.
+            assert!(
+                stdout.contains("not installed")
+                    || stdout.contains("nonexistent-package")
+                    || stdout.contains("No changes"),
+                "No-op uninstall should indicate status: stdout={}",
+                stdout
+            );
+        }
     } else {
         // If it fails, it should provide a helpful error message
         assert!(
@@ -1145,10 +1162,20 @@ fn test_install_from_detects_direct_url() {
     // If it fails, it should be a nix-related failure, not "unknown registry"
     if output.status.success() {
         // Success means it detected and processed the direct URL
+        // Check for specific positive indicators, excluding error contexts
         assert!(
+            // Explicitly mention the package name
             stdout.contains("hello")
-                || stdout_lower.contains("install")
-                || stdout_lower.contains("adding"),
+                // Clearly positive success phrasing
+                || stdout_lower.contains("successfully installed")
+                || stdout_lower.contains("added package")
+                // Generic "install" only counts if not in an error context
+                || (stdout_lower.contains("install")
+                    && !stdout_lower.contains("failed to install")
+                    && !stdout_lower.contains("error installing")
+                    && !stdout_lower.contains("unable to install"))
+                // Generic "adding" only counts if not in an error context
+                || (stdout_lower.contains("adding") && !stdout_lower.contains("error adding")),
             "Successful install should acknowledge the package: stdout={}",
             stdout
         );
