@@ -23,7 +23,7 @@ jobs:
 
           # macOS Intel (native)
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             binary_name: nixy-x86_64-darwin
 
           # Linux x86_64 (musl for static linking)
