@@ -306,6 +306,38 @@ is_flake_file() {
     grep -q '^[[:space:]]*outputs[[:space:]]*=' "$file" 2>/dev/null
 }
 
+# Get top-level flake inputs from flake.lock
+# Returns input names one per line
+get_flake_inputs() {
+    local lock_file="$1"
+    [[ ! -f "$lock_file" ]] && return 1
+    # Parse flake.lock JSON to get root input names
+    nix "${NIX_FLAGS[@]}" eval --impure --expr "builtins.attrNames (builtins.fromJSON (builtins.readFile \"$lock_file\")).nodes.root.inputs" \
+        --apply 'names: builtins.concatStringsSep "\n" names' \
+        --raw 2>/dev/null || return 1
+}
+
+# Validate that input names exist in flake.lock
+# Returns 0 if all inputs valid, 1 otherwise
+# Sets INVALID_INPUTS array with invalid input names
+validate_flake_inputs() {
+    local lock_file="$1"
+    shift
+    local -a inputs=("$@")
+
+    INVALID_INPUTS=()
+    local valid_inputs
+    valid_inputs=$(get_flake_inputs "$lock_file") || return 1
+
+    for input in "${inputs[@]}"; do
+        if ! echo "$valid_inputs" | grep -qx "$input"; then
+            INVALID_INPUTS+=("$input")
+        fi
+    done
+
+    [[ ${#INVALID_INPUTS[@]} -eq 0 ]]
+}
+
 
 # Install a package and track in flake.nix
 cmd_install() {
@@ -627,15 +659,31 @@ cmd_list() {
     fi
 }
 
-# Upgrade all packages
+# Upgrade all packages or specific inputs
 cmd_upgrade() {
     local use_local=false
+    local -a inputs=()
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --local|-l) use_local=true; shift ;;
-            *) shift ;;
+            --help|-h)
+                echo "Usage: nixy upgrade [input...]"
+                echo ""
+                echo "Upgrade all flake inputs or specific ones."
+                echo ""
+                echo "Arguments:"
+                echo "  input...    Specific input(s) to upgrade (e.g., nixpkgs)"
+                echo ""
+                echo "Examples:"
+                echo "  nixy upgrade              # Upgrade all inputs"
+                echo "  nixy upgrade nixpkgs      # Upgrade only nixpkgs"
+                echo "  nixy upgrade nixpkgs foo  # Upgrade multiple inputs"
+                return 0
+                ;;
+            --*) die "Unknown option: $1" ;;
+            *) inputs+=("$1"); shift ;;
         esac
     done
 
@@ -647,20 +695,46 @@ cmd_upgrade() {
     local flake_dir
     flake_dir=$(get_flake_dir "$use_local") || exit 1
     local flake="$flake_dir/flake.nix"
+    local lock_file="$flake_dir/flake.lock"
 
     if [[ ! -f "$flake" ]]; then
         die "No flake.nix found at $flake. Run 'nixy install <package>' to create one."
     fi
 
-    info "Updating flake.lock..."
-    nix "${NIX_FLAGS[@]}" flake update --flake "$flake_dir"
+    # If specific inputs are requested, validate them
+    if [[ ${#inputs[@]} -gt 0 ]]; then
+        if [[ ! -f "$lock_file" ]]; then
+            die "No flake.lock found. Run 'nixy sync' first."
+        fi
+
+        # First check if we can parse the lock file
+        local available
+        if ! available=$(get_flake_inputs "$lock_file" | tr '\n' ' '); then
+            die "Failed to parse flake.lock. The file may be corrupted."
+        fi
+
+        if ! validate_flake_inputs "$lock_file" "${inputs[@]}"; then
+            error "Unknown input(s): ${INVALID_INPUTS[*]}"
+            die "Available inputs: $available"
+        fi
+
+        info "Updating inputs: ${inputs[*]}..."
+        nix "${NIX_FLAGS[@]}" flake update "${inputs[@]}" --flake "$flake_dir"
+    else
+        info "Updating all inputs..."
+        nix "${NIX_FLAGS[@]}" flake update --flake "$flake_dir"
+    fi
 
     info "Rebuilding environment..."
     mkdir -p "$(dirname "$NIXY_ENV")"
     nix "${NIX_FLAGS[@]}" build "$flake_dir#default" --out-link "$NIXY_ENV" || \
         die "Failed to rebuild environment"
 
-    success "All packages upgraded"
+    if [[ ${#inputs[@]} -gt 0 ]]; then
+        success "Upgraded: ${inputs[*]}"
+    else
+        success "All inputs upgraded"
+    fi
 }
 
 # Garbage collect old generations
@@ -1487,7 +1561,7 @@ BASIC COMMANDS:
     uninstall <pkg>         Uninstall a package
     search <query>          Search for packages
     list                    List packages in flake.nix
-    upgrade                 Upgrade all packages (update flake.lock & rebuild)
+    upgrade [input...]      Upgrade all inputs or specific ones
     version                 Show nixy version
 
 PROFILE COMMANDS:
@@ -1609,4 +1683,7 @@ main() {
     esac
 }
 
-main "$@"
+# Only run main if this script is being executed, not sourced
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
