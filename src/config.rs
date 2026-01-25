@@ -53,9 +53,6 @@ impl Default for Config {
 /// Default profile name
 pub const DEFAULT_PROFILE: &str = "default";
 
-/// nixy version
-pub const VERSION: &str = "0.1.0";
-
 /// Nix experimental features flags
 pub const NIX_FLAGS: &[&str] = &[
     "--extra-experimental-features",
