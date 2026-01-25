@@ -86,9 +86,9 @@ pub fn run(force: bool) -> Result<()> {
     self_replace::self_replace(&tmp_path).map_err(|e| {
         let err_str = e.to_string();
         if err_str.contains("Permission denied") || err_str.contains("permission denied") {
-            Error::SelfUpdate(format!(
-                "Permission denied. If nixy is installed in a system directory, try running with elevated privileges (e.g., sudo nixy self-upgrade)"
-            ))
+            Error::SelfUpdate(
+                "Permission denied. If nixy is installed in a system directory, try running with elevated privileges (e.g., sudo nixy self-upgrade)".to_string()
+            )
         } else {
             Error::SelfUpdate(err_str)
         }
