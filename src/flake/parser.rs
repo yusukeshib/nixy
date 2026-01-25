@@ -111,6 +111,8 @@ fn extract_input_url(content: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_parse_quoted_attr() {
@@ -159,5 +161,190 @@ mod tests {
             extract_input_url(content),
             Some("github:user/repo".to_string())
         );
+    }
+
+    // Tests matching bash test_nixy.sh
+
+    #[test]
+    fn test_parse_pname_from_nixpkgs_style() {
+        // test_parse_pname_from_nixpkgs_style
+        let content = r#"
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "my-package";
+  version = "1.0.0";
+
+  src = fetchFromGitHub {
+    owner = "test";
+    repo = "test";
+    rev = "v${version}";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+
+  vendorHash = null;
+}
+"#;
+        assert_eq!(
+            parse_local_package_attr(content, "pname"),
+            Some("my-package".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_name_from_simple_style() {
+        // test_parse_name_from_simple_style
+        let content = r#"
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  name = "simple-package";
+  src = ./.;
+}
+"#;
+        assert_eq!(
+            parse_local_package_attr(content, "name"),
+            Some("simple-package".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pname_takes_precedence_over_name() {
+        // test_parse_pname_takes_precedence
+        let content = r#"
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  pname = "preferred-name";
+  name = "fallback-name";
+  version = "1.0";
+  src = ./.;
+}
+"#;
+        // pname should be found
+        let pname = parse_local_package_attr(content, "pname");
+        let name = parse_local_package_attr(content, "name");
+
+        assert_eq!(pname, Some("preferred-name".to_string()));
+        assert_eq!(name, Some("fallback-name".to_string()));
+
+        // When both exist, pname should be preferred
+        let preferred = pname.or(name);
+        assert_eq!(preferred, Some("preferred-name".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fails_without_name_or_pname() {
+        // test_parse_fails_without_name_or_pname
+        let content = r#"
+{ pkgs }:
+
+pkgs.stdenv.mkDerivation {
+  src = ./.;
+  buildPhase = "echo hello";
+}
+"#;
+        assert_eq!(parse_local_package_attr(content, "pname"), None);
+        assert_eq!(parse_local_package_attr(content, "name"), None);
+    }
+
+    #[test]
+    fn test_collect_local_packages_empty_dir() {
+        let temp = TempDir::new().unwrap();
+        let packages_dir = temp.path().join("packages");
+        fs::create_dir_all(&packages_dir).unwrap();
+
+        let (packages, flakes) = collect_local_packages(&packages_dir);
+        assert!(packages.is_empty());
+        assert!(flakes.is_empty());
+    }
+
+    #[test]
+    fn test_collect_local_packages_nonexistent_dir() {
+        let temp = TempDir::new().unwrap();
+        let packages_dir = temp.path().join("nonexistent");
+
+        let (packages, flakes) = collect_local_packages(&packages_dir);
+        assert!(packages.is_empty());
+        assert!(flakes.is_empty());
+    }
+
+    #[test]
+    fn test_collect_local_packages_with_nix_file() {
+        let temp = TempDir::new().unwrap();
+        let packages_dir = temp.path().join("packages");
+        fs::create_dir_all(&packages_dir).unwrap();
+
+        // Create a .nix package file
+        let pkg_content = r#"
+{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "my-local-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+"#;
+        fs::write(packages_dir.join("my-local-pkg.nix"), pkg_content).unwrap();
+
+        let (packages, flakes) = collect_local_packages(&packages_dir);
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "my-local-pkg");
+        assert!(flakes.is_empty());
+    }
+
+    #[test]
+    fn test_collect_local_packages_with_flake_dir() {
+        let temp = TempDir::new().unwrap();
+        let packages_dir = temp.path().join("packages");
+        let flake_dir = packages_dir.join("my-flake");
+        fs::create_dir_all(&flake_dir).unwrap();
+
+        // Create a flake.nix in subdirectory
+        let flake_content = r#"
+{
+  inputs = { nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; };
+  outputs = { self, nixpkgs }: { packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello; };
+}
+"#;
+        fs::write(flake_dir.join("flake.nix"), flake_content).unwrap();
+
+        let (packages, flakes) = collect_local_packages(&packages_dir);
+        assert!(packages.is_empty());
+        assert_eq!(flakes.len(), 1);
+        assert_eq!(flakes[0].name, "my-flake");
+    }
+
+    #[test]
+    fn test_collect_local_packages_mixed() {
+        let temp = TempDir::new().unwrap();
+        let packages_dir = temp.path().join("packages");
+        let flake_dir = packages_dir.join("flake-pkg");
+        fs::create_dir_all(&flake_dir).unwrap();
+
+        // Create a regular .nix package
+        let pkg_content = r#"
+{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "regular-pkg";
+  version = "1.0.0";
+  src = ./.;
+}
+"#;
+        fs::write(packages_dir.join("regular-pkg.nix"), pkg_content).unwrap();
+
+        // Create a flake package
+        let flake_content = r#"
+{
+  inputs = { nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; };
+  outputs = { self, nixpkgs }: { packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello; };
+}
+"#;
+        fs::write(flake_dir.join("flake.nix"), flake_content).unwrap();
+
+        let (packages, flakes) = collect_local_packages(&packages_dir);
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "regular-pkg");
+        assert_eq!(flakes.len(), 1);
+        assert_eq!(flakes[0].name, "flake-pkg");
     }
 }

@@ -349,6 +349,219 @@ mod tests {
         assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" ]"));
     }
 
+    // Tests matching bash test_nixy.sh
+
+    #[test]
+    fn test_flake_has_no_devshells() {
+        // test_flake_has_no_devshells
+        let packages = vec!["ripgrep".to_string()];
+        let flake = generate_flake(&packages, None, None);
+
+        // Flakes should NOT have devShells
+        assert!(!flake.contains("devShells"));
+        // But should have packages section
+        assert!(flake.contains("packages = forAllSystems"));
+    }
+
+    #[test]
+    fn test_flake_structure_has_markers() {
+        // test_flake_structure_has_markers
+        let flake = generate_flake(&[], None, None);
+
+        assert!(flake.contains("# [nixy:packages]"));
+        assert!(flake.contains("# [/nixy:packages]"));
+        assert!(flake.contains("# [nixy:local-packages]"));
+        assert!(flake.contains("# [/nixy:local-packages]"));
+    }
+
+    #[test]
+    fn test_flake_has_custom_markers() {
+        // test_flake_has_custom_markers
+        let flake = generate_flake(&[], None, None);
+
+        assert!(flake.contains("# [nixy:custom-inputs]"));
+        assert!(flake.contains("# [/nixy:custom-inputs]"));
+        assert!(flake.contains("# [nixy:custom-packages]"));
+        assert!(flake.contains("# [/nixy:custom-packages]"));
+        assert!(flake.contains("# [nixy:custom-paths]"));
+        assert!(flake.contains("# [/nixy:custom-paths]"));
+    }
+
+    #[test]
+    fn test_flake_has_buildenv_default() {
+        // test_flake_has_buildenv_default
+        let flake = generate_flake(&[], None, None);
+
+        assert!(flake.contains("default = pkgs.buildEnv"));
+        assert!(flake.contains("name = \"nixy-env\""));
+        assert!(flake.contains("# [nixy:env-paths]"));
+        assert!(flake.contains("# [/nixy:env-paths]"));
+    }
+
+    #[test]
+    fn test_buildenv_contains_all_packages() {
+        // test_buildenv_contains_all_packages
+        let packages = vec!["ripgrep".to_string(), "fzf".to_string(), "bat".to_string()];
+        let flake = generate_flake(&packages, None, None);
+
+        let env_paths_section =
+            extract_section(&flake, "# [nixy:env-paths]", "# [/nixy:env-paths]");
+        assert!(env_paths_section.contains("ripgrep"));
+        assert!(env_paths_section.contains("fzf"));
+        assert!(env_paths_section.contains("bat"));
+    }
+
+    #[test]
+    fn test_individual_packages_still_accessible() {
+        // test_individual_packages_still_accessible
+        let packages = vec!["ripgrep".to_string(), "fzf".to_string()];
+        let flake = generate_flake(&packages, None, None);
+
+        // Individual package attributes should still exist
+        assert!(flake.contains("ripgrep = pkgs.ripgrep;"));
+        assert!(flake.contains("fzf = pkgs.fzf;"));
+    }
+
+    #[test]
+    fn test_empty_flake_has_empty_buildenv() {
+        // test_empty_flake_has_empty_buildenv
+        let flake = generate_flake(&[], None, None);
+
+        // Empty flake should have buildEnv structure with empty paths
+        assert!(flake.contains("default = pkgs.buildEnv"));
+        assert!(flake.contains("paths = ["));
+        assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" ]"));
+    }
+
+    #[test]
+    fn test_flake_has_env_paths_markers() {
+        // test_flake_structure_has_env_paths_markers
+        let flake = generate_flake(&[], None, None);
+
+        assert!(flake.contains("# [nixy:env-paths]"));
+        assert!(flake.contains("# [/nixy:env-paths]"));
+    }
+
+    #[test]
+    fn test_custom_inputs_preserved() {
+        // test_custom_inputs_preserved_during_regeneration
+        let preserved = PreservedContent {
+            custom_inputs: "    my-overlay.url = \"github:user/my-overlay\";".to_string(),
+            custom_packages: String::new(),
+            custom_paths: String::new(),
+        };
+
+        let flake = generate_flake(&[], None, Some(&preserved));
+        assert!(flake.contains("my-overlay.url = \"github:user/my-overlay\""));
+
+        // Adding packages should preserve custom inputs
+        let flake_with_pkg = generate_flake(&["ripgrep".to_string()], None, Some(&preserved));
+        assert!(flake_with_pkg.contains("my-overlay.url = \"github:user/my-overlay\""));
+        assert!(flake_with_pkg.contains("ripgrep = pkgs.ripgrep;"));
+    }
+
+    #[test]
+    fn test_custom_packages_preserved() {
+        // test_custom_packages_preserved_during_regeneration
+        let preserved = PreservedContent {
+            custom_inputs: String::new(),
+            custom_packages:
+                "          my-custom-pkg = pkgs.hello.overrideAttrs { pname = \"my-custom\"; };"
+                    .to_string(),
+            custom_paths: String::new(),
+        };
+
+        let flake = generate_flake(&[], None, Some(&preserved));
+        assert!(flake.contains("my-custom-pkg"));
+
+        // Adding packages should preserve custom packages
+        let flake_with_pkg = generate_flake(&["ripgrep".to_string()], None, Some(&preserved));
+        assert!(flake_with_pkg.contains("my-custom-pkg"));
+        assert!(flake_with_pkg.contains("ripgrep = pkgs.ripgrep;"));
+    }
+
+    #[test]
+    fn test_custom_paths_preserved() {
+        // test_custom_paths_preserved_during_regeneration
+        let preserved = PreservedContent {
+            custom_inputs: String::new(),
+            custom_packages: String::new(),
+            custom_paths: "              my-custom-pkg".to_string(),
+        };
+
+        let flake = generate_flake(&[], None, Some(&preserved));
+        let custom_paths_section =
+            extract_section(&flake, "# [nixy:custom-paths]", "# [/nixy:custom-paths]");
+        assert!(custom_paths_section.contains("my-custom-pkg"));
+    }
+
+    #[test]
+    fn test_has_custom_modifications_detects_changes() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().unwrap();
+        let flake_dir = temp.path();
+        let flake_path = flake_dir.join("flake.nix");
+
+        // Write a clean flake
+        let clean_flake = generate_flake(&["ripgrep".to_string()], Some(flake_dir), None);
+        fs::write(&flake_path, &clean_flake).unwrap();
+
+        // No modifications should be detected
+        assert!(!has_custom_modifications(
+            &flake_path,
+            &["ripgrep".to_string()],
+            flake_dir
+        ));
+
+        // Add a modification outside markers
+        let modified =
+            clean_flake.replace("nixpkgs.url", "# OUTSIDE MARKER COMMENT\n    nixpkgs.url");
+        fs::write(&flake_path, &modified).unwrap();
+
+        // Modifications should be detected
+        assert!(has_custom_modifications(
+            &flake_path,
+            &["ripgrep".to_string()],
+            flake_dir
+        ));
+    }
+
+    #[test]
+    fn test_preserved_content_from_file() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+
+        // Create a flake with custom content
+        let preserved = PreservedContent {
+            custom_inputs: "    custom-input.url = \"github:test/test\";".to_string(),
+            custom_packages: "          custom-pkg = pkgs.hello;".to_string(),
+            custom_paths: "              custom-pkg".to_string(),
+        };
+        let flake = generate_flake(&[], None, Some(&preserved));
+        fs::write(&flake_path, &flake).unwrap();
+
+        // Read preserved content back
+        let read_preserved = PreservedContent::from_file(&flake_path);
+        assert!(read_preserved.custom_inputs.contains("custom-input.url"));
+        assert!(read_preserved
+            .custom_packages
+            .contains("custom-pkg = pkgs.hello"));
+        assert!(read_preserved.custom_paths.contains("custom-pkg"));
+    }
+
+    #[test]
+    fn test_preserved_content_from_nonexistent_file() {
+        let preserved = PreservedContent::from_file(Path::new("/nonexistent/file.nix"));
+        assert!(preserved.custom_inputs.is_empty());
+        assert!(preserved.custom_packages.is_empty());
+        assert!(preserved.custom_paths.is_empty());
+    }
+
     fn extract_section(content: &str, start: &str, end: &str) -> String {
         let mut in_section = false;
         let mut result = String::new();
