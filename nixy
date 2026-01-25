@@ -13,7 +13,7 @@ LOCAL_PACKAGES_DIR="${NIXY_CONFIG_DIR}/packages"
 NIX_FLAGS=(--extra-experimental-features nix-command --extra-experimental-features flakes)
 
 # Version info
-NIXY_VERSION="0.1.14"
+NIXY_VERSION="0.1.15"
 NIXY_REPO_URL="https://raw.githubusercontent.com/yusukeshib/nixy/main/nixy"
 
 # Colors for output
@@ -852,7 +852,7 @@ cmd_sync() {
     # Atomic sync using buildEnv
     if is_nixy_env_installed; then
         info "Upgrading nixy environment..."
-        nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*nixy-env.*' || \
+        nix "${NIX_FLAGS[@]}" profile upgrade $(get_profile_flags) '.*#default$' || \
             die "Failed to upgrade environment"
     else
         info "Installing nixy environment..."
