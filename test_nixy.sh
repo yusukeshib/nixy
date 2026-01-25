@@ -634,6 +634,23 @@ test_sync_builds_environment() {
     return 0
 }
 
+test_sync_creates_lock_file() {
+    cd "$TEST_DIR"
+    "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
+
+    # Verify no lock file exists before sync
+    if [[ -f "$NIXY_CONFIG_DIR/flake.lock" ]]; then
+        echo "  ASSERTION FAILED: flake.lock should not exist before sync"
+        return 1
+    fi
+
+    # Run sync
+    "$NIXY" sync >/dev/null 2>&1 || true
+
+    # Verify lock file is created
+    assert_file_exists "$NIXY_CONFIG_DIR/flake.lock" "flake.lock should be created after sync"
+}
+
 test_sync_remove_flag_accepted() {
     cd "$TEST_DIR"
     "$NIXY" init "$NIXY_CONFIG_DIR" >/dev/null 2>&1
@@ -1778,6 +1795,7 @@ main() {
     run_test "sync with packages no unbound variable" test_sync_with_packages_no_unbound_variable || true
     run_test "sync preserves local packages" test_sync_preserves_local_packages || true
     run_test "sync builds environment" test_sync_builds_environment || true
+    run_test "sync creates flake.lock" test_sync_creates_lock_file || true
     run_test "sync --remove flag accepted" test_sync_remove_flag_accepted || true
     run_test "sync -r short flag accepted" test_sync_short_remove_flag_accepted || true
     run_test "help shows sync command" test_help_shows_sync_command || true
