@@ -42,7 +42,7 @@ nixy は flake.nix を編集して標準の `nix` コマンドを実行するだ
 | | nix profile | nixy |
 |---|-------------|------|
 | パッケージリスト | `manifest.json` に隠れている | 読みやすい `flake.nix` |
-| バージョン固定 | `flake.lock` なし | `flake.lock` 完全サポート |
+| バージョン固定 | パッケージ個別のみ、統一ロックなし | 単一の `flake.lock` で全パッケージ管理 |
 | 新マシンへの同期 | 手動で再インストール | `nixy sync` |
 | ロールバック | プロファイル世代のみ | Git + `flake.lock` |
 

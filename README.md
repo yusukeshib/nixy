@@ -46,7 +46,7 @@ nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it gene
 | | nix profile | nixy |
 |---|-------------|------|
 | Package list | Hidden in `manifest.json` | Readable `flake.nix` |
-| Version locking | No `flake.lock` | Full `flake.lock` support |
+| Version locking | Per-package only, no unified lock | Single `flake.lock` for all packages |
 | Sync to new machine | Manual re-installation | `nixy sync` |
 | Rollback | Profile generations only | Git + `flake.lock` |
 
