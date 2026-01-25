@@ -6,6 +6,24 @@ use self_update::backends::github::ReleaseList;
 use self_update::self_replace;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
+
+/// RAII guard to ensure temporary update file is cleaned up.
+struct TempFileGuard {
+    path: PathBuf,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        TempFileGuard { path }
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 pub fn run(force: bool) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
@@ -60,30 +78,47 @@ pub fn run(force: bool) -> Result<()> {
     info("Downloading new version...");
     let tmp_path = download_binary(&asset.download_url)?;
 
+    // Ensure temp file is cleaned up even if installation fails
+    let _tmp_guard = TempFileGuard::new(tmp_path.clone());
+
     // Replace current executable
     info("Installing update...");
-    self_replace::self_replace(&tmp_path).map_err(|e| Error::SelfUpdate(e.to_string()))?;
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&tmp_path);
+    self_replace::self_replace(&tmp_path).map_err(|e| {
+        let err_str = e.to_string();
+        if err_str.contains("Permission denied") || err_str.contains("permission denied") {
+            Error::SelfUpdate(format!(
+                "Permission denied. If nixy is installed in a system directory, try running with elevated privileges (e.g., sudo nixy self-upgrade)"
+            ))
+        } else {
+            Error::SelfUpdate(err_str)
+        }
+    })?;
 
     success(&format!("Upgraded to {}", latest_version));
     Ok(())
 }
 
 fn get_asset_name() -> Result<String> {
-    let arch = std::env::consts::ARCH; // "x86_64" or "aarch64"
-    let os = std::env::consts::OS; // "linux", "macos"
+    let arch = std::env::consts::ARCH; // e.g., "x86_64", "aarch64"
+    let os = std::env::consts::OS; // "linux", "macos" (macOS is transformed to "darwin")
     let os_name = match os {
         "macos" => "darwin",
-        other => other,
+        "linux" => "linux",
+        other => {
+            return Err(Error::SelfUpdate(format!(
+                "Self-upgrade is only supported on macOS and Linux (detected platform: '{}')",
+                other
+            )));
+        }
     };
     Ok(format!("nixy-{}-{}", arch, os_name))
 }
 
-fn download_binary(url: &str) -> Result<std::path::PathBuf> {
+fn download_binary(url: &str) -> Result<PathBuf> {
     let tmp_dir = std::env::temp_dir();
-    let tmp_path = tmp_dir.join("nixy-update");
+    // Use unique temp file name to avoid conflicts with concurrent runs
+    let pid = std::process::id();
+    let tmp_path = tmp_dir.join(format!("nixy-update-{}", pid));
 
     // Create temp file
     let mut tmp_file = File::create(&tmp_path)?;
@@ -105,4 +140,36 @@ fn download_binary(url: &str) -> Result<std::path::PathBuf> {
     }
 
     Ok(tmp_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_asset_name_format() {
+        let result = get_asset_name();
+        assert!(result.is_ok());
+        let name = result.unwrap();
+        assert!(name.starts_with("nixy-"));
+        // Should contain arch and os
+        assert!(name.contains("-"));
+    }
+
+    #[test]
+    fn test_temp_file_guard_cleanup() {
+        let tmp_dir = std::env::temp_dir();
+        let tmp_path = tmp_dir.join("nixy-test-guard");
+
+        // Create a test file
+        std::fs::write(&tmp_path, "test").unwrap();
+        assert!(tmp_path.exists());
+
+        // Guard should clean up on drop
+        {
+            let _guard = TempFileGuard::new(tmp_path.clone());
+        }
+
+        assert!(!tmp_path.exists());
+    }
 }
