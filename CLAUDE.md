@@ -58,17 +58,24 @@ mod tests {
 }
 ```
 
-### 4. Run Tests
+### 4. Set Up Git Hooks (one-time)
+Configure git to use the project's pre-commit hooks:
+```bash
+git config core.hooksPath .githooks
+```
+This runs `cargo fmt --check` and `cargo clippy` before each commit.
+
+### 5. Run Tests
 ```bash
 cargo test
 ```
 All tests must pass before committing.
 
-### 5. Update Version
+### 6. Update Version
 - Bump version in `Cargo.toml`
 - Use semantic versioning (MAJOR.MINOR.PATCH)
 
-### 6. Commit, Push, and Create PR
+### 7. Commit, Push, and Create PR
 ```bash
 git add src/ tests/ Cargo.toml CLAUDE.md
 git commit -m "Description of change, bump to X.Y.Z
@@ -84,7 +91,7 @@ gh pr create --title "Feature description" --body "## Summary
 "
 ```
 
-### 7. Cleanup Worktree (after PR is merged)
+### 8. Cleanup Worktree (after PR is merged)
 ```bash
 git wt -d <username>/<feature-name>
 ```

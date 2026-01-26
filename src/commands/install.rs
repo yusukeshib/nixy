@@ -17,9 +17,11 @@ use crate::profile::get_flake_dir;
 use super::{info, success, warn};
 
 pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
+    let allow_unfree = args.allow_unfree;
+
     // Handle --file option
     if let Some(file) = args.file {
-        return install_from_file(config, &file, args.force);
+        return install_from_file(config, &file, args.force, allow_unfree);
     }
 
     // Handle --from option
@@ -27,7 +29,7 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         let pkg = args
             .package
             .ok_or_else(|| Error::Usage("Package name is required with --from".to_string()))?;
-        return install_from_registry(config, &from, &pkg);
+        return install_from_registry(config, &from, &pkg, allow_unfree);
     }
 
     // Standard nixpkgs install
@@ -55,7 +57,7 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     add_package_to_flake(config, &pkg)?;
 
     info(&format!("Installing {}...", pkg));
-    super::sync::run(config)?;
+    super::sync::run(config, allow_unfree)?;
 
     Ok(())
 }
@@ -109,7 +111,12 @@ fn add_package_to_flake(config: &Config, pkg: &str) -> Result<()> {
 }
 
 /// Install from a flake registry or direct URL
-fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<()> {
+fn install_from_registry(
+    config: &Config,
+    from_arg: &str,
+    pkg: &str,
+    allow_unfree: bool,
+) -> Result<()> {
     let flake_url = if from_arg.contains(':') {
         // Direct flake URL
         info(&format!("Using flake URL: {}", from_arg));
@@ -172,7 +179,7 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     add_registry_package_to_flake(config, &input_name, &flake_url, pkg, &pkg_output)?;
 
     info(&format!("Installing {} from {}...", pkg, input_name));
-    super::sync::run(config)?;
+    super::sync::run(config, allow_unfree)?;
 
     Ok(())
 }
@@ -297,14 +304,14 @@ fn add_registry_package_to_flake(
 }
 
 /// Install from a local nix file
-fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
+fn install_from_file(config: &Config, file: &Path, force: bool, allow_unfree: bool) -> Result<()> {
     if !file.exists() {
         return Err(Error::FileNotFound(file.display().to_string()));
     }
 
     // Check if this is a flake file
     if is_flake_file(file) {
-        return install_from_flake_file(config, file, force);
+        return install_from_flake_file(config, file, force, allow_unfree);
     }
 
     // Extract package name
@@ -359,13 +366,18 @@ fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
     fs::write(&flake_path, new_content)?;
 
     info(&format!("Installing {}...", pkg_name));
-    super::sync::run(config)?;
+    super::sync::run(config, allow_unfree)?;
 
     Ok(())
 }
 
 /// Install from a local flake file
-fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<()> {
+fn install_from_flake_file(
+    config: &Config,
+    file: &Path,
+    force: bool,
+    allow_unfree: bool,
+) -> Result<()> {
     // Extract package name from filename
     let pkg_name = file
         .file_stem()
@@ -423,7 +435,7 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
     fs::write(&flake_path, new_content)?;
 
     info(&format!("Installing {}...", pkg_name));
-    super::sync::run(config)?;
+    super::sync::run(config, allow_unfree)?;
 
     Ok(())
 }

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit hook to run lint checks
+
+set -e
+
+echo "Running cargo fmt --check..."
+cargo fmt --check
+
+echo "Running cargo clippy..."
+cargo clippy -- -D warnings
+
+echo "Lint checks passed!"
