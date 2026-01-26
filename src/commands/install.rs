@@ -214,7 +214,13 @@ fn ensure_custom_markers(content: &str) -> String {
             // Check if `...` is not already present
             if !sig_content.contains("...") {
                 let old_sig = caps[0].to_string();
-                let new_sig = old_sig.replace("}@inputs:", ", ... }@inputs:");
+                // Handle trailing comma: { self, nixpkgs, }@inputs: -> { self, nixpkgs, ... }@inputs:
+                // No trailing comma: { self, nixpkgs }@inputs: -> { self, nixpkgs, ... }@inputs:
+                let new_sig = if sig_content.trim_end().ends_with(',') {
+                    old_sig.replace("}@inputs:", "... }@inputs:")
+                } else {
+                    old_sig.replace("}@inputs:", ", ... }@inputs:")
+                };
                 result = result.replace(&old_sig, &new_sig);
             }
         }

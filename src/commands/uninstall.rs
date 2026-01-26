@@ -186,69 +186,95 @@ fn remove_unused_overlay(content: &str, overlay_name: &str) -> String {
         .map(|r| r.is_match(content))
         .unwrap_or(false)
     {
-        // Overlay input doesn't exist
+        // Overlay input doesn't exist, nothing to clean up
         return content.to_string();
     }
 
-    // Check if any overlay reference still exists in local-overlays
+    // First, remove the overlay from local-overlays section
+    let overlay_pattern = Regex::new(&format!(
+        r"^\s*{}\.overlays\.[a-zA-Z0-9_-]+",
+        regex::escape(overlay_name)
+    ))
+    .unwrap();
+    let content = remove_from_section(
+        content,
+        "# [nixy:local-overlays]",
+        "# [/nixy:local-overlays]",
+        &overlay_pattern,
+    );
+
+    // Now check if any references to the overlay still exist
+    // (could be used by other packages or overlays)
     let overlay_usage = format!(r"{}\.overlays", regex::escape(overlay_name));
     if Regex::new(&overlay_usage)
-        .map(|r| r.is_match(content))
+        .map(|r| r.is_match(&content))
         .unwrap_or(false)
     {
-        // Remove the overlay from local-overlays section
-        let overlay_pattern = Regex::new(&format!(
-            r"^\s*{}\.overlays\.[a-zA-Z0-9_-]+",
-            regex::escape(overlay_name)
-        ))
-        .unwrap();
-        let content = remove_from_section(
-            content,
-            "# [nixy:local-overlays]",
-            "# [/nixy:local-overlays]",
-            &overlay_pattern,
-        );
-
-        // Remove the input from local-inputs section
-        let input_pattern =
-            Regex::new(&format!(r"^\s*{}\.url = ", regex::escape(overlay_name))).unwrap();
-        let content = remove_from_section(
-            &content,
-            "# [nixy:local-inputs]",
-            "# [/nixy:local-inputs]",
-            &input_pattern,
-        );
-
-        // Update the outputs function signature to remove the overlay input
-        let content = remove_from_outputs_signature(&content, overlay_name);
-
+        // Overlay is still referenced elsewhere, don't remove the input
         return content;
     }
 
-    content.to_string()
+    // No more references, safe to remove the input from local-inputs
+    let input_pattern =
+        Regex::new(&format!(r"^\s*{}\.url = ", regex::escape(overlay_name))).unwrap();
+    let content = remove_from_section(
+        &content,
+        "# [nixy:local-inputs]",
+        "# [/nixy:local-inputs]",
+        &input_pattern,
+    );
+
+    // Update the outputs function signature to remove the overlay input
+    remove_from_outputs_signature(&content, overlay_name)
 }
 
 /// Remove an input from the outputs function signature
 fn remove_from_outputs_signature(content: &str, input_name: &str) -> String {
-    // Pattern: outputs = { self, nixpkgs, ..., input_name, ... }@inputs:
-    // We need to remove ", input_name" or "input_name, " from the signature
+    // Pattern (bounded): outputs = { self, nixpkgs, ..., input_name, ... }@inputs:
+    // Only modify the parameter list inside the outputs signature, not the entire file.
+    //
+    // Capture groups:
+    // 1: "outputs = {"
+    // 2: parameter list contents
+    // 3: "}@inputs:"
+    let sig_re = match Regex::new(r"(?s)(outputs\s*=\s*\{)([^}]*)\}(@inputs\s*:)") {
+        Ok(r) => r,
+        Err(_) => return content.to_string(),
+    };
 
-    // Try to match ", input_name" first (input is not first in list)
-    let pattern1 = format!(r",\s*{}", regex::escape(input_name));
-    if let Ok(re) = Regex::new(&pattern1) {
-        let result = re.replace(content, "").to_string();
-        if result != content {
-            return result;
-        }
-    }
+    let caps = match sig_re.captures(content) {
+        Some(c) => c,
+        None => return content.to_string(),
+    };
 
-    // Try to match "input_name, " (input is first after a required input)
-    let pattern2 = format!(r"{}\s*,\s*", regex::escape(input_name));
-    if let Ok(re) = Regex::new(&pattern2) {
-        return re.replace(content, "").to_string();
-    }
+    let full_match = caps.get(0).unwrap();
+    let before_brace = caps.get(1).unwrap().as_str();
+    let params = caps.get(2).unwrap().as_str();
+    let after_sig = caps.get(3).unwrap().as_str();
 
-    content.to_string()
+    // Within the parameter list, remove the input name with its surrounding comma/whitespace.
+    // This handles both ", input_name" and "input_name, " cases locally.
+    let param_pattern = format!(
+        r"(?m)(\s*,\s*{name}\s*|\s*{name}\s*,\s*)",
+        name = regex::escape(input_name)
+    );
+    let param_re = match Regex::new(&param_pattern) {
+        Ok(r) => r,
+        Err(_) => return content.to_string(),
+    };
+
+    let new_params = param_re.replace_all(params, "").to_string();
+
+    // Reconstruct the content with the updated outputs signature.
+    let mut result = String::with_capacity(content.len());
+    result.push_str(&content[..full_match.start()]);
+    result.push_str(before_brace);
+    result.push_str(&new_params);
+    result.push('}');
+    result.push_str(after_sig);
+    result.push_str(&content[full_match.end()..]);
+
+    result
 }
 
 /// Remove a file from git index
@@ -365,6 +391,7 @@ mod tests {
 
     #[test]
     fn test_remove_unused_overlay() {
+        // When overlay is only used once, removing it should also remove the input
         let content = r#"# [nixy:local-inputs]
     neovim-nightly-overlay.url = "github:nix-community/neovim-nightly-overlay";
 # [/nixy:local-inputs]
@@ -375,8 +402,31 @@ mod tests {
         ];
 "#;
         let result = remove_unused_overlay(content, "neovim-nightly-overlay");
-        assert!(!result.contains("neovim-nightly-overlay.url"));
+        // Overlay reference should be removed from local-overlays
         assert!(!result.contains("neovim-nightly-overlay.overlays"));
+        // Input should also be removed since no other references exist
+        assert!(!result.contains("neovim-nightly-overlay.url"));
+    }
+
+    #[test]
+    fn test_remove_unused_overlay_keeps_input_if_still_used() {
+        // If overlay is used elsewhere, input should be kept
+        let content = r#"# [nixy:local-inputs]
+    neovim-nightly-overlay.url = "github:nix-community/neovim-nightly-overlay";
+# [/nixy:local-inputs]
+        overlays = [
+          # [nixy:local-overlays]
+          neovim-nightly-overlay.overlays.default
+          # [/nixy:local-overlays]
+        ];
+        # Another reference outside local-overlays
+        other-pkg = neovim-nightly-overlay.overlays.something;
+"#;
+        let result = remove_unused_overlay(content, "neovim-nightly-overlay");
+        // Overlay reference should be removed from local-overlays section
+        assert!(!result.contains("          neovim-nightly-overlay.overlays.default"));
+        // But input should be kept because another reference exists
+        assert!(result.contains("neovim-nightly-overlay.url"));
     }
 
     #[test]
