@@ -128,7 +128,10 @@ fn remove_package_from_flake(config: &Config, pkg: &str) -> Result<()> {
         content
     };
 
-    // Check for overlay-based packages (naming convention: {pkg}-overlay)
+    // Check for overlay-based packages (naming convention: {pkg}-overlay).
+    // Note: This heuristic only handles overlays named exactly "{pkg}-overlay".
+    // For custom overlay naming (e.g., "neovim" from "neovim-nightly-overlay"),
+    // the cleanup via find_input_for_package handles the custom-inputs section.
     let overlay_input_name = format!("{}-overlay", pkg);
     let content = remove_unused_overlay(&content, &overlay_input_name);
 
@@ -252,18 +255,21 @@ fn remove_from_outputs_signature(content: &str, input_name: &str) -> String {
     let params = caps.get(2).unwrap().as_str();
     let after_sig = caps.get(3).unwrap().as_str();
 
-    // Within the parameter list, remove the input name with its surrounding comma/whitespace.
-    // This handles both ", input_name" and "input_name, " cases locally.
-    let param_pattern = format!(
-        r"(?m)(\s*,\s*{name}\s*|\s*{name}\s*,\s*)",
-        name = regex::escape(input_name)
-    );
-    let param_re = match Regex::new(&param_pattern) {
-        Ok(r) => r,
-        Err(_) => return content.to_string(),
-    };
+    // Within the parameter list, remove entries that match `input_name` (ignoring surrounding
+    // whitespace), then rebuild the list with normalized commas and spacing.
+    let mut kept_params: Vec<String> = Vec::new();
+    for raw_part in params.split(',') {
+        let trimmed = raw_part.trim();
 
-    let new_params = param_re.replace_all(params, "").to_string();
+        // Skip empty segments and the one matching `input_name`.
+        if trimmed.is_empty() || trimmed == input_name {
+            continue;
+        }
+
+        kept_params.push(trimmed.to_string());
+    }
+
+    let new_params = kept_params.join(", ");
 
     // Reconstruct the content with the updated outputs signature.
     let mut result = String::with_capacity(content.len());
