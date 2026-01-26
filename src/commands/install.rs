@@ -183,9 +183,7 @@ fn ensure_custom_markers(content: &str) -> String {
     let mut result = content.to_string();
 
     // Add custom-inputs marker after local-inputs if missing
-    if !has_marker(&result, "nixy:custom-inputs")
-        && result.contains("# [/nixy:local-inputs]")
-    {
+    if !has_marker(&result, "nixy:custom-inputs") && result.contains("# [/nixy:local-inputs]") {
         result = result.replace(
             "# [/nixy:local-inputs]",
             "# [/nixy:local-inputs]\n    # [nixy:custom-inputs]\n    # [/nixy:custom-inputs]",
@@ -193,9 +191,7 @@ fn ensure_custom_markers(content: &str) -> String {
     }
 
     // Add custom-packages marker after local-packages if missing
-    if !has_marker(&result, "nixy:custom-packages")
-        && result.contains("# [/nixy:local-packages]")
-    {
+    if !has_marker(&result, "nixy:custom-packages") && result.contains("# [/nixy:local-packages]") {
         result = result.replace(
             "# [/nixy:local-packages]",
             "# [/nixy:local-packages]\n          # [nixy:custom-packages]\n          # [/nixy:custom-packages]",
