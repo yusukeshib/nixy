@@ -9,7 +9,7 @@ use crate::profile::{
     get_active_profile, has_legacy_flake, list_profiles, migrate_legacy_flake, set_active_profile,
     validate_profile_name, Profile,
 };
-use crate::state::PackageState;
+use crate::state::{get_state_path, PackageState};
 
 use super::{info, success, warn};
 
@@ -43,8 +43,12 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
         if create {
             info(&format!("Creating profile '{}'...", name));
             profile.create()?;
-            let content = generate_flake(&PackageState::default(), Some(&profile.dir));
+            let state = PackageState::default();
+            let content = generate_flake(&state, Some(&profile.dir));
             fs::write(&profile.flake_path, content)?;
+            // Create empty packages.json for consistency
+            let state_path = get_state_path(&profile.dir);
+            state.save(&state_path)?;
         } else {
             return Err(Error::Usage(format!(
                 "Profile '{}' does not exist. Use -c to create it: nixy profile switch -c {}",

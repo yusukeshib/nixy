@@ -30,6 +30,7 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     let local_pkg_file = pkg_dir.join(format!("{}.nix", package));
     let local_flake_dir = pkg_dir.join(package);
 
+    let mut removed_local = false;
     if local_pkg_file.exists() {
         info(&format!(
             "Removing local package definition: {}",
@@ -37,6 +38,7 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
         ));
         fs::remove_file(&local_pkg_file)?;
         git_rm(&flake_dir, &format!("packages/{}.nix", package));
+        removed_local = true;
     } else if local_flake_dir.exists() && local_flake_dir.join("flake.nix").exists() {
         info(&format!(
             "Removing local flake: {}",
@@ -44,10 +46,12 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
         ));
         fs::remove_dir_all(&local_flake_dir)?;
         git_rm_recursive(&flake_dir, &format!("packages/{}", package));
+        removed_local = true;
     }
 
-    // Remove package from state
-    if !state.remove_package(package) {
+    // Remove package from state (local packages are auto-discovered, not in state)
+    let removed_from_state = state.remove_package(package);
+    if !removed_local && !removed_from_state {
         return Err(Error::PackageNotFound(package.to_string()));
     }
     state.save(&state_path)?;

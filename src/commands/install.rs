@@ -137,14 +137,8 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     // Save original state for rollback
     let original_state = state.clone();
 
-    // Check if we should reuse existing nixpkgs input
-    let (final_input_name, final_url) = if flake_url.contains("NixOS/nixpkgs") {
-        // Use existing nixpkgs input - but we need to add as custom for tracking
-        info("Using existing nixpkgs input");
-        ("nixpkgs".to_string(), flake_url.clone())
-    } else {
-        (input_name.clone(), flake_url.clone())
-    };
+    // Determine final input name and URL for this package
+    let (final_input_name, final_url) = (input_name.clone(), flake_url.clone());
 
     // Add custom package to state
     state.add_custom_package(CustomPackage {

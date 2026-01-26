@@ -104,7 +104,8 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
     let output_params = if seen_inputs.is_empty() {
         "self, nixpkgs".to_string()
     } else {
-        let inputs_list: Vec<_> = seen_inputs.into_iter().collect();
+        let mut inputs_list: Vec<_> = seen_inputs.into_iter().collect();
+        inputs_list.sort();
         format!("self, nixpkgs, {}", inputs_list.join(", "))
     };
 
