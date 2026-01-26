@@ -173,12 +173,9 @@ nixy install ripgrep              # Install from nixpkgs (default)
 nixy install --from <flake> <pkg> # Install from external flake
 nixy install --file my-pkg.nix    # Install from custom nix file
 nixy install --force <pkg>        # Force regeneration of flake.nix
-nixy install --allow-unfree <pkg> # Install packages with unfree licenses
 ```
 
 Use `--force` when you've made manual edits outside the nixy markers and want to proceed anyway (your custom changes will be lost).
-
-Use `--allow-unfree` to install packages with non-free licenses (e.g., `graphite-cli`, `slack`). This flag is also available on `sync`, `upgrade`, and `uninstall` commands for when your flake contains unfree packages.
 
 ## Multiple Profiles
 
@@ -271,17 +268,10 @@ nixy sync                                     # Apply the old state
 This is more powerful than `nix profile rollback` - you can go back to any point in history, see why changes were made via commit messages, and experiment with branches.
 
 **How do I install unfree packages?**
-Some packages have non-free licenses (e.g., `graphite-cli`, `slack`). Nix refuses to install these by default. Use the `--allow-unfree` flag:
+Packages with non-free licenses (e.g., `graphite-cli`, `slack`) are allowed by default in nixy. Just install them normally:
 
 ```bash
-nixy install --allow-unfree graphite-cli
-```
-
-Once installed, you'll need to use `--allow-unfree` with `sync`, `upgrade`, or `uninstall` commands that rebuild the environment:
-
-```bash
-nixy sync --allow-unfree      # Rebuild environment with unfree packages
-nixy upgrade --allow-unfree   # Upgrade with unfree packages
+nixy install slack
 ```
 
 ---

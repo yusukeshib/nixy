@@ -14,7 +14,6 @@ use super::info;
 
 pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     let package = &args.package;
-    let allow_unfree = args.allow_unfree;
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
 
@@ -53,7 +52,7 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     remove_package_from_flake(config, package)?;
 
     info("Rebuilding environment...");
-    super::sync::run(config, allow_unfree)?;
+    super::sync::run(config)?;
 
     Ok(())
 }

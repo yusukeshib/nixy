@@ -10,7 +10,6 @@ use super::{info, success};
 
 pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
     let inputs = args.inputs;
-    let allow_unfree = args.allow_unfree;
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
     let lock_file = flake_dir.join("flake.lock");
@@ -55,7 +54,7 @@ pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    Nix::build(&flake_dir, "default", &config.env_link, allow_unfree)?;
+    Nix::build(&flake_dir, "default", &config.env_link)?;
 
     if !inputs.is_empty() {
         success(&format!("Upgraded: {}", inputs.join(", ")));

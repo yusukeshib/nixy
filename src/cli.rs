@@ -73,37 +73,21 @@ pub struct InstallArgs {
     /// Force regeneration even if flake.nix has custom modifications
     #[arg(long)]
     pub force: bool,
-
-    /// Allow installation of packages with unfree licenses
-    #[arg(long)]
-    pub allow_unfree: bool,
 }
 
 #[derive(Args)]
 pub struct UpgradeArgs {
     /// Specific inputs to upgrade (if empty, upgrades all)
     pub inputs: Vec<String>,
-
-    /// Allow packages with unfree licenses
-    #[arg(long)]
-    pub allow_unfree: bool,
 }
 
 #[derive(Args)]
-pub struct SyncArgs {
-    /// Allow packages with unfree licenses
-    #[arg(long)]
-    pub allow_unfree: bool,
-}
+pub struct SyncArgs {}
 
 #[derive(Args)]
 pub struct UninstallArgs {
     /// Package name to uninstall
     pub package: String,
-
-    /// Allow packages with unfree licenses
-    #[arg(long)]
-    pub allow_unfree: bool,
 }
 
 #[derive(Args)]

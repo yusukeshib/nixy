@@ -7,7 +7,7 @@ use crate::profile::get_flake_dir;
 
 use super::{info, success};
 
-pub fn run(config: &Config, allow_unfree: bool) -> Result<()> {
+pub fn run(config: &Config) -> Result<()> {
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
 
@@ -28,7 +28,7 @@ pub fn run(config: &Config, allow_unfree: bool) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    Nix::build(&flake_dir, "default", &config.env_link, allow_unfree)?;
+    Nix::build(&flake_dir, "default", &config.env_link)?;
 
     success("Sync complete");
     Ok(())

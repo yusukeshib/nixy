@@ -63,11 +63,10 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        match Nix::build(&profile.dir, "default", &config.env_link, false) {
+        match Nix::build(&profile.dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
             Err(_) => {
                 warn("Profile switched but environment build failed. Run 'nixy sync' to rebuild.");
-                warn("If using unfree packages, run 'nixy sync --allow-unfree'.");
                 success(&format!("Switched to profile '{}'", name));
             }
         }

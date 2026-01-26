@@ -55,24 +55,14 @@ impl Nix {
     }
 
     /// Build a flake and create an out-link
-    pub fn build(
-        flake_dir: &Path,
-        output: &str,
-        out_link: &Path,
-        allow_unfree: bool,
-    ) -> Result<()> {
+    pub fn build(flake_dir: &Path, output: &str, out_link: &Path) -> Result<()> {
         let ref_str = flake_ref(flake_dir, Some(output));
         let out_link_str = out_link.to_string_lossy();
 
         let mut cmd = Command::new("nix");
         cmd.args(NIX_FLAGS);
-
-        if allow_unfree {
-            cmd.env("NIXPKGS_ALLOW_UNFREE", "1");
-            cmd.args(["build", &ref_str, "--out-link", &out_link_str, "--impure"]);
-        } else {
-            cmd.args(["build", &ref_str, "--out-link", &out_link_str]);
-        }
+        cmd.env("NIXPKGS_ALLOW_UNFREE", "1");
+        cmd.args(["build", &ref_str, "--out-link", &out_link_str, "--impure"]);
 
         let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
 
