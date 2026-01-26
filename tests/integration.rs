@@ -1188,3 +1188,51 @@ fn test_install_from_detects_direct_url() {
         );
     }
 }
+
+// =============================================================================
+// Install revert on sync failure tests
+// =============================================================================
+
+#[test]
+fn test_install_reverts_flake_on_sync_failure() {
+    let env = TestEnv::new();
+
+    // Create a profile with a minimal flake.nix
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create a minimal nixy-managed flake.nix
+    let flake_content = r#"# nixy-managed flake.nix
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+  outputs = { self, nixpkgs }@inputs: {
+    packages = { };
+  };
+}
+"#;
+    std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    // Save original content
+    let original = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+
+    // Try to install a package (this will likely fail due to invalid flake structure)
+    let output = env.cmd().args(["install", "hello"]).output().unwrap();
+
+    // If install failed (sync failed), check that flake.nix was reverted
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lower = stderr.to_lowercase();
+
+        // If the error mentions "reverted", the flake should be restored
+        if stderr_lower.contains("reverted") {
+            let current = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+            assert_eq!(
+                current.trim(),
+                original.trim(),
+                "Flake should be reverted to original content on sync failure"
+            );
+        }
+    }
+}

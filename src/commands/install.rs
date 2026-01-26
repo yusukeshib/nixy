@@ -51,11 +51,32 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         return Err(Error::NotNixyManaged);
     }
 
+    // Save original flake content for rollback if sync fails
+    let original_content = if flake_path.exists() {
+        Some(fs::read_to_string(&flake_path)?)
+    } else {
+        None
+    };
+
     // Add package to flake.nix
     add_package_to_flake(config, &pkg)?;
 
     info(&format!("Installing {}...", pkg));
-    super::sync::run(config)?;
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert flake.nix changes
+        if let Some(content) = original_content {
+            fs::write(&flake_path, content)?;
+            warn(&format!(
+                "Sync failed. Reverted changes to {}",
+                flake_path.display()
+            ));
+        } else if flake_path.exists() {
+            // Flake was newly created, remove it
+            fs::remove_file(&flake_path)?;
+            warn(&format!("Sync failed. Removed {}", flake_path.display()));
+        }
+        return Err(e);
+    }
 
     Ok(())
 }
@@ -168,11 +189,22 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
         return Err(Error::NotNixyManaged);
     }
 
+    // Save original flake content for rollback if sync fails
+    let original_content = fs::read_to_string(&flake_path)?;
+
     // Add the flake as an input and the package
     add_registry_package_to_flake(config, &input_name, &flake_url, pkg, &pkg_output)?;
 
     info(&format!("Installing {} from {}...", pkg, input_name));
-    super::sync::run(config)?;
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert flake.nix changes
+        fs::write(&flake_path, original_content)?;
+        warn(&format!(
+            "Sync failed. Reverted changes to {}",
+            flake_path.display()
+        ));
+        return Err(e);
+    }
 
     Ok(())
 }
@@ -340,6 +372,13 @@ fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
         }
     }
 
+    // Save original flake content for rollback if sync fails
+    let original_content = if flake_path.exists() {
+        Some(fs::read_to_string(&flake_path)?)
+    } else {
+        None
+    };
+
     // Create packages directory
     let pkg_dir = flake_dir.join("packages");
     fs::create_dir_all(&pkg_dir)?;
@@ -359,7 +398,21 @@ fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
     fs::write(&flake_path, new_content)?;
 
     info(&format!("Installing {}...", pkg_name));
-    super::sync::run(config)?;
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert flake.nix changes
+        if let Some(content) = original_content {
+            fs::write(&flake_path, content)?;
+        } else {
+            let _ = fs::remove_file(&flake_path);
+        }
+        // Remove the copied package file
+        let _ = fs::remove_file(&dest);
+        warn(&format!(
+            "Sync failed. Reverted changes to {}",
+            flake_path.display()
+        ));
+        return Err(e);
+    }
 
     Ok(())
 }
@@ -404,6 +457,13 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
         }
     }
 
+    // Save original flake content for rollback if sync fails
+    let original_content = if flake_path.exists() {
+        Some(fs::read_to_string(&flake_path)?)
+    } else {
+        None
+    };
+
     // Create package directory
     let pkg_dir = flake_dir.join("packages").join(&pkg_name);
     fs::create_dir_all(&pkg_dir)?;
@@ -423,7 +483,21 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
     fs::write(&flake_path, new_content)?;
 
     info(&format!("Installing {}...", pkg_name));
-    super::sync::run(config)?;
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert flake.nix changes
+        if let Some(content) = original_content {
+            fs::write(&flake_path, content)?;
+        } else {
+            let _ = fs::remove_file(&flake_path);
+        }
+        // Remove the copied package directory
+        let _ = fs::remove_dir_all(&pkg_dir);
+        warn(&format!(
+            "Sync failed. Reverted changes to {}",
+            flake_path.display()
+        ));
+        return Err(e);
+    }
 
     Ok(())
 }
