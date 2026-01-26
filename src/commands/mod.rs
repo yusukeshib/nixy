@@ -1,5 +1,4 @@
 pub mod config;
-pub mod gc;
 pub mod install;
 pub mod list;
 pub mod profile;

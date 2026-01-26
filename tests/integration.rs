@@ -327,29 +327,6 @@ fn test_search_requires_query() {
 }
 
 // =============================================================================
-// GC command tests
-// =============================================================================
-
-#[test]
-fn test_gc_runs() {
-    // GC should run without error (even if nix gc does nothing)
-    let output = nixy_cmd().arg("gc").output().unwrap();
-    // May succeed or fail depending on nix availability
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // Should at least attempt to run
-    assert!(
-        output.status.success()
-            || stdout.contains("garbage")
-            || stderr.contains("nix")
-            || stderr.contains("gc"),
-        "GC should attempt to run: stdout={}, stderr={}",
-        stdout,
-        stderr
-    );
-}
-
-// =============================================================================
 // Help content tests
 // =============================================================================
 
@@ -399,14 +376,6 @@ fn test_help_shows_sync_command() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("sync"));
-}
-
-#[test]
-fn test_help_shows_gc_command() {
-    let output = nixy_cmd().arg("--help").output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("gc"));
 }
 
 #[test]
