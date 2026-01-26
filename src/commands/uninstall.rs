@@ -3,6 +3,7 @@ use std::process::Command;
 
 use regex::Regex;
 
+use crate::cli::UninstallArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::flake::editor::remove_from_section;
@@ -11,7 +12,9 @@ use crate::profile::get_flake_dir;
 
 use super::info;
 
-pub fn run(config: &Config, package: &str) -> Result<()> {
+pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
+    let package = &args.package;
+    let allow_unfree = args.allow_unfree;
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
 
@@ -50,7 +53,7 @@ pub fn run(config: &Config, package: &str) -> Result<()> {
     remove_package_from_flake(config, package)?;
 
     info("Rebuilding environment...");
-    super::sync::run(config)?;
+    super::sync::run(config, allow_unfree)?;
 
     Ok(())
 }

@@ -157,9 +157,12 @@ nixy install ripgrep              # nixpkgs からインストール（デフォ
 nixy install --from <flake> <pkg> # 外部 flake からインストール
 nixy install --file my-pkg.nix    # カスタム nix ファイルからインストール
 nixy install --force <pkg>        # flake.nix を強制的に再生成
+nixy install --allow-unfree <pkg> # 非フリーライセンスのパッケージをインストール
 ```
 
 `--force` は、nixy マーカー外を手動で編集した場合に使用します（カスタム変更は失われます）。
+
+`--allow-unfree` は、非フリーライセンスのパッケージ（例：`graphite-cli`、`slack`）をインストールする際に使用します。このフラグは `sync`、`upgrade`、`uninstall` コマンドでも利用可能です。
 
 ## 複数プロファイル
 
@@ -250,6 +253,20 @@ nixy sync                                     # 古い状態を適用
 ```
 
 これは `nix profile rollback` より強力です - 履歴の任意の時点に戻れる、コミットメッセージで変更理由がわかる、ブランチで実験できる、といった利点があります。
+
+**非フリーパッケージをインストールするには？**
+一部のパッケージは非フリーライセンス（例：`graphite-cli`、`slack`）を持っています。Nix はデフォルトでこれらのインストールを拒否します。`--allow-unfree` フラグを使用してください：
+
+```bash
+nixy install --allow-unfree graphite-cli
+```
+
+インストール後、環境を再ビルドする `sync`、`upgrade`、`uninstall` コマンドでも `--allow-unfree` が必要です：
+
+```bash
+nixy sync --allow-unfree      # 非フリーパッケージを含む環境を再ビルド
+nixy upgrade --allow-unfree   # 非フリーパッケージを含むアップグレード
+```
 
 ---
 

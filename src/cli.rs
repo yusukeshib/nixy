@@ -20,10 +20,7 @@ pub enum Commands {
 
     /// Uninstall a package
     #[command(alias = "remove")]
-    Uninstall {
-        /// Package name to uninstall
-        package: String,
-    },
+    Uninstall(UninstallArgs),
 
     /// List packages in flake.nix
     #[command(alias = "ls")]
@@ -39,7 +36,7 @@ pub enum Commands {
     Upgrade(UpgradeArgs),
 
     /// Build environment from flake.nix and create symlink
-    Sync,
+    Sync(SyncArgs),
 
     /// Garbage collect old generations
     Gc,
@@ -76,12 +73,37 @@ pub struct InstallArgs {
     /// Force regeneration even if flake.nix has custom modifications
     #[arg(long)]
     pub force: bool,
+
+    /// Allow installation of packages with unfree licenses
+    #[arg(long)]
+    pub allow_unfree: bool,
 }
 
 #[derive(Args)]
 pub struct UpgradeArgs {
     /// Specific inputs to upgrade (if empty, upgrades all)
     pub inputs: Vec<String>,
+
+    /// Allow packages with unfree licenses
+    #[arg(long)]
+    pub allow_unfree: bool,
+}
+
+#[derive(Args)]
+pub struct SyncArgs {
+    /// Allow packages with unfree licenses
+    #[arg(long)]
+    pub allow_unfree: bool,
+}
+
+#[derive(Args)]
+pub struct UninstallArgs {
+    /// Package name to uninstall
+    pub package: String,
+
+    /// Allow packages with unfree licenses
+    #[arg(long)]
+    pub allow_unfree: bool,
 }
 
 #[derive(Args)]
