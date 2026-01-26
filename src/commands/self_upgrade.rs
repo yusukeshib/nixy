@@ -56,27 +56,32 @@ pub fn run(force: bool) -> Result<()> {
     let asset_name = get_asset_name()?;
     info(&format!("Looking for asset: {}", asset_name));
 
-    // Find the asset URL in the release
-    let asset = latest
-        .assets
-        .iter()
-        .find(|a| a.name == asset_name)
-        .ok_or_else(|| {
-            Error::SelfUpdate(format!(
-                "Asset '{}' not found for this platform. Available assets: {}",
-                asset_name,
-                latest
-                    .assets
-                    .iter()
-                    .map(|a| a.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        })?;
+    // Verify the asset exists in the release
+    let asset_exists = latest.assets.iter().any(|a| a.name == asset_name);
+    if !asset_exists {
+        return Err(Error::SelfUpdate(format!(
+            "Asset '{}' not found for this platform. Available assets: {}",
+            asset_name,
+            latest
+                .assets
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+
+    // Construct browser_download_url directly
+    // The self_update library's download_url points to the API endpoint which requires
+    // special headers. browser_download_url is a direct download link that works without headers.
+    let download_url = format!(
+        "https://github.com/yusukeshib/nixy/releases/download/v{}/{}",
+        latest_version, asset_name
+    );
 
     // Download binary to temp file
     info("Downloading new version...");
-    let tmp_path = download_binary(&asset.download_url)?;
+    let tmp_path = download_binary(&download_url)?;
 
     // Ensure temp file is cleaned up even if installation fails
     let _tmp_guard = TempFileGuard::new(tmp_path.clone());
