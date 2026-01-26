@@ -398,7 +398,9 @@ mod tests {
     #[test]
     fn test_remove_unused_overlay() {
         // When overlay is only used once, removing it should also remove the input
-        let content = r#"# [nixy:local-inputs]
+        // and clean up the outputs signature
+        let content = r#"outputs = { self, nixpkgs, neovim-nightly-overlay, ... }@inputs:
+# [nixy:local-inputs]
     neovim-nightly-overlay.url = "github:nix-community/neovim-nightly-overlay";
 # [/nixy:local-inputs]
         overlays = [
@@ -412,6 +414,11 @@ mod tests {
         assert!(!result.contains("neovim-nightly-overlay.overlays"));
         // Input should also be removed since no other references exist
         assert!(!result.contains("neovim-nightly-overlay.url"));
+        // Outputs signature should also be cleaned up - neovim-nightly-overlay removed
+        assert!(!result.contains("neovim-nightly-overlay"));
+        // Still contains self, nixpkgs, and ...
+        assert!(result.contains("self, nixpkgs, ..."));
+        assert!(result.contains("}@inputs:"));
     }
 
     #[test]
@@ -461,5 +468,38 @@ mod tests {
         let result = remove_from_outputs_signature(content, "neovim-nightly-overlay");
         assert!(!result.contains("neovim-nightly-overlay"));
         assert!(result.contains("gke-plugin"));
+    }
+
+    #[test]
+    fn test_remove_from_outputs_signature_only_custom_input() {
+        // Edge case: removing the only custom input (besides self and nixpkgs)
+        let content = r#"outputs = { self, nixpkgs, my-input }@inputs:"#;
+        let result = remove_from_outputs_signature(content, "my-input");
+        assert!(!result.contains("my-input"));
+        assert!(result.contains("self"));
+        assert!(result.contains("nixpkgs"));
+        // Verify no trailing comma before }
+        assert!(!result.contains("nixpkgs,}") && !result.contains("nixpkgs, }"));
+        assert!(result.contains("}@inputs:"));
+    }
+
+    #[test]
+    fn test_remove_from_outputs_signature_first_custom() {
+        // Edge case: removing first parameter after nixpkgs
+        let content = r#"outputs = { self, nixpkgs, first-input, second-input }@inputs:"#;
+        let result = remove_from_outputs_signature(content, "first-input");
+        assert!(!result.contains("first-input"));
+        assert!(result.contains("second-input"));
+        assert!(result.contains("self, nixpkgs, second-input"));
+    }
+
+    #[test]
+    fn test_remove_from_outputs_signature_with_ellipsis() {
+        // Test with ... in signature
+        let content = r#"outputs = { self, nixpkgs, my-input, ... }@inputs:"#;
+        let result = remove_from_outputs_signature(content, "my-input");
+        assert!(!result.contains("my-input"));
+        assert!(result.contains("..."));
+        assert!(result.contains("self, nixpkgs, ..."));
     }
 }
