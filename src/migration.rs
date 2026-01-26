@@ -60,6 +60,10 @@ pub fn migrate(profile_dir: &Path) -> Result<()> {
     // Save the state file
     state.save(&state_path)?;
 
+    // Regenerate flake.nix in the new marker-free format
+    let content = crate::flake::template::generate_flake(&state, Some(profile_dir));
+    fs::write(&flake_path, content)?;
+
     Ok(())
 }
 
@@ -109,7 +113,16 @@ fn extract_custom_packages(content: &str) -> Vec<CustomPackage> {
                 let package_output = caps[3].to_string();
 
                 // Try to find the input URL from custom-inputs section
-                let input_url = find_input_url(content, &input_name).unwrap_or_default();
+                let input_url = match find_input_url(content, &input_name) {
+                    Some(url) => url,
+                    None => {
+                        eprintln!(
+                            "Warning: Migration: could not find URL for input '{}' used by custom package '{}'; skipping this package.",
+                            input_name, name
+                        );
+                        continue;
+                    }
+                };
 
                 packages.push(CustomPackage {
                     name,

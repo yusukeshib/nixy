@@ -47,7 +47,9 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     }
 
     // Remove package from state
-    state.remove_package(package);
+    if !state.remove_package(package) {
+        return Err(Error::PackageNotFound(package.to_string()));
+    }
     state.save(&state_path)?;
 
     // Regenerate flake.nix

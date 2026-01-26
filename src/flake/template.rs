@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use super::parser::collect_local_packages;
@@ -36,7 +37,7 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
 
     // Build local inputs
     let mut local_inputs = String::new();
-    let mut local_input_params = Vec::new();
+    let mut seen_inputs: HashSet<String> = HashSet::new();
     let mut local_overlays = String::new();
     let mut local_packages_entries = String::new();
 
@@ -46,7 +47,7 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
             "    {}.url = \"path:./packages/{}\";\n",
             flake.name, flake.name
         ));
-        local_input_params.push(flake.name.clone());
+        seen_inputs.insert(flake.name.clone());
         local_packages_entries.push_str(&format!(
             "          {} = inputs.{}.packages.${{system}}.default;\n",
             flake.name, flake.name
@@ -57,7 +58,7 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
     for pkg in &local_packages {
         if let (Some(input_name), Some(input_url)) = (&pkg.input_name, &pkg.input_url) {
             local_inputs.push_str(&format!("    {}.url = \"{}\";\n", input_name, input_url));
-            local_input_params.push(input_name.clone());
+            seen_inputs.insert(input_name.clone());
         }
 
         if let Some(overlay) = &pkg.overlay {
@@ -73,15 +74,12 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
     let mut custom_packages_entries = String::new();
 
     for pkg in &state.custom_packages {
-        // Add the input if not already present from local packages
-        if !local_input_params.contains(&pkg.input_name)
-            && !custom_inputs.contains(&format!("{}.", pkg.input_name))
-        {
+        // Add the input if not already present
+        if seen_inputs.insert(pkg.input_name.clone()) {
             custom_inputs.push_str(&format!(
                 "    {}.url = \"{}\";\n",
                 pkg.input_name, pkg.input_url
             ));
-            local_input_params.push(pkg.input_name.clone());
         }
 
         custom_packages_entries.push_str(&format!(
@@ -103,10 +101,11 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
         .join("\n");
 
     // Build output parameters
-    let output_params = if local_input_params.is_empty() {
+    let output_params = if seen_inputs.is_empty() {
         "self, nixpkgs".to_string()
     } else {
-        format!("self, nixpkgs, {}", local_input_params.join(", "))
+        let inputs_list: Vec<_> = seen_inputs.into_iter().collect();
+        format!("self, nixpkgs, {}", inputs_list.join(", "))
     };
 
     // Build overlays section
