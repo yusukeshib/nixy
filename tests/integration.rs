@@ -283,6 +283,73 @@ fn test_install_file_not_found() {
     assert!(stderr.contains("File not found") || stderr.contains("not found"));
 }
 
+#[test]
+fn test_install_already_installed() {
+    let env = TestEnv::new();
+
+    // Create a profile with a package already installed
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create a nixy-managed flake.nix with hello already installed
+    let flake_content = r#"{
+  # This flake is managed by nixy. Do not edit manually.
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # [nixy:local-inputs]
+    # [/nixy:local-inputs]
+  };
+
+  outputs = { self, nixpkgs, ... }@inputs:
+    let
+      system = builtins.currentSystem;
+      pkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+      };
+      packages = {
+          # [nixy:packages]
+          hello = pkgs.hello;
+          # [/nixy:packages]
+          # [nixy:local-packages]
+          # [/nixy:local-packages]
+      };
+    in {
+      packages.${system}.default = pkgs.buildEnv {
+        name = "nixy-env";
+        paths = with packages; [
+              # [nixy:env-paths]
+              hello
+              # [/nixy:env-paths]
+        ];
+      };
+    };
+}
+"#;
+    std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    // Try to install hello again
+    let output = env.cmd().args(["install", "hello"]).output().unwrap();
+
+    // Should succeed (not an error)
+    assert!(
+        output.status.success(),
+        "Installing already-installed package should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should show message about already installed
+    assert!(
+        stdout.contains("already installed"),
+        "Should indicate package is already installed: {}",
+        stdout
+    );
+}
+
 // =============================================================================
 // Upgrade command tests
 // =============================================================================
