@@ -16,6 +16,40 @@ use crate::profile::get_flake_dir;
 
 use super::{info, success, warn};
 
+/// Check if a package is already installed in the flake.nix
+fn is_package_installed(flake_path: &Path, pkg: &str) -> bool {
+    if !flake_path.exists() {
+        return false;
+    }
+
+    let content = match fs::read_to_string(flake_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    // Check for standard nixpkgs package pattern ((?m) enables multiline mode)
+    let pattern = format!(
+        r"(?m)^\s*{} = pkgs\.{};",
+        regex::escape(pkg),
+        regex::escape(pkg)
+    );
+    if let Ok(re) = Regex::new(&pattern) {
+        if re.is_match(&content) {
+            return true;
+        }
+    }
+
+    // Check for custom package pattern (from --from installs)
+    let custom_pattern = format!(r"(?m)^\s*{} = ", regex::escape(pkg));
+    if let Ok(re) = Regex::new(&custom_pattern) {
+        if re.is_match(&content) {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     // Handle --file option
     if let Some(file) = args.file {
@@ -37,6 +71,15 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         )
     })?;
 
+    // Check if package is already installed (before expensive validation)
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+
+    if is_package_installed(&flake_path, &pkg) {
+        success(&format!("Package '{}' is already installed", pkg));
+        return Ok(());
+    }
+
     // Validate package exists in nixpkgs
     info(&format!("Validating package {}...", pkg));
     if !Nix::validate_package(&pkg)? {
@@ -44,9 +87,6 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     }
 
     // Check if existing flake.nix is nixy-managed
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
-
     if flake_path.exists() && !is_nixy_managed(&flake_path) {
         return Err(Error::NotNixyManaged);
     }
@@ -131,6 +171,15 @@ fn add_package_to_flake(config: &Config, pkg: &str) -> Result<()> {
 
 /// Install from a flake registry or direct URL
 fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<()> {
+    // Check if package is already installed (before expensive validation)
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+
+    if is_package_installed(&flake_path, pkg) {
+        success(&format!("Package '{}' is already installed", pkg));
+        return Ok(());
+    }
+
     let flake_url = if from_arg.contains(':') {
         // Direct flake URL
         info(&format!("Using flake URL: {}", from_arg));
@@ -176,9 +225,6 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     })?;
 
     // Get or create flake
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
-
     if !flake_path.exists() {
         fs::create_dir_all(&flake_dir)?;
         let content = generate_flake(&[], Some(&flake_dir), None);
@@ -345,14 +391,20 @@ fn install_from_file(config: &Config, file: &Path, force: bool) -> Result<()> {
         .or_else(|| parse_local_package_attr(&content, "name"))
         .ok_or_else(|| Error::NoPackageName(file.display().to_string()))?;
 
+    // Check if package is already installed
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+
+    if is_package_installed(&flake_path, &pkg_name) {
+        success(&format!("Package '{}' is already installed", pkg_name));
+        return Ok(());
+    }
+
     info(&format!(
         "Installing local package: {} from {}",
         pkg_name,
         file.display()
     ));
-
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
 
     // Check if existing flake.nix is nixy-managed
     if flake_path.exists() && !is_nixy_managed(&flake_path) {
@@ -430,14 +482,20 @@ fn install_from_flake_file(config: &Config, file: &Path, force: bool) -> Result<
         return Err(Error::InvalidFilename(file.display().to_string()));
     }
 
+    // Check if package is already installed
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+
+    if is_package_installed(&flake_path, &pkg_name) {
+        success(&format!("Package '{}' is already installed", pkg_name));
+        return Ok(());
+    }
+
     info(&format!(
         "Installing local flake: {} from {}",
         pkg_name,
         file.display()
     ));
-
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
 
     // Check if existing flake.nix is nixy-managed
     if flake_path.exists() && !is_nixy_managed(&flake_path) {
@@ -544,5 +602,84 @@ fn git_add(dir: &Path, file: &str) {
         let _ = Command::new("git")
             .args(["-C", &dir.to_string_lossy(), "add", file])
             .output();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_is_package_installed_no_flake() {
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+        assert!(!is_package_installed(&flake_path, "hello"));
+    }
+
+    #[test]
+    fn test_is_package_installed_empty_flake() {
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+        fs::write(&flake_path, "{ }").unwrap();
+        assert!(!is_package_installed(&flake_path, "hello"));
+    }
+
+    #[test]
+    fn test_is_package_installed_with_package() {
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+        let content = r#"
+{
+  outputs = { self, nixpkgs }: {
+    packages = {
+          hello = pkgs.hello;
+          world = pkgs.world;
+    };
+  };
+}
+"#;
+        fs::write(&flake_path, content).unwrap();
+        assert!(is_package_installed(&flake_path, "hello"));
+        assert!(is_package_installed(&flake_path, "world"));
+        assert!(!is_package_installed(&flake_path, "notinstalled"));
+    }
+
+    #[test]
+    fn test_is_package_installed_custom_package() {
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+        let content = r#"
+{
+  outputs = { self, nixpkgs }: {
+    packages = {
+          custom-pkg = inputs.some-flake.packages.${system}.custom-pkg;
+    };
+  };
+}
+"#;
+        fs::write(&flake_path, content).unwrap();
+        assert!(is_package_installed(&flake_path, "custom-pkg"));
+        assert!(!is_package_installed(&flake_path, "hello"));
+    }
+
+    #[test]
+    fn test_is_package_installed_special_chars() {
+        let temp = TempDir::new().unwrap();
+        let flake_path = temp.path().join("flake.nix");
+        let content = r#"
+{
+  outputs = { self, nixpkgs }: {
+    packages = {
+          foo-bar = pkgs.foo-bar;
+          baz_qux = pkgs.baz_qux;
+    };
+  };
+}
+"#;
+        fs::write(&flake_path, content).unwrap();
+        assert!(is_package_installed(&flake_path, "foo-bar"));
+        assert!(is_package_installed(&flake_path, "baz_qux"));
     }
 }

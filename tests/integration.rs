@@ -283,6 +283,73 @@ fn test_install_file_not_found() {
     assert!(stderr.contains("File not found") || stderr.contains("not found"));
 }
 
+#[test]
+fn test_install_already_installed() {
+    let env = TestEnv::new();
+
+    // Create a profile with a package already installed
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create a nixy-managed flake.nix with hello already installed
+    let flake_content = r#"{
+  # This flake is managed by nixy. Do not edit manually.
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # [nixy:local-inputs]
+    # [/nixy:local-inputs]
+  };
+
+  outputs = { self, nixpkgs, ... }@inputs:
+    let
+      system = builtins.currentSystem;
+      pkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+      };
+      packages = {
+          # [nixy:packages]
+          hello = pkgs.hello;
+          # [/nixy:packages]
+          # [nixy:local-packages]
+          # [/nixy:local-packages]
+      };
+    in {
+      packages.${system}.default = pkgs.buildEnv {
+        name = "nixy-env";
+        paths = with packages; [
+              # [nixy:env-paths]
+              hello
+              # [/nixy:env-paths]
+        ];
+      };
+    };
+}
+"#;
+    std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    // Try to install hello again
+    let output = env.cmd().args(["install", "hello"]).output().unwrap();
+
+    // Should succeed (not an error)
+    assert!(
+        output.status.success(),
+        "Installing already-installed package should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should show message about already installed
+    assert!(
+        stdout.contains("already installed"),
+        "Should indicate package is already installed: {}",
+        stdout
+    );
+}
+
 // =============================================================================
 // Upgrade command tests
 // =============================================================================
@@ -1037,6 +1104,93 @@ fn test_list_shows_none_for_empty_flake() {
             || stdout_lower.contains("empty")
             || stdout.contains("Packages in"),
         "Should indicate empty package list: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_shows_installed_packages() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a flake.nix containing packages
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Write a flake.nix with packages (no flake.lock needed)
+    let flake_content = r#"{
+  description = "nixy managed packages";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # [nixy:local-inputs]
+    # [/nixy:local-inputs]
+    # [nixy:custom-inputs]
+    # [/nixy:custom-inputs]
+  };
+
+  outputs = { self, nixpkgs }@inputs:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+    in {
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in rec {
+          # [nixy:packages]
+          ripgrep = pkgs.ripgrep;
+          fzf = pkgs.fzf;
+          bat = pkgs.bat;
+          # [/nixy:packages]
+          # [nixy:local-packages]
+          # [/nixy:local-packages]
+          # [nixy:custom-packages]
+          # [/nixy:custom-packages]
+
+          default = pkgs.buildEnv {
+            name = "nixy-env";
+            paths = [
+              # [nixy:env-paths]
+              ripgrep
+              fzf
+              bat
+              # [/nixy:env-paths]
+              # [nixy:custom-paths]
+              # [/nixy:custom-paths]
+            ];
+            extraOutputsToInstall = [ "man" "doc" "info" ];
+          };
+        });
+    };
+}
+"#;
+    std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().arg("list").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Command should succeed
+    assert!(
+        output.status.success(),
+        "List should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Should show the installed packages
+    assert!(
+        stdout.contains("ripgrep"),
+        "Should show ripgrep: {}",
+        stdout
+    );
+    assert!(stdout.contains("fzf"), "Should show fzf: {}", stdout);
+    assert!(stdout.contains("bat"), "Should show bat: {}", stdout);
+
+    // Should NOT show "(none)"
+    assert!(
+        !stdout.contains("(none)"),
+        "Should not show (none) when packages exist: {}",
         stdout
     );
 }
