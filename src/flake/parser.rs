@@ -6,12 +6,28 @@ use rowan::ast::AstNode;
 use super::{LocalFlake, LocalPackage};
 
 /// Parse an attribute value from a nix file using rnix AST parsing.
+///
+/// Searches recursively through nested attribute sets to find the first
+/// attribute matching the given name (simple name, not full path).
+/// For example, searching for "pname" will match both top-level `pname`
+/// and nested `outer.inner.pname`.
+///
 /// Supports both quoted (name = "value";) and unquoted (name = value;) formats.
 /// Handles multi-line values and complex Nix expressions.
+///
+/// Returns None if:
+/// - The attribute is not found
+/// - The value contains string interpolation (cannot be evaluated statically)
+/// - The Nix content contains syntax errors
 pub fn parse_local_package_attr(content: &str, attr: &str) -> Option<String> {
     let parse = rnix::Root::parse(content);
-    let root = parse.tree();
 
+    // Return early if there are parse errors to avoid using a partial tree
+    if !parse.errors().is_empty() {
+        return None;
+    }
+
+    let root = parse.tree();
     find_attr_value(root.syntax(), attr)
 }
 
@@ -23,22 +39,27 @@ fn find_attr_value(node: &rnix::SyntaxNode, attr: &str) -> Option<String> {
             if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
                 // Check if this is the attribute we're looking for
                 if let Some(attrpath) = attrpath_value.attrpath() {
-                    let path_str: String = attrpath
+                    // Collect all path components, returning None if any component
+                    // cannot be extracted (e.g., dynamic attributes with interpolation)
+                    let path_components: Option<Vec<String>> = attrpath
                         .attrs()
-                        .filter_map(|a| match a {
+                        .map(|a| match a {
                             rnix::ast::Attr::Ident(ident) => {
                                 ident.ident_token().map(|t| t.text().to_string())
                             }
                             rnix::ast::Attr::Str(s) => extract_string_value(&s),
                             _ => None,
                         })
-                        .collect::<Vec<_>>()
-                        .join(".");
+                        .collect();
 
-                    if path_str == attr {
-                        // Extract the value
-                        if let Some(value) = attrpath_value.value() {
-                            return extract_expr_value(&value);
+                    if let Some(components) = path_components {
+                        let path_str = components.join(".");
+
+                        if path_str == attr {
+                            // Extract the value
+                            if let Some(value) = attrpath_value.value() {
+                                return extract_expr_value(&value);
+                            }
                         }
                     }
                 }
@@ -144,19 +165,25 @@ fn parse_local_package_file(path: &Path) -> Option<LocalPackage> {
 /// Extract input name from content (looks for `name.url = "..."` pattern)
 fn extract_input_name(content: &str) -> Option<String> {
     let parse = rnix::Root::parse(content);
-    let root = parse.tree();
 
+    // Return early if there are parse errors to avoid using a partial tree
+    if !parse.errors().is_empty() {
+        return None;
+    }
+
+    let root = parse.tree();
     find_url_attr_parent(root.syntax())
 }
 
-/// Find the parent attr name of a `.url` attribute
+/// Find the parent attr name of a `.url` attribute.
+/// Only matches patterns with exactly 2 parts like `name.url = "..."`.
 fn find_url_attr_parent(node: &rnix::SyntaxNode) -> Option<String> {
     for child in node.children() {
         if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
             if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
                 if let Some(attrpath) = attrpath_value.attrpath() {
                     let attrs: Vec<_> = attrpath.attrs().collect();
-                    // Check if this is a `name.url = "..."` pattern (2 parts, last is "url")
+                    // Check if this is a `name.url = "..."` pattern (exactly 2 parts, last is "url")
                     if attrs.len() == 2 {
                         if let Some(rnix::ast::Attr::Ident(last_ident)) = attrs.last() {
                             if let Some(token) = last_ident.ident_token() {
@@ -186,25 +213,34 @@ fn find_url_attr_parent(node: &rnix::SyntaxNode) -> Option<String> {
 /// Extract input URL from content
 fn extract_input_url(content: &str) -> Option<String> {
     let parse = rnix::Root::parse(content);
-    let root = parse.tree();
 
+    // Return early if there are parse errors to avoid using a partial tree
+    if !parse.errors().is_empty() {
+        return None;
+    }
+
+    let root = parse.tree();
     find_url_value(root.syntax())
 }
 
-/// Find the value of a `.url` attribute
+/// Find the value of a `.url` attribute.
+/// Only matches patterns with exactly 2 parts like `name.url = "..."` to stay
+/// consistent with find_url_attr_parent.
 fn find_url_value(node: &rnix::SyntaxNode) -> Option<String> {
     for child in node.children() {
         if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
             if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
                 if let Some(attrpath) = attrpath_value.attrpath() {
                     let attrs: Vec<_> = attrpath.attrs().collect();
-                    // Check if this is a `*.url = "..."` pattern
-                    if let Some(rnix::ast::Attr::Ident(last_ident)) = attrs.last() {
-                        if let Some(token) = last_ident.ident_token() {
-                            if token.text() == "url" {
-                                // Extract the URL value
-                                if let Some(value) = attrpath_value.value() {
-                                    return extract_expr_value(&value);
+                    // Check if this is a `name.url = "..."` pattern (exactly 2 parts, last is "url")
+                    if attrs.len() == 2 {
+                        if let Some(rnix::ast::Attr::Ident(last_ident)) = attrs.last() {
+                            if let Some(token) = last_ident.ident_token() {
+                                if token.text() == "url" {
+                                    // Extract the URL value
+                                    if let Some(value) = attrpath_value.value() {
+                                        return extract_expr_value(&value);
+                                    }
                                 }
                             }
                         }
