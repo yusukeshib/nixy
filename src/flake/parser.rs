@@ -514,10 +514,7 @@ pkgs.stdenv.mkDerivation {
   };
 }
 "#;
-        assert_eq!(
-            extract_input_name(content),
-            Some("my-overlay".to_string())
-        );
+        assert_eq!(extract_input_name(content), Some("my-overlay".to_string()));
         assert_eq!(
             extract_input_url(content),
             Some("github:user/repo".to_string())
@@ -566,10 +563,7 @@ pkgs.stdenv.mkDerivation {
   };
 }
 "#;
-        assert_eq!(
-            extract_input_name(content),
-            Some("first-input".to_string())
-        );
+        assert_eq!(extract_input_name(content), Some("first-input".to_string()));
         assert_eq!(
             extract_input_url(content),
             Some("github:user/first".to_string())
