@@ -29,7 +29,7 @@ fn main() {
         Commands::List => commands::list::run(&config),
         Commands::Search { query } => commands::search::run(&query),
         Commands::Upgrade(args) => commands::upgrade::run(&config, args),
-        Commands::Sync(args) => commands::sync::run(&config, args.allow_unfree),
+        Commands::Sync(_) => commands::sync::run(&config),
         Commands::Gc => commands::gc::run(),
         Commands::Config { shell } => commands::config::run(&shell),
         Commands::Profile(args) => commands::profile::run(&config, args),

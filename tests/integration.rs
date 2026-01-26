@@ -461,38 +461,6 @@ fn test_install_help_shows_force_option() {
     assert!(stdout.contains("--force") || stdout.contains("force"));
 }
 
-#[test]
-fn test_install_help_shows_allow_unfree_option() {
-    let output = nixy_cmd().args(["install", "--help"]).output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--allow-unfree"));
-}
-
-#[test]
-fn test_sync_help_shows_allow_unfree_option() {
-    let output = nixy_cmd().args(["sync", "--help"]).output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--allow-unfree"));
-}
-
-#[test]
-fn test_upgrade_help_shows_allow_unfree_option() {
-    let output = nixy_cmd().args(["upgrade", "--help"]).output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--allow-unfree"));
-}
-
-#[test]
-fn test_uninstall_help_shows_allow_unfree_option() {
-    let output = nixy_cmd().args(["uninstall", "--help"]).output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--allow-unfree"));
-}
-
 // =============================================================================
 // Profile subcommand tests
 // =============================================================================
