@@ -183,33 +183,31 @@ fn ensure_custom_markers(content: &str) -> String {
     let mut result = content.to_string();
 
     // Add custom-inputs marker after local-inputs if missing
-    if !has_marker(&result, "nixy:custom-inputs") {
-        if result.contains("# [/nixy:local-inputs]") {
-            result = result.replace(
-                "# [/nixy:local-inputs]",
-                "# [/nixy:local-inputs]\n    # [nixy:custom-inputs]\n    # [/nixy:custom-inputs]",
-            );
-        }
+    if !has_marker(&result, "nixy:custom-inputs")
+        && result.contains("# [/nixy:local-inputs]")
+    {
+        result = result.replace(
+            "# [/nixy:local-inputs]",
+            "# [/nixy:local-inputs]\n    # [nixy:custom-inputs]\n    # [/nixy:custom-inputs]",
+        );
     }
 
     // Add custom-packages marker after local-packages if missing
-    if !has_marker(&result, "nixy:custom-packages") {
-        if result.contains("# [/nixy:local-packages]") {
-            result = result.replace(
-                "# [/nixy:local-packages]",
-                "# [/nixy:local-packages]\n          # [nixy:custom-packages]\n          # [/nixy:custom-packages]",
-            );
-        }
+    if !has_marker(&result, "nixy:custom-packages")
+        && result.contains("# [/nixy:local-packages]")
+    {
+        result = result.replace(
+            "# [/nixy:local-packages]",
+            "# [/nixy:local-packages]\n          # [nixy:custom-packages]\n          # [/nixy:custom-packages]",
+        );
     }
 
     // Add custom-paths marker after env-paths if missing
-    if !has_marker(&result, "nixy:custom-paths") {
-        if result.contains("# [/nixy:env-paths]") {
-            result = result.replace(
-                "# [/nixy:env-paths]",
-                "# [/nixy:env-paths]\n              # [nixy:custom-paths]\n              # [/nixy:custom-paths]",
-            );
-        }
+    if !has_marker(&result, "nixy:custom-paths") && result.contains("# [/nixy:env-paths]") {
+        result = result.replace(
+            "# [/nixy:env-paths]",
+            "# [/nixy:env-paths]\n              # [nixy:custom-paths]\n              # [/nixy:custom-paths]",
+        );
     }
 
     // Ensure outputs signature accepts additional inputs via `...`

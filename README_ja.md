@@ -241,6 +241,16 @@ my-overlay.url = "github:user/my-overlay";
 **なぜ `nix profile` を直接使わないの？**
 `nix profile` には再現性の仕組みがありません - パッケージをエクスポートして別のマシンで同じ環境を再現する公式の方法がないのです。nixy は `flake.nix` を真実の源として使うため、コピー、バージョン管理、共有が可能です。
 
+**以前の状態にロールバックするには？**
+nixy は宣言的なので、`flake.nix` と `flake.lock` が状態そのものです。git で管理していれば（推奨）、ロールバックは簡単：
+
+```bash
+git checkout HEAD~1 -- flake.nix flake.lock  # 前のコミットに戻す
+nixy sync                                     # 古い状態を適用
+```
+
+これは `nix profile rollback` より強力です - 履歴の任意の時点に戻れる、コミットメッセージで変更理由がわかる、ブランチで実験できる、といった利点があります。
+
 ---
 
 ## 付録

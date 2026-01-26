@@ -257,6 +257,16 @@ Delete the `nixy` binary (typically `~/.local/bin/nixy` or `~/.cargo/bin/nixy`).
 **Why not use `nix profile` directly?**
 `nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `flake.nix` as the source of truth, which can be copied, version-controlled, and shared.
 
+**How do I rollback to a previous state?**
+Since nixy is declarative, your `flake.nix` and `flake.lock` files *are* the state. If you version control them with git (recommended), rollback is simple:
+
+```bash
+git checkout HEAD~1 -- flake.nix flake.lock  # Revert to previous commit
+nixy sync                                     # Apply the old state
+```
+
+This is more powerful than `nix profile rollback` - you can go back to any point in history, see why changes were made via commit messages, and experiment with branches.
+
 ---
 
 ## Appendix
