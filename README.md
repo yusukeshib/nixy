@@ -143,7 +143,6 @@ Packages are installed globally and available in all terminal sessions.
 | `nixy search <query>` | | Search for packages |
 | `nixy upgrade [input...]` | | Upgrade all inputs or specific ones |
 | `nixy sync` | | Build environment from flake.nix (for new machines) |
-| `nixy gc` | | Clean up old package versions |
 
 ### Profile Management
 
@@ -273,6 +272,15 @@ Packages with non-free licenses (e.g., `graphite-cli`, `slack`) are allowed by d
 ```bash
 nixy install slack
 ```
+
+**How do I clean up old Nix store paths?**
+nixy doesn't provide a garbage collection command because it uses `nix build --out-link` instead of `nix profile`. To clean up unused Nix store paths, use the standard Nix command directly:
+
+```bash
+nix-collect-garbage -d
+```
+
+Note: This will clean up ALL unused Nix profiles and store paths on your system, not just nixy-related ones.
 
 ---
 
