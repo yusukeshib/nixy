@@ -95,6 +95,8 @@ pub fn extract_marker_content(content: &str, marker: &str) -> String {
 /// Extract package names from a flake.nix file by parsing marker sections
 /// Looks for patterns like "pkgname = pkgs.pkgname;" or "pkgname = ..." in marked sections
 pub fn extract_packages_from_flake(content: &str) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
     let mut packages = Vec::new();
 
     // Extract from nixy:packages, nixy:local-packages, and nixy:custom-packages sections
@@ -108,12 +110,19 @@ pub fn extract_packages_from_flake(content: &str) -> Vec<String> {
         let section = extract_marker_content(content, marker);
         for line in section.lines() {
             let trimmed = line.trim();
+            // Skip commented lines
+            if trimmed.starts_with('#') || trimmed.starts_with("//") {
+                continue;
+            }
             // Match patterns like "pkgname = ..." (package assignment)
             if let Some(eq_pos) = trimmed.find('=') {
                 let name = trimmed[..eq_pos].trim();
                 // Skip if empty or if it looks like an attribute access (contains '.')
                 if !name.is_empty() && !name.contains('.') && is_valid_nix_identifier(name) {
-                    packages.push(name.to_string());
+                    // Deduplicate: only add if not already seen
+                    if seen.insert(name.to_string()) {
+                        packages.push(name.to_string());
+                    }
                 }
             }
         }
@@ -309,5 +318,55 @@ mod tests {
         assert!(!is_valid_nix_identifier("123pkg"));
         assert!(!is_valid_nix_identifier(""));
         assert!(!is_valid_nix_identifier("pkg.attr"));
+    }
+
+    #[test]
+    fn test_extract_packages_from_flake_ignores_comments() {
+        let content = r#"
+          # [nixy:packages]
+          ripgrep = pkgs.ripgrep;
+          # fzf = pkgs.fzf;
+          // bat = pkgs.bat;
+          fd = pkgs.fd;
+          # [/nixy:packages]
+        "#;
+        let packages = extract_packages_from_flake(content);
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(&"ripgrep".to_string()));
+        assert!(packages.contains(&"fd".to_string()));
+        assert!(!packages.contains(&"fzf".to_string()));
+        assert!(!packages.contains(&"bat".to_string()));
+    }
+
+    #[test]
+    fn test_extract_packages_from_flake_complex_rhs() {
+        let content = r#"
+          # [nixy:packages]
+          my-pkg = pkgs.callPackage ./pkg.nix { foo = "bar"; baz = 42; };
+          other-pkg = inputs.some-flake.packages.${system}.other-pkg;
+          # [/nixy:packages]
+        "#;
+        let packages = extract_packages_from_flake(content);
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(&"my-pkg".to_string()));
+        assert!(packages.contains(&"other-pkg".to_string()));
+    }
+
+    #[test]
+    fn test_extract_packages_from_flake_deduplicates() {
+        let content = r#"
+          # [nixy:packages]
+          ripgrep = pkgs.ripgrep;
+          # [/nixy:packages]
+          # [nixy:custom-packages]
+          ripgrep = pkgs.hello;
+          fzf = pkgs.fzf;
+          # [/nixy:custom-packages]
+        "#;
+        let packages = extract_packages_from_flake(content);
+        // ripgrep should only appear once despite being in two sections
+        assert_eq!(packages.len(), 2);
+        assert_eq!(packages.iter().filter(|&p| p == "ripgrep").count(), 1);
+        assert!(packages.contains(&"fzf".to_string()));
     }
 }
