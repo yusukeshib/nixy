@@ -9,6 +9,7 @@ use crate::profile::{
     get_active_profile, has_legacy_flake, list_profiles, migrate_legacy_flake, set_active_profile,
     validate_profile_name, Profile,
 };
+use crate::state::PackageState;
 
 use super::{info, success, warn};
 
@@ -42,7 +43,7 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
         if create {
             info(&format!("Creating profile '{}'...", name));
             profile.create()?;
-            let content = generate_flake(&[], Some(&profile.dir), None);
+            let content = generate_flake(&PackageState::default(), Some(&profile.dir));
             fs::write(&profile.flake_path, content)?;
         } else {
             return Err(Error::Usage(format!(

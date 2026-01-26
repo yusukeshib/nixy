@@ -291,38 +291,40 @@ fn test_install_already_installed() {
     let profile_dir = env.config_dir.join("profiles/default");
     std::fs::create_dir_all(&profile_dir).unwrap();
 
-    // Create a nixy-managed flake.nix with hello already installed
+    // Create packages.json with hello already installed (new state-based format)
+    let state_content = r#"{
+  "version": 1,
+  "packages": ["hello"],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+
+    // Create a nixy-managed flake.nix (without markers - new format)
     let flake_content = r#"{
-  # This flake is managed by nixy. Do not edit manually.
+  description = "nixy managed packages";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # [nixy:local-inputs]
-    # [/nixy:local-inputs]
   };
 
-  outputs = { self, nixpkgs, ... }@inputs:
+  outputs = { self, nixpkgs }@inputs:
     let
-      system = builtins.currentSystem;
-      pkgs = import nixpkgs {
-        inherit system;
-        config.allowUnfree = true;
-      };
-      packages = {
-          # [nixy:packages]
-          hello = pkgs.hello;
-          # [/nixy:packages]
-          # [nixy:local-packages]
-          # [/nixy:local-packages]
-      };
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
     in {
-      packages.${system}.default = pkgs.buildEnv {
-        name = "nixy-env";
-        paths = with packages; [
-              # [nixy:env-paths]
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in rec {
+          hello = pkgs.hello;
+
+          default = pkgs.buildEnv {
+            name = "nixy-env";
+            paths = [
               hello
-              # [/nixy:env-paths]
-        ];
-      };
+            ];
+            extraOutputsToInstall = [ "man" "doc" "info" ];
+          };
+        });
     };
 }
 "#;
@@ -520,13 +522,9 @@ fn test_install_help_shows_file_option() {
     assert!(stdout.contains("--file") || stdout.contains("file"));
 }
 
-#[test]
-fn test_install_help_shows_force_option() {
-    let output = nixy_cmd().args(["install", "--help"]).output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--force") || stdout.contains("force"));
-}
+// Removed: --force flag is no longer used since marker-based editing was removed
+// The test_install_help_shows_force_option test has been removed as the --force
+// flag was only needed for overriding custom modifications in the marker-based system
 
 // =============================================================================
 // Profile subcommand tests
@@ -1112,20 +1110,24 @@ fn test_list_shows_none_for_empty_flake() {
 fn test_list_shows_installed_packages() {
     let env = TestEnv::new();
 
-    // Create a profile directory with a flake.nix containing packages
+    // Create a profile directory with packages.json and flake.nix
     let profile_dir = env.config_dir.join("profiles/default");
     std::fs::create_dir_all(&profile_dir).unwrap();
 
-    // Write a flake.nix with packages (no flake.lock needed)
+    // Create packages.json with installed packages (new state-based format)
+    let state_content = r#"{
+  "version": 1,
+  "packages": ["bat", "fzf", "ripgrep"],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+
+    // Write a flake.nix with packages (no markers - new format)
     let flake_content = r#"{
   description = "nixy managed packages";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # [nixy:local-inputs]
-    # [/nixy:local-inputs]
-    # [nixy:custom-inputs]
-    # [/nixy:custom-inputs]
   };
 
   outputs = { self, nixpkgs }@inputs:
@@ -1136,26 +1138,16 @@ fn test_list_shows_installed_packages() {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in rec {
-          # [nixy:packages]
-          ripgrep = pkgs.ripgrep;
-          fzf = pkgs.fzf;
           bat = pkgs.bat;
-          # [/nixy:packages]
-          # [nixy:local-packages]
-          # [/nixy:local-packages]
-          # [nixy:custom-packages]
-          # [/nixy:custom-packages]
+          fzf = pkgs.fzf;
+          ripgrep = pkgs.ripgrep;
 
           default = pkgs.buildEnv {
             name = "nixy-env";
             paths = [
-              # [nixy:env-paths]
-              ripgrep
-              fzf
               bat
-              # [/nixy:env-paths]
-              # [nixy:custom-paths]
-              # [/nixy:custom-paths]
+              fzf
+              ripgrep
             ];
             extraOutputsToInstall = [ "man" "doc" "info" ];
           };
@@ -1351,20 +1343,24 @@ fn test_install_from_detects_direct_url() {
 fn test_install_reverts_flake_on_sync_failure() {
     let env = TestEnv::new();
 
-    // Create a profile with a proper nixy-managed flake.nix (with markers)
+    // Create a profile with an empty packages.json and flake.nix (new format)
     let profile_dir = env.config_dir.join("profiles/default");
     std::fs::create_dir_all(&profile_dir).unwrap();
 
-    // Create a proper nixy-managed flake.nix with required markers
+    // Create empty packages.json (new state-based format)
+    let state_content = r#"{
+  "version": 1,
+  "packages": [],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+
+    // Create a flake.nix (no markers - new format)
     let flake_content = r#"{
   description = "nixy managed packages";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # [nixy:local-inputs]
-    # [/nixy:local-inputs]
-    # [nixy:custom-inputs]
-    # [/nixy:custom-inputs]
   };
 
   outputs = { self, nixpkgs }@inputs:
@@ -1375,20 +1371,10 @@ fn test_install_reverts_flake_on_sync_failure() {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in rec {
-          # [nixy:packages]
-          # [/nixy:packages]
-          # [nixy:local-packages]
-          # [/nixy:local-packages]
-          # [nixy:custom-packages]
-          # [/nixy:custom-packages]
 
           default = pkgs.buildEnv {
             name = "nixy-env";
             paths = [
-              # [nixy:env-paths]
-              # [/nixy:env-paths]
-              # [nixy:custom-paths]
-              # [/nixy:custom-paths]
             ];
             extraOutputsToInstall = [ "man" "doc" "info" ];
           };
@@ -1399,33 +1385,38 @@ fn test_install_reverts_flake_on_sync_failure() {
     std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
     std::fs::write(env.config_dir.join("active"), "default").unwrap();
 
-    // Save original content for comparison
-    let original = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+    // Save original state for comparison
+    let original_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
 
-    // Try to install a package - this will modify flake.nix and then run sync
+    // Try to install a package - this will modify state and flake.nix, then run sync
     // Sync may fail in test environment (no nix, missing lock, etc.)
     let output = env.cmd().args(["install", "hello"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // If sync failed and revert happened, verify the flake was restored
+    // If sync failed and revert happened, verify the state was restored
     if !output.status.success() && stderr.to_lowercase().contains("reverted") {
-        let current = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
-        assert_eq!(
-            current.trim(),
-            original.trim(),
-            "Flake should be reverted to original content on sync failure"
+        let current_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
+        // The state should be empty (reverted) - no packages
+        assert!(
+            !current_state.contains("hello"),
+            "State should be reverted on sync failure"
         );
     }
 
     // Also verify the command behavior is consistent:
-    // - If it succeeded, hello should be in the flake
-    // - If it failed with revert, the flake should be unchanged
+    // - If it succeeded, hello should be in the state
+    // - If it failed with revert, the state should be unchanged
     // - If it failed without revert message, something else went wrong (acceptable in test)
     if output.status.success() {
-        let current = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+        let current_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
         assert!(
-            current.contains("hello = pkgs.hello"),
+            current_state.contains("hello"),
+            "On success, state should contain the installed package"
+        );
+        let current_flake = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+        assert!(
+            current_flake.contains("hello = pkgs.hello"),
             "On success, flake should contain the installed package"
         );
     }

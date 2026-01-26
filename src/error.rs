@@ -14,9 +14,6 @@ pub enum Error {
     #[error("Invalid profile name '{0}'. Use only letters, numbers, dashes, and underscores.")]
     InvalidProfileName(String),
 
-    #[error("Existing flake.nix is not managed by nixy")]
-    NotNixyManaged,
-
     #[error("No flake.nix found at {0}. Run 'nixy install <package>' to create one.")]
     NoFlakeFound(String),
 
@@ -50,9 +47,6 @@ pub enum Error {
     #[error("Failed to parse flake.lock. The file may be corrupted.")]
     InvalidFlakeLock,
 
-    #[error("flake.nix has modifications outside nixy markers. Use --force to proceed.")]
-    CustomModifications,
-
     #[error("Unknown shell: {0}. Supported: bash, zsh, fish")]
     UnknownShell(String),
 
@@ -61,6 +55,9 @@ pub enum Error {
 
     #[error("Self-update error: {0}")]
     SelfUpdate(String),
+
+    #[error("State file error: {0}")]
+    StateFile(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
