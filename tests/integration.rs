@@ -1355,7 +1355,7 @@ fn test_install_reverts_flake_on_sync_failure() {
     std::fs::write(env.config_dir.join("active"), "default").unwrap();
 
     // Save original state for comparison
-    let original_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
+    let _original_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
 
     // Try to install a package - this will modify state and flake.nix, then run sync
     // Sync may fail in test environment (no nix, missing lock, etc.)

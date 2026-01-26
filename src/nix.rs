@@ -73,37 +73,6 @@ impl Nix {
         Ok(())
     }
 
-    /// Evaluate packages from a flake using nix eval
-    pub fn eval_packages(flake_dir: &Path) -> Result<Vec<String>> {
-        let system = Self::current_system()?;
-        let ref_str = flake_ref(flake_dir, Some(&format!("packages.{}", system)));
-
-        let output = Command::new("nix")
-            .args(NIX_FLAGS)
-            .args([
-                "eval",
-                &ref_str,
-                "--apply",
-                r#"pkgs: builtins.concatStringsSep "\n" (builtins.filter (n: n != "default") (builtins.attrNames pkgs))"#,
-                "--raw",
-            ])
-            .output()
-            .map_err(|e| Error::NixCommand(e.to_string()))?;
-
-        if !output.status.success() {
-            // flake.lock might not exist yet
-            return Ok(Vec::new());
-        }
-
-        let packages: Vec<String> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
-
-        Ok(packages)
-    }
-
     /// Search for packages in nixpkgs (passes through to stdout)
     pub fn search(query: &str) -> Result<()> {
         let status = Command::new("nix")

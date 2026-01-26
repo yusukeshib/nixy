@@ -111,10 +111,7 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
 
     // Build overlays section
     let overlays_content = if !local_overlays.is_empty() {
-        format!(
-            "overlays = [\n{}        ];",
-            local_overlays
-        )
+        format!("overlays = [\n{}        ];", local_overlays)
     } else {
         String::new()
     };
@@ -258,7 +255,9 @@ mod tests {
         let flake = generate_flake(&state, None);
 
         // Should have custom input
-        assert!(flake.contains("neovim-nightly.url = \"github:nix-community/neovim-nightly-overlay\""));
+        assert!(
+            flake.contains("neovim-nightly.url = \"github:nix-community/neovim-nightly-overlay\"")
+        );
 
         // Should have custom package entry
         assert!(flake.contains("neovim = inputs.neovim-nightly.packages.${system}.neovim;"));

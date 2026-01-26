@@ -51,8 +51,8 @@ impl PackageState {
             fs::create_dir_all(parent)?;
         }
 
-        let content = serde_json::to_string_pretty(self)
-            .map_err(|e| Error::StateFile(e.to_string()))?;
+        let content =
+            serde_json::to_string_pretty(self).map_err(|e| Error::StateFile(e.to_string()))?;
         fs::write(path, content)?;
         Ok(())
     }
@@ -104,23 +104,6 @@ impl PackageState {
         names.extend(self.custom_packages.iter().map(|p| p.name.clone()));
         names.sort();
         names
-    }
-
-    /// Check if state is empty (no packages installed)
-    pub fn is_empty(&self) -> bool {
-        self.packages.is_empty() && self.custom_packages.is_empty()
-    }
-
-    /// Get the input name for a custom package (for cleanup during uninstall)
-    pub fn get_custom_package_input(&self, name: &str) -> Option<&CustomPackage> {
-        self.custom_packages.iter().find(|p| p.name == name)
-    }
-
-    /// Check if any package uses a given input
-    pub fn any_package_uses_input(&self, input_name: &str) -> bool {
-        self.custom_packages
-            .iter()
-            .any(|p| p.input_name == input_name)
     }
 }
 
@@ -290,28 +273,5 @@ mod tests {
         let state = PackageState::load(&path).unwrap();
         assert!(state.packages.is_empty());
         assert!(state.custom_packages.is_empty());
-    }
-
-    #[test]
-    fn test_is_empty() {
-        let mut state = PackageState::default();
-        assert!(state.is_empty());
-
-        state.add_package("hello");
-        assert!(!state.is_empty());
-    }
-
-    #[test]
-    fn test_any_package_uses_input() {
-        let mut state = PackageState::default();
-        state.add_custom_package(CustomPackage {
-            name: "neovim".to_string(),
-            input_name: "neovim-nightly".to_string(),
-            input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
-            package_output: "packages".to_string(),
-        });
-
-        assert!(state.any_package_uses_input("neovim-nightly"));
-        assert!(!state.any_package_uses_input("other-input"));
     }
 }

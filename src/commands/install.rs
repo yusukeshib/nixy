@@ -141,7 +141,10 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     let (final_input_name, final_url) = if flake_url.contains("NixOS/nixpkgs") {
         // Use existing nixpkgs input - but we need to add as custom for tracking
         info("Using existing nixpkgs input");
-        ("nixpkgs".to_string(), "github:NixOS/nixpkgs/nixos-unstable".to_string())
+        (
+            "nixpkgs".to_string(),
+            "github:NixOS/nixpkgs/nixos-unstable".to_string(),
+        )
     } else {
         (input_name.clone(), flake_url.clone())
     };
