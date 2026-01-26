@@ -1,5 +1,11 @@
 use regex::Regex;
 
+/// Check if a marker exists in the content
+pub fn has_marker(content: &str, marker: &str) -> bool {
+    let marker_pattern = format!("# [{}]", marker);
+    content.contains(&marker_pattern)
+}
+
 /// Insert a line after a marker in content
 pub fn insert_after_marker(content: &str, marker: &str, line: &str) -> String {
     let mut result = String::new();

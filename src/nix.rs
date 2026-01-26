@@ -103,20 +103,6 @@ impl Nix {
         Ok(packages)
     }
 
-    /// Check if a flake has a default output
-    pub fn has_default_output(flake_dir: &Path) -> bool {
-        let ref_str = flake_ref(flake_dir, Some("default"));
-
-        Command::new("nix")
-            .args(NIX_FLAGS)
-            .args(["eval", &ref_str])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    }
-
     /// Search for packages in nixpkgs (passes through to stdout)
     pub fn search(query: &str) -> Result<()> {
         let status = Command::new("nix")

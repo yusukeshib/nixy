@@ -70,7 +70,10 @@ fn remove_package_from_flake(config: &Config, pkg: &str) -> Result<()> {
 
     let content = fs::read_to_string(&flake_path)?;
 
-    // Remove from packages section
+    // Find which input the package uses (for custom packages)
+    let input_used = find_input_for_package(&content, pkg);
+
+    // Remove from packages section (standard nixpkgs packages)
     let pkg_pattern = Regex::new(&format!(
         r"^\s*{} = pkgs\.{};",
         regex::escape(pkg),
@@ -92,10 +95,160 @@ fn remove_package_from_flake(config: &Config, pkg: &str) -> Result<()> {
         &path_pattern,
     );
 
+    // Remove from custom-packages section (registry packages)
+    let custom_pkg_pattern = Regex::new(&format!(r"^\s*{} = inputs\.", regex::escape(pkg)))?;
+    let content = remove_from_section(
+        &content,
+        "# [nixy:custom-packages]",
+        "# [/nixy:custom-packages]",
+        &custom_pkg_pattern,
+    );
+
+    // Remove from custom-paths section
+    let content = remove_from_section(
+        &content,
+        "# [nixy:custom-paths]",
+        "# [/nixy:custom-paths]",
+        &path_pattern,
+    );
+
+    // Remove from local-packages section
+    let local_pkg_pattern = Regex::new(&format!(r"^\s*{} = ", regex::escape(pkg)))?;
+    let content = remove_from_section(
+        &content,
+        "# [nixy:local-packages]",
+        "# [/nixy:local-packages]",
+        &local_pkg_pattern,
+    );
+
+    // If we found an input that was used by this package, check if it's still needed
+    let content = if let Some(input_name) = input_used {
+        remove_unused_input(&content, &input_name)
+    } else {
+        content
+    };
+
+    // Check for overlay-based packages (naming convention: {pkg}-overlay)
+    let overlay_input_name = format!("{}-overlay", pkg);
+    let content = remove_unused_overlay(&content, &overlay_input_name);
+
     fs::write(&flake_path, content)?;
     super::success(&format!("Removed {} from flake.nix", pkg));
 
     Ok(())
+}
+
+/// Find which input a custom package uses
+fn find_input_for_package(content: &str, pkg: &str) -> Option<String> {
+    // Pattern: pkg = inputs.INPUT_NAME.packages...
+    let pattern = Regex::new(&format!(
+        r"^\s*{} = inputs\.([a-zA-Z0-9_-]+)\.",
+        regex::escape(pkg)
+    ))
+    .ok()?;
+
+    for line in content.lines() {
+        if let Some(caps) = pattern.captures(line) {
+            return Some(caps[1].to_string());
+        }
+    }
+    None
+}
+
+/// Remove an input from custom-inputs if no packages use it anymore
+fn remove_unused_input(content: &str, input_name: &str) -> String {
+    // Check if any package still references this input
+    let usage_pattern = format!(r"inputs\.{}\.", regex::escape(input_name));
+    if Regex::new(&usage_pattern)
+        .map(|r| r.is_match(content))
+        .unwrap_or(false)
+    {
+        // Input is still used
+        return content.to_string();
+    }
+
+    // Remove the input from custom-inputs section
+    let input_pattern = Regex::new(&format!(r"^\s*{}\.url = ", regex::escape(input_name))).unwrap();
+    remove_from_section(
+        content,
+        "# [nixy:custom-inputs]",
+        "# [/nixy:custom-inputs]",
+        &input_pattern,
+    )
+}
+
+/// Remove an overlay-based input if it's no longer used
+/// This handles packages installed via overlays (e.g., neovim-nightly-overlay)
+fn remove_unused_overlay(content: &str, overlay_name: &str) -> String {
+    // Check if the overlay input exists in local-inputs
+    let input_pattern = format!(r"{}\.url\s*=", regex::escape(overlay_name));
+    if !Regex::new(&input_pattern)
+        .map(|r| r.is_match(content))
+        .unwrap_or(false)
+    {
+        // Overlay input doesn't exist
+        return content.to_string();
+    }
+
+    // Check if any overlay reference still exists in local-overlays
+    let overlay_usage = format!(r"{}\.overlays", regex::escape(overlay_name));
+    if Regex::new(&overlay_usage)
+        .map(|r| r.is_match(content))
+        .unwrap_or(false)
+    {
+        // Remove the overlay from local-overlays section
+        let overlay_pattern = Regex::new(&format!(
+            r"^\s*{}\.overlays\.[a-zA-Z0-9_-]+",
+            regex::escape(overlay_name)
+        ))
+        .unwrap();
+        let content = remove_from_section(
+            content,
+            "# [nixy:local-overlays]",
+            "# [/nixy:local-overlays]",
+            &overlay_pattern,
+        );
+
+        // Remove the input from local-inputs section
+        let input_pattern =
+            Regex::new(&format!(r"^\s*{}\.url = ", regex::escape(overlay_name))).unwrap();
+        let content = remove_from_section(
+            &content,
+            "# [nixy:local-inputs]",
+            "# [/nixy:local-inputs]",
+            &input_pattern,
+        );
+
+        // Update the outputs function signature to remove the overlay input
+        let content = remove_from_outputs_signature(&content, overlay_name);
+
+        return content;
+    }
+
+    content.to_string()
+}
+
+/// Remove an input from the outputs function signature
+fn remove_from_outputs_signature(content: &str, input_name: &str) -> String {
+    // Pattern: outputs = { self, nixpkgs, ..., input_name, ... }@inputs:
+    // We need to remove ", input_name" or "input_name, " from the signature
+
+    // Try to match ", input_name" first (input is not first in list)
+    let pattern1 = format!(r",\s*{}", regex::escape(input_name));
+    if let Ok(re) = Regex::new(&pattern1) {
+        let result = re.replace(content, "").to_string();
+        if result != content {
+            return result;
+        }
+    }
+
+    // Try to match "input_name, " (input is first after a required input)
+    let pattern2 = format!(r"{}\s*,\s*", regex::escape(input_name));
+    if let Ok(re) = Regex::new(&pattern2) {
+        return re.replace(content, "").to_string();
+    }
+
+    content.to_string()
 }
 
 /// Remove a file from git index
@@ -127,5 +280,130 @@ fn git_rm_recursive(dir: &std::path::Path, path: &str) {
         let _ = Command::new("git")
             .args(["-C", &dir.to_string_lossy(), "rm", "-r", "--cached", path])
             .output();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_input_for_package() {
+        let content = r#"
+# [nixy:custom-packages]
+          neovim = inputs.github-nix-community-neovim-nightly-overlay.packages.${system}.neovim;
+# [/nixy:custom-packages]
+"#;
+        let result = find_input_for_package(content, "neovim");
+        assert_eq!(
+            result,
+            Some("github-nix-community-neovim-nightly-overlay".to_string())
+        );
+    }
+
+    #[test]
+    fn test_find_input_for_package_not_found() {
+        let content = r#"
+# [nixy:packages]
+          hello = pkgs.hello;
+# [/nixy:packages]
+"#;
+        let result = find_input_for_package(content, "hello");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_input_for_package_different_package() {
+        let content = r#"
+# [nixy:custom-packages]
+          neovim = inputs.neovim-overlay.packages.${system}.neovim;
+# [/nixy:custom-packages]
+"#;
+        let result = find_input_for_package(content, "vim");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_remove_unused_input_removes_when_not_used() {
+        let content = r#"# [nixy:custom-inputs]
+    neovim-overlay.url = "github:nix-community/neovim-nightly-overlay";
+# [/nixy:custom-inputs]
+# [nixy:custom-packages]
+# [/nixy:custom-packages]
+"#;
+        let result = remove_unused_input(content, "neovim-overlay");
+        assert!(!result.contains("neovim-overlay.url"));
+    }
+
+    #[test]
+    fn test_remove_unused_input_keeps_when_still_used() {
+        let content = r#"# [nixy:custom-inputs]
+    neovim-overlay.url = "github:nix-community/neovim-nightly-overlay";
+# [/nixy:custom-inputs]
+# [nixy:custom-packages]
+          neovim = inputs.neovim-overlay.packages.${system}.neovim;
+# [/nixy:custom-packages]
+"#;
+        let result = remove_unused_input(content, "neovim-overlay");
+        assert!(result.contains("neovim-overlay.url"));
+    }
+
+    #[test]
+    fn test_remove_unused_input_keeps_other_inputs() {
+        let content = r#"# [nixy:custom-inputs]
+    neovim-overlay.url = "github:nix-community/neovim-nightly-overlay";
+    other-input.url = "github:foo/bar";
+# [/nixy:custom-inputs]
+# [nixy:custom-packages]
+          foo = inputs.other-input.packages.${system}.foo;
+# [/nixy:custom-packages]
+"#;
+        let result = remove_unused_input(content, "neovim-overlay");
+        assert!(!result.contains("neovim-overlay.url"));
+        assert!(result.contains("other-input.url"));
+    }
+
+    #[test]
+    fn test_remove_unused_overlay() {
+        let content = r#"# [nixy:local-inputs]
+    neovim-nightly-overlay.url = "github:nix-community/neovim-nightly-overlay";
+# [/nixy:local-inputs]
+        overlays = [
+          # [nixy:local-overlays]
+          neovim-nightly-overlay.overlays.default
+          # [/nixy:local-overlays]
+        ];
+"#;
+        let result = remove_unused_overlay(content, "neovim-nightly-overlay");
+        assert!(!result.contains("neovim-nightly-overlay.url"));
+        assert!(!result.contains("neovim-nightly-overlay.overlays"));
+    }
+
+    #[test]
+    fn test_remove_unused_overlay_no_overlay() {
+        let content = r#"# [nixy:local-inputs]
+    gke-plugin.url = "path:./packages/gke";
+# [/nixy:local-inputs]
+"#;
+        let result = remove_unused_overlay(content, "neovim-nightly-overlay");
+        // Should return unchanged content
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn test_remove_from_outputs_signature() {
+        let content = r#"outputs = { self, nixpkgs, gke-plugin, neovim-nightly-overlay }@inputs:"#;
+        let result = remove_from_outputs_signature(content, "neovim-nightly-overlay");
+        assert!(!result.contains("neovim-nightly-overlay"));
+        assert!(result.contains("gke-plugin"));
+        assert!(result.contains("nixpkgs"));
+    }
+
+    #[test]
+    fn test_remove_from_outputs_signature_middle() {
+        let content = r#"outputs = { self, nixpkgs, neovim-nightly-overlay, gke-plugin }@inputs:"#;
+        let result = remove_from_outputs_signature(content, "neovim-nightly-overlay");
+        assert!(!result.contains("neovim-nightly-overlay"));
+        assert!(result.contains("gke-plugin"));
     }
 }

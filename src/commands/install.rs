@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::cli::InstallArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::editor::insert_after_marker;
+use crate::flake::editor::{has_marker, insert_after_marker};
 use crate::flake::parser::parse_local_package_attr;
 use crate::flake::template::{generate_flake, has_custom_modifications, PreservedContent};
 use crate::flake::{is_flake_file, is_nixy_managed};
@@ -177,6 +177,58 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
     Ok(())
 }
 
+/// Ensure custom markers exist in flake.nix, adding them if missing
+/// Also ensures outputs signature accepts additional inputs via `...`
+fn ensure_custom_markers(content: &str) -> String {
+    let mut result = content.to_string();
+
+    // Add custom-inputs marker after local-inputs if missing
+    if !has_marker(&result, "nixy:custom-inputs") {
+        if result.contains("# [/nixy:local-inputs]") {
+            result = result.replace(
+                "# [/nixy:local-inputs]",
+                "# [/nixy:local-inputs]\n    # [nixy:custom-inputs]\n    # [/nixy:custom-inputs]",
+            );
+        }
+    }
+
+    // Add custom-packages marker after local-packages if missing
+    if !has_marker(&result, "nixy:custom-packages") {
+        if result.contains("# [/nixy:local-packages]") {
+            result = result.replace(
+                "# [/nixy:local-packages]",
+                "# [/nixy:local-packages]\n          # [nixy:custom-packages]\n          # [/nixy:custom-packages]",
+            );
+        }
+    }
+
+    // Add custom-paths marker after env-paths if missing
+    if !has_marker(&result, "nixy:custom-paths") {
+        if result.contains("# [/nixy:env-paths]") {
+            result = result.replace(
+                "# [/nixy:env-paths]",
+                "# [/nixy:env-paths]\n              # [nixy:custom-paths]\n              # [/nixy:custom-paths]",
+            );
+        }
+    }
+
+    // Ensure outputs signature accepts additional inputs via `...`
+    // Pattern: outputs = { ... }@inputs: where there's no `...` before `}`
+    if let Ok(re) = Regex::new(r"outputs\s*=\s*\{([^}]+)\}@inputs:") {
+        if let Some(caps) = re.captures(&result) {
+            let sig_content = &caps[1];
+            // Check if `...` is not already present
+            if !sig_content.contains("...") {
+                let old_sig = caps[0].to_string();
+                let new_sig = old_sig.replace("}@inputs:", ", ... }@inputs:");
+                result = result.replace(&old_sig, &new_sig);
+            }
+        }
+    }
+
+    result
+}
+
 /// Add a package from a registry flake to flake.nix
 fn add_registry_package_to_flake(
     config: &Config,
@@ -188,6 +240,9 @@ fn add_registry_package_to_flake(
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
     let mut content = fs::read_to_string(&flake_path)?;
+
+    // Ensure custom markers exist
+    content = ensure_custom_markers(&content);
 
     // Check if we should reuse existing nixpkgs input
     let (final_input_name, use_existing_nixpkgs) =
