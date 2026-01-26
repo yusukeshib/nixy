@@ -113,13 +113,16 @@ fn extract_custom_packages(content: &str) -> Vec<CustomPackage> {
                 let package_output = caps[3].to_string();
                 let source_pkg_name = caps[4].to_string();
 
-                // Warn if package is an alias (name differs from source package name)
-                if name != source_pkg_name {
+                // Check if package is an alias (name differs from source package name)
+                let source_name = if name != source_pkg_name {
                     eprintln!(
                         "Warning: Migration: custom package '{}' is an alias for '{}'; preserving alias during migration.",
                         name, source_pkg_name
                     );
-                }
+                    Some(source_pkg_name)
+                } else {
+                    None
+                };
 
                 // Try to find the input URL from custom-inputs section
                 let input_url = match find_input_url(content, &input_name) {
@@ -138,6 +141,7 @@ fn extract_custom_packages(content: &str) -> Vec<CustomPackage> {
                     input_name,
                     input_url,
                     package_output,
+                    source_name,
                 });
             }
         }

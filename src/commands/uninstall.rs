@@ -8,7 +8,7 @@ use crate::flake::template::generate_flake;
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
-use super::info;
+use super::{info, warn};
 
 pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     let package = &args.package;
@@ -20,8 +20,10 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
         return Err(Error::NoFlakeFound(flake_path.display().to_string()));
     }
 
-    // Load state
+    // Load state and save original for rollback
     let mut state = PackageState::load(&state_path)?;
+    let original_state = state.clone();
+    let original_flake = fs::read_to_string(&flake_path)?;
 
     info(&format!("Uninstalling {}...", package));
 
@@ -62,7 +64,13 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     super::success(&format!("Removed {} from flake.nix", package));
 
     info("Rebuilding environment...");
-    super::sync::run(config)?;
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert state and flake (note: local file deletions cannot be undone)
+        original_state.save(&state_path)?;
+        fs::write(&flake_path, original_flake)?;
+        warn("Sync failed. Reverted state and flake.nix (local file deletions cannot be undone).");
+        return Err(e);
+    }
 
     Ok(())
 }

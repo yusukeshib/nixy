@@ -84,7 +84,10 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
 
         custom_packages_entries.push_str(&format!(
             "          {} = inputs.{}.{}.${{system}}.{};\n",
-            pkg.name, pkg.input_name, pkg.package_output, pkg.name
+            pkg.name,
+            pkg.input_name,
+            pkg.package_output,
+            pkg.source_package_name()
         ));
     }
 
@@ -250,6 +253,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -318,6 +322,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -335,12 +340,14 @@ mod tests {
             input_name: "nixpkgs-unstable".to_string(),
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
+            source_name: None,
         });
         state.add_custom_package(CustomPackage {
             name: "world".to_string(),
             input_name: "nixpkgs-unstable".to_string(),
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
+            source_name: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -360,6 +367,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         });
 
         let flake = generate_flake(&state, None);

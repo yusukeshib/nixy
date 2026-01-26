@@ -54,21 +54,25 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         return Err(Error::PackageNotFound(pkg));
     }
 
-    // Save original state for rollback if sync fails
+    // Save original state for rollback
     let original_state = state.clone();
 
     // Add package to state
     state.add_package(&pkg);
     state.save(&state_path)?;
 
-    // Regenerate flake.nix
-    regenerate_flake(&flake_dir, &state)?;
+    // Regenerate flake.nix (rollback state if this fails)
+    if let Err(e) = regenerate_flake(&flake_dir, &state) {
+        original_state.save(&state_path)?;
+        warn("Failed to regenerate flake.nix. Reverted changes.");
+        return Err(e);
+    }
 
     info(&format!("Installing {}...", pkg));
     if let Err(e) = super::sync::run(config) {
-        // Sync failed, revert state
+        // Sync failed, revert state and flake
         original_state.save(&state_path)?;
-        regenerate_flake(&flake_dir, &original_state)?;
+        let _ = regenerate_flake(&flake_dir, &original_state);
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
@@ -146,17 +150,22 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
         input_name: final_input_name.clone(),
         input_url: final_url,
         package_output: pkg_output,
+        source_name: None,
     });
     state.save(&state_path)?;
 
-    // Regenerate flake.nix
-    regenerate_flake(&flake_dir, &state)?;
+    // Regenerate flake.nix (rollback state if this fails)
+    if let Err(e) = regenerate_flake(&flake_dir, &state) {
+        original_state.save(&state_path)?;
+        warn("Failed to regenerate flake.nix. Reverted changes.");
+        return Err(e);
+    }
 
     info(&format!("Installing {} from {}...", pkg, final_input_name));
     if let Err(e) = super::sync::run(config) {
-        // Sync failed, revert state
+        // Sync failed, revert state and flake
         original_state.save(&state_path)?;
-        regenerate_flake(&flake_dir, &original_state)?;
+        let _ = regenerate_flake(&flake_dir, &original_state);
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }

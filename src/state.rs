@@ -12,6 +12,15 @@ pub struct CustomPackage {
     pub input_name: String,
     pub input_url: String,
     pub package_output: String, // e.g., "packages" or "legacyPackages"
+    #[serde(default)]
+    pub source_name: Option<String>, // The actual package name in the source flake (for aliases)
+}
+
+impl CustomPackage {
+    /// Get the source package name (falls back to name if not set)
+    pub fn source_package_name(&self) -> &str {
+        self.source_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// State file for tracking installed packages
@@ -44,7 +53,7 @@ impl PackageState {
         serde_json::from_str(&content).map_err(|e| Error::StateFile(e.to_string()))
     }
 
-    /// Save state to a file
+    /// Save state to a file atomically
     pub fn save(&self, path: &Path) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
@@ -53,7 +62,11 @@ impl PackageState {
 
         let content =
             serde_json::to_string_pretty(self).map_err(|e| Error::StateFile(e.to_string()))?;
-        fs::write(path, content)?;
+
+        // Write to a temporary file first, then atomically rename it into place
+        let tmp_path = path.with_extension("json.tmp");
+        fs::write(&tmp_path, &content)?;
+        fs::rename(&tmp_path, path)?;
         Ok(())
     }
 
@@ -163,6 +176,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         };
         state.add_custom_package(pkg.clone());
 
@@ -178,6 +192,7 @@ mod tests {
             input_name: "neovim-old".to_string(),
             input_url: "github:old/overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         };
         state.add_custom_package(pkg1);
 
@@ -186,6 +201,7 @@ mod tests {
             input_name: "neovim-new".to_string(),
             input_url: "github:new/overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         };
         state.add_custom_package(pkg2);
 
@@ -212,6 +228,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         };
         state.add_custom_package(pkg);
 
@@ -234,6 +251,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         });
 
         let names = state.all_package_names();
@@ -252,6 +270,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            source_name: None,
         });
 
         state.save(&path).unwrap();
