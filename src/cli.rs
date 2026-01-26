@@ -66,10 +66,6 @@ pub struct InstallArgs {
     /// Install from local nix file
     #[arg(long, short)]
     pub file: Option<PathBuf>,
-
-    /// Force regeneration even if flake.nix has custom modifications
-    #[arg(long)]
-    pub force: bool,
 }
 
 #[derive(Args)]

@@ -1,22 +1,7 @@
-pub mod editor;
 pub mod parser;
 pub mod template;
 
 use std::path::Path;
-
-/// Check if a flake.nix file is managed by nixy (has markers)
-pub fn is_nixy_managed(flake_path: &Path) -> bool {
-    if !flake_path.exists() {
-        return false;
-    }
-
-    let content = match std::fs::read_to_string(flake_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    content.contains("[nixy:packages]")
-}
 
 /// Check if a file is a flake (has inputs and outputs)
 pub fn is_flake_file(path: &Path) -> bool {
