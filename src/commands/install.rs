@@ -111,7 +111,12 @@ fn add_package_to_flake(config: &Config, pkg: &str) -> Result<()> {
 }
 
 /// Install from a flake registry or direct URL
-fn install_from_registry(config: &Config, from_arg: &str, pkg: &str, allow_unfree: bool) -> Result<()> {
+fn install_from_registry(
+    config: &Config,
+    from_arg: &str,
+    pkg: &str,
+    allow_unfree: bool,
+) -> Result<()> {
     let flake_url = if from_arg.contains(':') {
         // Direct flake URL
         info(&format!("Using flake URL: {}", from_arg));
@@ -367,7 +372,12 @@ fn install_from_file(config: &Config, file: &Path, force: bool, allow_unfree: bo
 }
 
 /// Install from a local flake file
-fn install_from_flake_file(config: &Config, file: &Path, force: bool, allow_unfree: bool) -> Result<()> {
+fn install_from_flake_file(
+    config: &Config,
+    file: &Path,
+    force: bool,
+    allow_unfree: bool,
+) -> Result<()> {
     // Extract package name from filename
     let pkg_name = file
         .file_stem()

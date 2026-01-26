@@ -55,7 +55,12 @@ impl Nix {
     }
 
     /// Build a flake and create an out-link
-    pub fn build(flake_dir: &Path, output: &str, out_link: &Path, allow_unfree: bool) -> Result<()> {
+    pub fn build(
+        flake_dir: &Path,
+        output: &str,
+        out_link: &Path,
+        allow_unfree: bool,
+    ) -> Result<()> {
         let ref_str = flake_ref(flake_dir, Some(output));
         let out_link_str = out_link.to_string_lossy();
 
@@ -69,9 +74,7 @@ impl Nix {
             cmd.args(["build", &ref_str, "--out-link", &out_link_str]);
         }
 
-        let status = cmd
-            .status()
-            .map_err(|e| Error::NixCommand(e.to_string()))?;
+        let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
             return Err(Error::NixCommand("Failed to build environment".to_string()));
