@@ -1,38 +1,83 @@
 use std::path::Path;
 
-use regex::Regex;
+use rnix::SyntaxKind;
+use rowan::ast::AstNode;
 
 use super::{LocalFlake, LocalPackage};
 
-/// Parse an attribute value from a nix file
-/// Supports both quoted (name = "value";) and unquoted (name = value;) formats
+/// Parse an attribute value from a nix file using rnix AST parsing.
+/// Supports both quoted (name = "value";) and unquoted (name = value;) formats.
+/// Handles multi-line values and complex Nix expressions.
 pub fn parse_local_package_attr(content: &str, attr: &str) -> Option<String> {
-    let pattern = format!(r#"^\s*{}\s*="#, regex::escape(attr));
-    let re = Regex::new(&pattern).ok()?;
+    let parse = rnix::Root::parse(content);
+    let root = parse.tree();
 
-    for line in content.lines() {
-        if re.is_match(line) {
-            // Try quoted value first
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line[start + 1..].find('"') {
-                    return Some(line[start + 1..start + 1 + end].to_string());
-                }
-            }
+    find_attr_value(root.syntax(), attr)
+}
 
-            // Try unquoted value
-            if let Some(eq_pos) = line.find('=') {
-                let value_part = &line[eq_pos + 1..];
-                if let Some(semi_pos) = value_part.find(';') {
-                    let value = value_part[..semi_pos].trim();
-                    if !value.is_empty() {
-                        return Some(value.to_string());
+/// Recursively search for an attribute binding with the given name
+fn find_attr_value(node: &rnix::SyntaxNode, attr: &str) -> Option<String> {
+    for child in node.children() {
+        // Look for AttrpathValue nodes (attr = value;)
+        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
+            if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
+                // Check if this is the attribute we're looking for
+                if let Some(attrpath) = attrpath_value.attrpath() {
+                    let path_str: String = attrpath
+                        .attrs()
+                        .filter_map(|a| match a {
+                            rnix::ast::Attr::Ident(ident) => {
+                                ident.ident_token().map(|t| t.text().to_string())
+                            }
+                            rnix::ast::Attr::Str(s) => extract_string_value(&s),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".");
+
+                    if path_str == attr {
+                        // Extract the value
+                        if let Some(value) = attrpath_value.value() {
+                            return extract_expr_value(&value);
+                        }
                     }
                 }
             }
         }
-    }
 
+        // Recurse into child nodes
+        if let Some(found) = find_attr_value(&child, attr) {
+            return Some(found);
+        }
+    }
     None
+}
+
+/// Extract value from a Nix expression
+fn extract_expr_value(expr: &rnix::ast::Expr) -> Option<String> {
+    match expr {
+        rnix::ast::Expr::Str(s) => extract_string_value(s),
+        rnix::ast::Expr::Ident(ident) => ident.ident_token().map(|t| t.text().to_string()),
+        rnix::ast::Expr::Literal(lit) => Some(lit.syntax().text().to_string()),
+        _ => None,
+    }
+}
+
+/// Extract the string value from a Str node, handling escape sequences
+fn extract_string_value(s: &rnix::ast::Str) -> Option<String> {
+    let mut result = String::new();
+    for part in s.parts() {
+        match part {
+            rnix::ast::InterpolPart::Literal(lit) => {
+                result.push_str(&lit.to_string());
+            }
+            rnix::ast::InterpolPart::Interpolation(_) => {
+                // Skip interpolations for now - we can't evaluate them statically
+                return None;
+            }
+        }
+    }
+    Some(result)
 }
 
 /// Collect local packages from a packages directory
@@ -58,7 +103,7 @@ pub fn collect_local_packages(packages_dir: &Path) -> (Vec<LocalPackage>, Vec<Lo
                         });
                     }
                 }
-            } else if path.extension().map(|e| e == "nix").unwrap_or(false) {
+            } else if path.extension().is_some_and(|e| e == "nix") {
                 if let Some(pkg) = parse_local_package_file(&path) {
                     local_packages.push(pkg);
                 }
@@ -96,16 +141,84 @@ fn parse_local_package_file(path: &Path) -> Option<LocalPackage> {
     })
 }
 
-/// Extract input name from content (looks for .url = pattern)
+/// Extract input name from content (looks for `name.url = "..."` pattern)
 fn extract_input_name(content: &str) -> Option<String> {
-    let re = Regex::new(r"([a-zA-Z0-9_-]+)\.url\s*=").ok()?;
-    re.captures(content).map(|c| c[1].to_string())
+    let parse = rnix::Root::parse(content);
+    let root = parse.tree();
+
+    find_url_attr_parent(root.syntax())
+}
+
+/// Find the parent attr name of a `.url` attribute
+fn find_url_attr_parent(node: &rnix::SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
+            if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
+                if let Some(attrpath) = attrpath_value.attrpath() {
+                    let attrs: Vec<_> = attrpath.attrs().collect();
+                    // Check if this is a `name.url = "..."` pattern (2 parts, last is "url")
+                    if attrs.len() == 2 {
+                        if let Some(rnix::ast::Attr::Ident(last_ident)) = attrs.last() {
+                            if let Some(token) = last_ident.ident_token() {
+                                if token.text() == "url" {
+                                    // Return the first part (input name)
+                                    if let rnix::ast::Attr::Ident(first_ident) = &attrs[0] {
+                                        if let Some(first_token) = first_ident.ident_token() {
+                                            return Some(first_token.text().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recurse into child nodes
+        if let Some(found) = find_url_attr_parent(&child) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Extract input URL from content
 fn extract_input_url(content: &str) -> Option<String> {
-    let re = Regex::new(r#"\.url\s*=\s*"([^"]+)""#).ok()?;
-    re.captures(content).map(|c| c[1].to_string())
+    let parse = rnix::Root::parse(content);
+    let root = parse.tree();
+
+    find_url_value(root.syntax())
+}
+
+/// Find the value of a `.url` attribute
+fn find_url_value(node: &rnix::SyntaxNode) -> Option<String> {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::NODE_ATTRPATH_VALUE {
+            if let Some(attrpath_value) = rnix::ast::AttrpathValue::cast(child.clone()) {
+                if let Some(attrpath) = attrpath_value.attrpath() {
+                    let attrs: Vec<_> = attrpath.attrs().collect();
+                    // Check if this is a `*.url = "..."` pattern
+                    if let Some(rnix::ast::Attr::Ident(last_ident)) = attrs.last() {
+                        if let Some(token) = last_ident.ident_token() {
+                            if token.text() == "url" {
+                                // Extract the URL value
+                                if let Some(value) = attrpath_value.value() {
+                                    return extract_expr_value(&value);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recurse into child nodes
+        if let Some(found) = find_url_value(&child) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -117,8 +230,10 @@ mod tests {
     #[test]
     fn test_parse_quoted_attr() {
         let content = r#"
-        pname = "my-package";
-        version = "1.0.0";
+{
+  pname = "my-package";
+  version = "1.0.0";
+}
         "#;
         assert_eq!(
             parse_local_package_attr(content, "pname"),
@@ -129,7 +244,9 @@ mod tests {
     #[test]
     fn test_parse_unquoted_attr() {
         let content = r#"
-        name = mypackage;
+{
+  name = mypackage;
+}
         "#;
         assert_eq!(
             parse_local_package_attr(content, "name"),
@@ -140,9 +257,11 @@ mod tests {
     #[test]
     fn test_extract_input_name() {
         let content = r#"
-        inputs = {
-            overlay-name.url = "github:user/repo";
-        };
+{
+  inputs = {
+    overlay-name.url = "github:user/repo";
+  };
+}
         "#;
         assert_eq!(
             extract_input_name(content),
@@ -153,9 +272,11 @@ mod tests {
     #[test]
     fn test_extract_input_url() {
         let content = r#"
-        inputs = {
-            overlay-name.url = "github:user/repo";
-        };
+{
+  inputs = {
+    overlay-name.url = "github:user/repo";
+  };
+}
         "#;
         assert_eq!(
             extract_input_url(content),
@@ -346,5 +467,112 @@ stdenv.mkDerivation {
         assert_eq!(packages[0].name, "regular-pkg");
         assert_eq!(flakes.len(), 1);
         assert_eq!(flakes[0].name, "flake-pkg");
+    }
+
+    // New tests for edge cases that regex-based parsing couldn't handle
+
+    #[test]
+    fn test_multiline_value() {
+        // This case would fail with regex-based parsing
+        let content = r#"
+{ pkgs }:
+pkgs.stdenv.mkDerivation {
+  pname =
+    "multiline-package";
+  version = "1.0.0";
+}
+"#;
+        assert_eq!(
+            parse_local_package_attr(content, "pname"),
+            Some("multiline-package".to_string())
+        );
+    }
+
+    #[test]
+    fn test_value_with_comments_between() {
+        // Comments between attr and value
+        let content = r#"
+{ pkgs }:
+pkgs.stdenv.mkDerivation {
+  pname = /* inline comment */ "commented-package";
+  version = "1.0.0";
+}
+"#;
+        assert_eq!(
+            parse_local_package_attr(content, "pname"),
+            Some("commented-package".to_string())
+        );
+    }
+
+    #[test]
+    fn test_multiline_input_url() {
+        let content = r#"
+{
+  inputs = {
+    my-overlay.url =
+      "github:user/repo";
+  };
+}
+"#;
+        assert_eq!(
+            extract_input_name(content),
+            Some("my-overlay".to_string())
+        );
+        assert_eq!(
+            extract_input_url(content),
+            Some("github:user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_interpolation_returns_none() {
+        // String interpolation cannot be evaluated statically
+        let content = r#"
+{ pkgs, version }:
+pkgs.stdenv.mkDerivation {
+  pname = "test-${version}";
+}
+"#;
+        // Should return None because we can't evaluate interpolation
+        assert_eq!(parse_local_package_attr(content, "pname"), None);
+    }
+
+    #[test]
+    fn test_nested_attrset() {
+        // Nested attribute sets
+        let content = r#"
+{
+  outer = {
+    inner = {
+      pname = "nested-package";
+    };
+  };
+}
+"#;
+        assert_eq!(
+            parse_local_package_attr(content, "pname"),
+            Some("nested-package".to_string())
+        );
+    }
+
+    #[test]
+    fn test_multiple_url_attrs() {
+        // Multiple url attributes - should find the first one
+        let content = r#"
+{
+  inputs = {
+    first-input.url = "github:user/first";
+    second-input.url = "github:user/second";
+  };
+}
+"#;
+        assert_eq!(
+            extract_input_name(content),
+            Some("first-input".to_string())
+        );
+        assert_eq!(
+            extract_input_url(content),
+            Some("github:user/first".to_string())
+        );
     }
 }
