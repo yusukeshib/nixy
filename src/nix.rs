@@ -301,20 +301,6 @@ impl Nix {
             .map(String::from)
             .collect())
     }
-
-    /// Run garbage collection
-    pub fn gc() -> Result<()> {
-        let status = Command::new("nix-collect-garbage")
-            .arg("-d")
-            .status()
-            .map_err(|e| Error::NixCommand(e.to_string()))?;
-
-        if !status.success() {
-            return Err(Error::NixCommand("Garbage collection failed".to_string()));
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]

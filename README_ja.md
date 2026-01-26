@@ -127,7 +127,6 @@ nixy upgrade            # 全パッケージをアップグレード
 | `nixy search <query>` | | パッケージを検索 |
 | `nixy upgrade [input...]` | | 全 input または指定した input をアップグレード |
 | `nixy sync` | | flake.nix から環境をビルド（新しいマシン用） |
-| `nixy gc` | | 古いパッケージを削除 |
 
 ### プロファイル管理
 
@@ -257,6 +256,15 @@ nixy sync                                     # 古い状態を適用
 ```bash
 nixy install slack
 ```
+
+**古い Nix ストアパスをクリーンアップするには？**
+nixy は `nix profile` ではなく `nix build --out-link` を使用しているため、ガベージコレクションコマンドを提供していません。未使用の Nix ストアパスをクリーンアップするには、標準の Nix コマンドを直接使用してください：
+
+```bash
+nix-collect-garbage -d
+```
+
+注意：これは nixy 関連のものだけでなく、システム上のすべての未使用の Nix プロファイルとストアパスをクリーンアップします。
 
 ---
 

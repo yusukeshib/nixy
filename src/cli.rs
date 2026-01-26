@@ -38,9 +38,6 @@ pub enum Commands {
     /// Build environment from flake.nix and create symlink
     Sync(SyncArgs),
 
-    /// Garbage collect old generations
-    Gc,
-
     /// Output shell config (for eval in rc files)
     Config {
         /// Shell type (bash, zsh, fish)
