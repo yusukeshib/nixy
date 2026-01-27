@@ -54,6 +54,22 @@ nixy は `nix profile` の代替ではなく、再現性を追加する補助ツ
 
 nixy と `nix profile` は別々のパス（`~/.local/state/nixy/env` と `~/.nix-profile`）を使うため、互いに干渉しません。`nix profile` は手軽な実験用に、nixy は再現可能なベース環境用に - あるいは両方を組み合わせて使えます。
 
+## 他のツールとの比較
+
+### vs devbox
+
+[devbox](https://github.com/jetify-com/devbox) は**開発環境ツール**です - asdf、nvm、pyenv の代替と考えてください。プロジェクトごとの依存関係と分離されたシェルを管理します。
+
+nixy は**パッケージマネージャー**です - Homebrew の代替と考えてください。グローバルにインストールする CLI ツールを管理します。
+
+用途が違うツールです。
+
+### vs home-manager
+
+[home-manager](https://github.com/nix-community/home-manager) はホームディレクトリ全体を管理します - dotfiles、サービス、パッケージ。強力ですが、Nix を学ぶ必要があります。
+
+nixy はパッケージだけを管理します。完全なホーム設定が必要なら home-manager を使ってください。Nix の再現性を持つ Homebrew スタイルのパッケージ管理だけが欲しいなら、nixy を使ってください。
+
 ## クイックスタート
 
 nixy は**プロファイル**を使ってパッケージを整理します。初回使用時に「default」プロファイルが自動作成されます。後から仕事用、個人用、プロジェクト用など、追加のプロファイルを作成できます。
