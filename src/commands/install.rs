@@ -10,6 +10,7 @@ use crate::flake::parser::parse_local_package_attr;
 use crate::flake::template::regenerate_flake;
 use crate::nix::Nix;
 use crate::profile::get_flake_dir;
+use crate::rollback::{self, RollbackContext};
 use crate::state::{get_state_path, CustomPackage, PackageState};
 
 use super::{info, success, warn};
@@ -68,14 +69,28 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         return Err(e);
     }
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext {
+        flake_dir: flake_dir.clone(),
+        state_path: state_path.clone(),
+        original_state: original_state.clone(),
+        copied_file: None,
+        created_dir: None,
+    });
+
     info(&format!("Installing {}...", pkg));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert state and flake
         original_state.save(&state_path)?;
         let _ = regenerate_flake(&flake_dir, &original_state);
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
@@ -161,14 +176,28 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
         return Err(e);
     }
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext {
+        flake_dir: flake_dir.clone(),
+        state_path: state_path.clone(),
+        original_state: original_state.clone(),
+        copied_file: None,
+        created_dir: None,
+    });
+
     info(&format!("Installing {} from {}...", pkg, final_input_name));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert state and flake
         original_state.save(&state_path)?;
         let _ = regenerate_flake(&flake_dir, &original_state);
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
@@ -226,8 +255,19 @@ fn install_from_file(config: &Config, file: &Path) -> Result<()> {
     // Regenerate flake.nix (local packages are auto-discovered)
     regenerate_flake(&flake_dir, &state)?;
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext {
+        flake_dir: flake_dir.clone(),
+        state_path: state_path.clone(),
+        original_state: original_state.clone(),
+        copied_file: Some(dest.clone()),
+        created_dir: None,
+    });
+
     info(&format!("Installing {}...", pkg_name));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert changes
         original_state.save(&state_path)?;
         let _ = fs::remove_file(&dest);
@@ -235,6 +275,9 @@ fn install_from_file(config: &Config, file: &Path) -> Result<()> {
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
@@ -288,8 +331,19 @@ fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
     // Regenerate flake.nix (local flakes are auto-discovered)
     regenerate_flake(&flake_dir, &state)?;
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext {
+        flake_dir: flake_dir.clone(),
+        state_path: state_path.clone(),
+        original_state: original_state.clone(),
+        copied_file: None,
+        created_dir: Some(pkg_dir.clone()),
+    });
+
     info(&format!("Installing {}...", pkg_name));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert changes
         original_state.save(&state_path)?;
         let _ = fs::remove_dir_all(&pkg_dir);
@@ -297,6 +351,9 @@ fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
