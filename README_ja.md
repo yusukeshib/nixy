@@ -155,10 +155,7 @@ nixy upgrade            # 全パッケージをアップグレード
 nixy install ripgrep              # nixpkgs からインストール（デフォルト）
 nixy install --from <flake> <pkg> # 外部 flake からインストール
 nixy install --file my-pkg.nix    # カスタム nix ファイルからインストール
-nixy install --force <pkg>        # flake.nix を強制的に再生成
 ```
-
-`--force` は、nixy マーカー外を手動で編集した場合に使用します（カスタム変更は失われます）。
 
 ## 複数プロファイル
 
@@ -196,16 +193,20 @@ nixy sync                     # 環境をビルド
 
 ## 複数マシンで同期
 
-パッケージリストはただのテキストファイル。バックアップしたり、バージョン管理したり、dotfiles と一緒に同期できます：
+パッケージの状態は `packages.json` に保存されています。バックアップしたり、バージョン管理したり、dotfiles と一緒に同期できます：
 
 ```bash
-# パッケージリストをバックアップ（デフォルトプロファイル）
-cp ~/.config/nixy/profiles/default/flake.nix ~/dotfiles/
+# パッケージ状態をバックアップ（デフォルトプロファイル）
+cp ~/.config/nixy/profiles/default/packages.json ~/dotfiles/
+cp ~/.config/nixy/profiles/default/flake.lock ~/dotfiles/  # 正確なバージョン用
+cp -r ~/.config/nixy/profiles/default/packages ~/dotfiles/ # カスタムパッケージがある場合
 
 # 新しいマシンで：
 mkdir -p ~/.config/nixy/profiles/default
-cp ~/dotfiles/flake.nix ~/.config/nixy/profiles/default/
-nixy sync    # flake.nix からすべてをインストール
+cp ~/dotfiles/packages.json ~/.config/nixy/profiles/default/
+cp ~/dotfiles/flake.lock ~/.config/nixy/profiles/default/   # オプション
+cp -r ~/dotfiles/packages ~/.config/nixy/profiles/default/  # 必要に応じて
+nixy sync    # flake.nix を再生成してすべてをインストール
 ```
 
 どのマシンでも同じパッケージ、同じバージョン。
@@ -221,15 +222,14 @@ nixy sync    # flake.nix からすべてをインストール
 Nix ストア（`/nix/store/`）にインストールされます。nixy は統合された環境をビルドし、`~/.local/state/nixy/env` にシンボリックリンクを作成します。`nixy config` コマンドでこの場所を PATH に追加する設定を行います。
 
 **flake.nix を手動で編集できる？**
-はい！nixy はカスタムマーカーを提供しており、再生成時に保持される独自の inputs、packages、paths を追加できます：
+`flake.nix` は操作のたびに nixy の状態ファイル（`packages.json`）から完全に再生成されます。手動での編集は上書きされます。
 
-```nix
-# [nixy:custom-inputs]
-my-overlay.url = "github:user/my-overlay";
-# [/nixy:custom-inputs]
-```
+カスタムパッケージには、サポートされている方法を使用してください：
+- `nixy install --from <flake> <pkg>` - 外部 flake から
+- `nixy install --file <path>` - カスタム nix 定義から
+- `packages/` ディレクトリにファイルを配置 - 自動検出
 
-これらのマーカー外のコンテンツは、nixy が flake を再生成する際に上書きされます。詳細なカスタマイズについては、付録の「flake.nix のカスタマイズ」を参照してください。
+詳細は付録の「カスタムパッケージ定義」を参照してください。
 
 **nixy をアップデートするには？**
 `nixy self-upgrade` で自動的に最新版にアップデートできます。または `cargo install nixy` やインストールスクリプトの再実行でも可能です。
@@ -270,39 +270,25 @@ nix-collect-garbage -d
 
 ## 付録
 
-### flake.nix のカスタマイズ
+### nixy の状態管理
 
-nixy はカスタムマーカーを提供しており、flake 再生成時に保持される独自のコンテンツを追加できます：
+nixy は各プロファイルディレクトリの `packages.json` ファイルを真実の源として使用します。`flake.nix` は操作のたびにこの状態から完全に再生成されます。
 
-**カスタム inputs** - 独自の flake inputs を追加：
-```nix
-# [nixy:custom-inputs]
-my-overlay.url = "github:user/my-overlay";
-home-manager.url = "github:nix-community/home-manager";
-# [/nixy:custom-inputs]
+```
+~/.config/nixy/profiles/default/
+├── packages.json    # 真実の源（nixy が管理）
+├── flake.nix        # 生成ファイル（手動編集しない）
+├── flake.lock       # Nix ロックファイル
+└── packages/        # カスタムパッケージ定義
+    ├── my-tool.nix
+    └── my-flake/
+        └── flake.nix
 ```
 
-**カスタム packages** - カスタムパッケージ定義を追加：
-```nix
-# [nixy:custom-packages]
-my-tool = pkgs.writeShellScriptBin "my-tool" ''echo "Hello"'';
-patched-app = pkgs.app.overrideAttrs { ... };
-# [/nixy:custom-packages]
-```
-
-**カスタム paths** - buildEnv に追加のパスを指定：
-```nix
-# [nixy:custom-paths]
-my-tool
-patched-app
-# [/nixy:custom-paths]
-```
-
-これらのマーカー**外**のコンテンツを編集すると、上書き前に nixy が警告します：
-```
-Warning: flake.nix has modifications outside nixy markers.
-Use --force to proceed (custom changes will be lost).
-```
+この設計により：
+- 同期が狂うマーカーベースの編集が不要
+- 状態と生成出力の明確な分離
+- 簡単なバックアップ（`packages.json` と `packages/` ディレクトリをコピーするだけ）
 
 ### 既存の Nix ユーザー向け
 
@@ -310,10 +296,10 @@ Use --force to proceed (custom changes will be lost).
 
 ```nix
 {
-  inputs.nixy.url = "path:~/.config/nixy";
+  inputs.nixy-packages.url = "path:~/.config/nixy/profiles/default";
 
-  outputs = { self, nixpkgs, nixy }: {
-    # nixy.packages.<system>.default は全 nixy パッケージを含む buildEnv
+  outputs = { self, nixpkgs, nixy-packages }: {
+    # nixy-packages.packages.<system>.default は全 nixy パッケージを含む buildEnv
     # 依存関係として使ったり、独自の環境とマージできます
   };
 }
@@ -351,25 +337,46 @@ flake はカスタム input として `flake.nix` に追加され、再現性の
 nixy install --file my-package.nix
 ```
 
-`my-package.nix` の形式：
+ファイルは `packages/` ディレクトリにコピーされ、flake 生成時に自動検出されます。
+
+**シンプルなパッケージの形式**（`my-package.nix`）：
 ```nix
 {
-  name = "my-package";
-  inputs = { overlay-name.url = "github:user/repo"; };
+  pname = "my-package";  # または "name"
   overlay = "overlay-name.overlays.default";
   packageExpr = "pkgs.my-package";
+  # オプション：カスタム inputs
+  input.overlay-name.url = "github:user/repo";
 }
 ```
+
+**flake ベースのパッケージの形式**：
+
+`flake.nix` を含むディレクトリを `packages/` に配置：
+```
+packages/my-tool/flake.nix
+```
+
+nixy は自動的にパス input として追加し、デフォルトパッケージを含めます。
+
+**自動検出**：
+
+`packages/` ディレクトリ内のファイルは自動的に含まれます：
+- `packages/*.nix` - 単一ファイルパッケージ
+- `packages/*/flake.nix` - flake ベースのパッケージ
+
+`nixy install --file` を使わずに `packages/` に直接ファイルを配置することもできます。
 
 ### 設定ファイルの場所
 
 | パス | 説明 |
 |------|------|
-| `~/.config/nixy/profiles/<name>/flake.nix` | プロファイルのパッケージ |
+| `~/.config/nixy/profiles/<name>/packages.json` | パッケージ状態（真実の源） |
+| `~/.config/nixy/profiles/<name>/flake.nix` | 生成された flake（編集しない） |
+| `~/.config/nixy/profiles/<name>/flake.lock` | Nix ロックファイル（バージョン管理推奨） |
+| `~/.config/nixy/profiles/<name>/packages/` | カスタムパッケージ定義（自動検出） |
 | `~/.config/nixy/active` | 現在のアクティブプロファイル名 |
-| `~/.config/nixy/profiles/<name>/packages/` | プロファイルのカスタムパッケージ定義 |
 | `~/.local/state/nixy/env` | ビルド済み環境へのシンボリックリンク（`bin/` を PATH に追加） |
-| `~/.config/nixy/flake.nix` | レガシーの場所（デフォルトプロファイルに自動移行） |
 
 ### 環境変数
 

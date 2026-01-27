@@ -171,10 +171,7 @@ The `install` command supports several options:
 nixy install ripgrep              # Install from nixpkgs (default)
 nixy install --from <flake> <pkg> # Install from external flake
 nixy install --file my-pkg.nix    # Install from custom nix file
-nixy install --force <pkg>        # Force regeneration of flake.nix
 ```
-
-Use `--force` when you've made manual edits outside the nixy markers and want to proceed anyway (your custom changes will be lost).
 
 ## Multiple Profiles
 
@@ -212,16 +209,20 @@ nixy sync                     # Build the environment
 
 ## Sync Across Machines
 
-Your package list is just a text file. Back it up, version control it, or sync it with dotfiles:
+Your package state is stored in `packages.json`. Back it up, version control it, or sync it with dotfiles:
 
 ```bash
-# Back up your package list (default profile)
-cp ~/.config/nixy/profiles/default/flake.nix ~/dotfiles/
+# Back up your package state (default profile)
+cp ~/.config/nixy/profiles/default/packages.json ~/dotfiles/
+cp ~/.config/nixy/profiles/default/flake.lock ~/dotfiles/  # For exact versions
+cp -r ~/.config/nixy/profiles/default/packages ~/dotfiles/ # If you have custom packages
 
 # On a new machine:
 mkdir -p ~/.config/nixy/profiles/default
-cp ~/dotfiles/flake.nix ~/.config/nixy/profiles/default/
-nixy sync    # Installs everything from flake.nix
+cp ~/dotfiles/packages.json ~/.config/nixy/profiles/default/
+cp ~/dotfiles/flake.lock ~/.config/nixy/profiles/default/   # Optional
+cp -r ~/dotfiles/packages ~/.config/nixy/profiles/default/  # If applicable
+nixy sync    # Regenerates flake.nix and installs everything
 ```
 
 Same packages, same versions, on every machine.
@@ -237,15 +238,14 @@ Use `nixy search <keyword>`. Package names sometimes differ from what you expect
 In the Nix store (`/nix/store/`). nixy builds a combined environment and creates a symlink at `~/.local/state/nixy/env` pointing to it. The `nixy config` command sets up your PATH to include this location.
 
 **Can I edit the flake.nix manually?**
-Yes! nixy provides custom markers where you can add your own inputs, packages, and paths that will be preserved during regeneration:
+The `flake.nix` is fully regenerated from nixy's state file (`packages.json`) on every operation. Manual edits will be overwritten.
 
-```nix
-# [nixy:custom-inputs]
-my-overlay.url = "github:user/my-overlay";
-# [/nixy:custom-inputs]
-```
+For custom packages, use the supported methods instead:
+- `nixy install --from <flake> <pkg>` for external flakes
+- `nixy install --file <path>` for custom nix definitions
+- Place files in `packages/` directory for auto-discovery
 
-Any content outside these markers will be overwritten when nixy regenerates the flake. For heavy customization, see "Customizing flake.nix" in the Appendix.
+See "Custom Package Definitions" in the Appendix for details.
 
 **How do I update nixy?**
 Run `nixy self-upgrade` to automatically update to the latest version. Alternatively, use `cargo install nixy` or re-run the install script.
@@ -286,39 +286,25 @@ Note: This will clean up ALL unused Nix profiles and store paths on your system,
 
 ## Appendix
 
-### Customizing flake.nix
+### How nixy manages state
 
-nixy provides custom markers where you can add your own content that will be preserved when nixy regenerates the flake:
+nixy uses a `packages.json` file in each profile directory as the source of truth. The `flake.nix` is fully regenerated from this state on every operation.
 
-**Custom inputs** - Add your own flake inputs:
-```nix
-# [nixy:custom-inputs]
-my-overlay.url = "github:user/my-overlay";
-home-manager.url = "github:nix-community/home-manager";
-# [/nixy:custom-inputs]
+```
+~/.config/nixy/profiles/default/
+├── packages.json    # Source of truth (managed by nixy)
+├── flake.nix        # Generated (do not edit manually)
+├── flake.lock       # Nix lockfile
+└── packages/        # Custom package definitions
+    ├── my-tool.nix
+    └── my-flake/
+        └── flake.nix
 ```
 
-**Custom packages** - Add custom package definitions:
-```nix
-# [nixy:custom-packages]
-my-tool = pkgs.writeShellScriptBin "my-tool" ''echo "Hello"'';
-patched-app = pkgs.app.overrideAttrs { ... };
-# [/nixy:custom-packages]
-```
-
-**Custom paths** - Add extra paths to the buildEnv:
-```nix
-# [nixy:custom-paths]
-my-tool
-patched-app
-# [/nixy:custom-paths]
-```
-
-If you edit content **outside** these markers, nixy will warn you before overwriting:
-```
-Warning: flake.nix has modifications outside nixy markers.
-Use --force to proceed (custom changes will be lost).
-```
+This design ensures:
+- No marker-based editing that can get out of sync
+- Clean separation between state and generated output
+- Easy backup (just copy `packages.json` and `packages/` directory)
 
 ### For Existing Nix Users
 
@@ -326,10 +312,10 @@ If you already manage your own `flake.nix` and want to use nixy's package list, 
 
 ```nix
 {
-  inputs.nixy.url = "path:~/.config/nixy";
+  inputs.nixy-packages.url = "path:~/.config/nixy/profiles/default";
 
-  outputs = { self, nixpkgs, nixy }: {
-    # nixy.packages.<system>.default is a buildEnv with all nixy packages
+  outputs = { self, nixpkgs, nixy-packages }: {
+    # nixy-packages.packages.<system>.default is a buildEnv with all nixy packages
     # You can use it as a dependency or merge it with your own environment
   };
 }
@@ -367,25 +353,46 @@ Install packages from custom nix files:
 nixy install --file my-package.nix
 ```
 
-Format for `my-package.nix`:
+The file is copied to the `packages/` directory and automatically discovered during flake generation.
+
+**Format for simple packages** (`my-package.nix`):
 ```nix
 {
-  name = "my-package";
-  inputs = { overlay-name.url = "github:user/repo"; };
+  pname = "my-package";  # or "name"
   overlay = "overlay-name.overlays.default";
   packageExpr = "pkgs.my-package";
+  # Optional: custom inputs
+  input.overlay-name.url = "github:user/repo";
 }
 ```
+
+**Format for flake-based packages**:
+
+Place a directory with `flake.nix` in `packages/`:
+```
+packages/my-tool/flake.nix
+```
+
+nixy will automatically add it as a path input and include its default package.
+
+**Auto-discovery**:
+
+Any files in the `packages/` directory are automatically included:
+- `packages/*.nix` - Single file packages
+- `packages/*/flake.nix` - Flake-based packages
+
+You can also manually place files in `packages/` without using `nixy install --file`.
 
 ### Config Locations
 
 | Path | Description |
 |------|-------------|
-| `~/.config/nixy/profiles/<name>/flake.nix` | Profile packages |
+| `~/.config/nixy/profiles/<name>/packages.json` | Package state (source of truth) |
+| `~/.config/nixy/profiles/<name>/flake.nix` | Generated flake (do not edit) |
+| `~/.config/nixy/profiles/<name>/flake.lock` | Nix lockfile (version control this) |
+| `~/.config/nixy/profiles/<name>/packages/` | Custom package definitions (auto-discovered) |
 | `~/.config/nixy/active` | Current active profile name |
-| `~/.config/nixy/profiles/<name>/packages/` | Custom package definitions for profile |
 | `~/.local/state/nixy/env` | Symlink to built environment (add `bin/` to PATH) |
-| `~/.config/nixy/flake.nix` | Legacy location (auto-migrated to default profile) |
 
 ### Environment Variables
 
