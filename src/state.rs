@@ -118,9 +118,11 @@ impl PackageState {
         self.packages.contains(&name.to_string())
             || self.custom_packages.iter().any(|p| p.name == name)
     }
+}
 
-    /// Get all package names (standard + custom)
-    #[allow(dead_code)]
+#[cfg(test)]
+impl PackageState {
+    /// Get all package names (standard + custom) - test helper
     pub fn all_package_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.packages.clone();
         names.extend(self.custom_packages.iter().map(|p| p.name.clone()));
