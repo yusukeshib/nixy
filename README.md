@@ -155,7 +155,7 @@ Packages are installed globally and available in all terminal sessions.
 | `nixy install --from <flake> <pkg>` | | Install from a flake (registry name or URL) |
 | `nixy install --file <path>` | | Install from a custom nix file |
 | `nixy uninstall <pkg>` | `remove` | Uninstall a package |
-| `nixy list` | `ls` | List packages in flake.nix |
+| `nixy list` | `ls` | List installed packages with source info |
 | `nixy search <query>` | | Search for packages |
 | `nixy upgrade [input...]` | | Upgrade all inputs or specific ones |
 | `nixy sync` | | Build environment from flake.nix (for new machines) |

@@ -139,7 +139,7 @@ nixy upgrade            # 全パッケージをアップグレード
 | `nixy install --from <flake> <pkg>` | | flake からインストール（レジストリ名または URL） |
 | `nixy install --file <path>` | | カスタム nix ファイルからインストール |
 | `nixy uninstall <pkg>` | `remove` | パッケージをアンインストール |
-| `nixy list` | `ls` | インストール済みパッケージを一覧表示 |
+| `nixy list` | `ls` | インストール済みパッケージをソース情報付きで表示 |
 | `nixy search <query>` | | パッケージを検索 |
 | `nixy upgrade [input...]` | | 全 input または指定した input をアップグレード |
 | `nixy sync` | | flake.nix から環境をビルド（新しいマシン用） |
