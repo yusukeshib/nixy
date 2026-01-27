@@ -253,7 +253,11 @@ fn install_from_file(config: &Config, file: &Path) -> Result<()> {
     git_add(&flake_dir, &format!("packages/{}.nix", pkg_name));
 
     // Regenerate flake.nix (local packages are auto-discovered)
-    regenerate_flake(&flake_dir, &state)?;
+    // Clean up copied file if regeneration fails
+    if let Err(e) = regenerate_flake(&flake_dir, &state) {
+        let _ = fs::remove_file(&dest);
+        return Err(e);
+    }
 
     // Set up rollback context for Ctrl+C handling
     rollback::set_context(RollbackContext {
@@ -329,7 +333,11 @@ fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
     git_add(&flake_dir, &format!("packages/{}/flake.nix", pkg_name));
 
     // Regenerate flake.nix (local flakes are auto-discovered)
-    regenerate_flake(&flake_dir, &state)?;
+    // Clean up created directory if regeneration fails
+    if let Err(e) = regenerate_flake(&flake_dir, &state) {
+        let _ = fs::remove_dir_all(&pkg_dir);
+        return Err(e);
+    }
 
     // Set up rollback context for Ctrl+C handling
     rollback::set_context(RollbackContext {
