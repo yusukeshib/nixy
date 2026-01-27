@@ -6,8 +6,8 @@ use crate::error::{Error, Result};
 use crate::flake::template::generate_flake;
 use crate::nix::Nix;
 use crate::profile::{
-    get_active_profile, has_legacy_flake, list_profiles, migrate_legacy_flake, set_active_profile,
-    validate_profile_name, Profile,
+    get_active_profile, get_flake_dir, has_legacy_flake, list_profiles, migrate_legacy_flake,
+    set_active_profile, validate_profile_name, Profile,
 };
 use crate::state::{get_state_path, PackageState};
 
@@ -68,30 +68,8 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        // Resolve symlinks in flake.nix to get the actual flake directory
-        // This is needed because nix doesn't handle symlinked flake.nix well
-        let flake_dir = if profile.flake_path.is_symlink() {
-            let target = fs::read_link(&profile.flake_path)?;
-            let resolved = if target.is_absolute() {
-                target
-            } else {
-                profile
-                    .flake_path
-                    .parent()
-                    .unwrap_or(&profile.dir)
-                    .join(&target)
-            };
-            let candidate = resolved.parent().unwrap_or(&resolved);
-            match fs::canonicalize(candidate) {
-                Ok(path) => path,
-                Err(_) => candidate.to_path_buf(),
-            }
-        } else {
-            match fs::canonicalize(&profile.dir) {
-                Ok(path) => path,
-                Err(_) => profile.dir.clone(),
-            }
-        };
+        // Use get_flake_dir to resolve symlinks consistently with sync/upgrade
+        let flake_dir = get_flake_dir(config)?;
         match Nix::build(&flake_dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
             Err(e) => {
