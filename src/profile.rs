@@ -1,3 +1,22 @@
+//! Profile management for nixy.
+//!
+//! Profiles allow users to maintain separate package environments. Each profile
+//! has its own `flake.nix`, `packages.json`, and optional `packages/` directory.
+//!
+//! Profile structure:
+//! ```text
+//! ~/.config/nixy/
+//! ├── active              # Contains the name of the active profile
+//! └── profiles/
+//!     ├── default/        # The default profile
+//!     │   ├── flake.nix
+//!     │   ├── flake.lock
+//!     │   ├── packages.json
+//!     │   └── packages/   # Optional local packages
+//!     └── work/           # Another profile
+//!         └── ...
+//! ```
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;

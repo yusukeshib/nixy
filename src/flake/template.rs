@@ -1,3 +1,14 @@
+//! Flake.nix template generation.
+//!
+//! This module generates `flake.nix` content from the package state. It handles:
+//! - Standard nixpkgs packages
+//! - Custom packages from external flakes
+//! - Local packages (`.nix` files in `packages/` directory)
+//! - Local flakes (subdirectories with `flake.nix`)
+//!
+//! The generated flake uses `buildEnv` to create a unified environment with
+//! all installed packages.
+
 use std::collections::HashSet;
 use std::path::Path;
 

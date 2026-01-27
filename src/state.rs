@@ -1,3 +1,11 @@
+//! Package state management for nixy.
+//!
+//! This module handles the persistent state of installed packages, stored in `packages.json`.
+//! It tracks both standard nixpkgs packages and custom packages from external flakes.
+//!
+//! The state file uses atomic writes (write to temp file, then rename) to prevent
+//! corruption if a write is interrupted.
+
 use std::fs;
 use std::path::Path;
 

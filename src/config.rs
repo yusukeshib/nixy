@@ -1,3 +1,13 @@
+//! Configuration and path management for nixy.
+//!
+//! This module defines the directory structure and configuration paths used by nixy.
+//! It follows XDG-style conventions (`~/.config/nixy`, `~/.local/state/nixy`) for
+//! cross-platform compatibility.
+//!
+//! The configuration can be overridden via environment variables:
+//! - `NIXY_CONFIG_DIR`: Override the config directory
+//! - `NIXY_ENV`: Override the environment symlink location
+
 use std::path::PathBuf;
 
 /// Application configuration paths

@@ -1,3 +1,13 @@
+//! Nix command wrapper for nixy.
+//!
+//! This module provides a safe interface to Nix CLI commands. All Nix operations
+//! (build, search, flake update, etc.) go through this module.
+//!
+//! Key features:
+//! - Automatically enables required experimental features (flakes, nix-command)
+//! - Captures stderr for better error messages
+//! - Handles path escaping for flake references
+
 use std::path::Path;
 use std::process::{Command, Stdio};
 

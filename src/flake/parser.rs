@@ -1,3 +1,12 @@
+//! Nix file parsing using `rnix` AST.
+//!
+//! This module provides robust parsing of Nix files using abstract syntax tree
+//! analysis rather than regex. This handles edge cases like:
+//! - Multiline attribute values
+//! - Comments between attributes and values
+//! - Nested attribute sets
+//! - String interpolation detection (returns None for dynamic values)
+
 use std::path::Path;
 
 use rnix::SyntaxKind;
