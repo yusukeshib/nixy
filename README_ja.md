@@ -35,12 +35,12 @@ CLI ツールに対して、Homebrew のシンプルさと Nix の再現性を�
 
 nixy はシンプルな Nix の機能だけを使います - Home Manager も NixOS も不要。パッケージは `~/.config/nixy/profiles/<name>/` の `flake.nix` で定義され、`nix build` でビルドされます。
 
-nixy は**純粋に宣言的** - `flake.nix` が唯一の真実の源です。可変な状態を持つ `nix profile` とは異なり、nixy は `nix build --out-link` を使ってビルド済み環境へのシンボリックリンク（`~/.local/state/nixy/env`）を作成します。これにより：
+nixy は**純粋に宣言的** - `packages.json` が唯一の真実の源であり、`flake.nix` は操作のたびにそこから完全に再生成されます。可変な状態を持つ `nix profile` とは異なり、nixy は `nix build --out-link` を使ってビルド済み環境へのシンボリックリンク（`~/.local/state/nixy/env`）を作成します。これにより：
 - 同期が狂う隠れたプロファイル状態がない
-- `flake.nix` にあるものが、そのままインストールされているもの
+- `packages.json` にあるものが、そのままインストールされているもの
 - 理解しやすく、デバッグしやすく、バージョン管理しやすい
 
-nixy は flake.nix を編集して標準の `nix` コマンドを実行するだけ。生成される flake.nix は普通の Nix なので、直接読んだり編集したり、`nix` コマンドを直接使うこともできます。
+生成される `flake.nix` は普通の Nix なので、読んだり、検査したり、`nix` コマンドを直接使うこともできます。ただし、`flake.nix` への手動編集は上書きされます。
 
 ## nixy と nix profile
 
@@ -49,8 +49,8 @@ nixy は `nix profile` の代替ではなく、再現性を追加する補助ツ
 `nix profile` は単一マシンでの手軽なパッケージ管理に最適です。nixy は Nix の上に宣言的なレイヤーを追加し、以下が必要な場合に役立ちます：
 
 - **統一されたロックファイル**: 全パッケージを同じ nixpkgs バージョンに固定
-- **簡単な同期**: `flake.nix` を新しいマシンにコピーして `nixy sync` を実行、それだけ
-- **バージョン管理可能な設定**: `flake.nix` は git での管理に最適
+- **簡単な同期**: `packages.json` を新しいマシンにコピーして `nixy sync` を実行、それだけ
+- **バージョン管理可能な設定**: `packages.json` + `flake.lock` は git での管理に最適
 
 nixy と `nix profile` は別々のパス（`~/.local/state/nixy/env` と `~/.nix-profile`）を使うため、互いに干渉しません。`nix profile` は手軽な実験用に、nixy は再現可能なベース環境用に - あるいは両方を組み合わせて使えます。
 
@@ -238,14 +238,14 @@ Nix ストア（`/nix/store/`）にインストールされます。nixy は統�
 `nixy` スクリプトを削除するだけ。flake.nix ファイルはそのまま残り、標準の `nix` コマンドで使えます。
 
 **なぜ `nix profile` を直接使わないの？**
-`nix profile` には再現性の仕組みがありません - パッケージをエクスポートして別のマシンで同じ環境を再現する公式の方法がないのです。nixy は `flake.nix` を真実の源として使うため、コピー、バージョン管理、共有が可能です。
+`nix profile` には再現性の仕組みがありません - パッケージをエクスポートして別のマシンで同じ環境を再現する公式の方法がないのです。nixy は `packages.json` を真実の源として使い、再現可能な `flake.nix` を生成するため、コピー、バージョン管理、共有が可能です。
 
 **以前の状態にロールバックするには？**
-nixy は宣言的なので、`flake.nix` と `flake.lock` が状態そのものです。git で管理していれば（推奨）、ロールバックは簡単：
+nixy は宣言的なので、`packages.json` と `flake.lock` が状態そのものです。git で管理していれば（推奨）、ロールバックは簡単：
 
 ```bash
-git checkout HEAD~1 -- flake.nix flake.lock  # 前のコミットに戻す
-nixy sync                                     # 古い状態を適用
+git checkout HEAD~1 -- packages.json flake.lock  # 前のコミットに戻す
+nixy sync                                         # flake.nix を再生成して適用
 ```
 
 これは `nix profile rollback` より強力です - 履歴の任意の時点に戻れる、コミットメッセージで変更理由がわかる、ブランチで実験できる、といった利点があります。

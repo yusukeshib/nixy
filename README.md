@@ -39,12 +39,12 @@ If you want Homebrew's simplicity with Nix's reproducibility for your CLI tools,
 
 nixy uses plain Nix features - no Home Manager, no NixOS, no complex setup. Your packages are defined in `flake.nix` at `~/.config/nixy/profiles/<name>/`, built with `nix build`.
 
-nixy is **purely declarative** - your `flake.nix` is the single source of truth. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/env`) pointing to your built environment. This means:
+nixy is **purely declarative** - your `packages.json` is the single source of truth, and `flake.nix` is fully regenerated from it on every operation. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink (`~/.local/state/nixy/env`) pointing to your built environment. This means:
 - No hidden profile state to get out of sync
-- What's in `flake.nix` is exactly what's installed
+- What's in `packages.json` is exactly what's installed
 - Easy to understand, debug, and version control
 
-nixy edits the flake.nix and runs standard `nix` commands. The flake.nix it generates is plain Nix - you can read it, edit it manually, or use `nix` commands directly anytime.
+The generated `flake.nix` is plain Nix - you can read it, inspect it, or use `nix` commands directly anytime. However, manual edits to `flake.nix` will be overwritten.
 
 ## nixy and nix profile
 
@@ -53,8 +53,8 @@ nixy is not a replacement for `nix profile` - it's a complement that adds reprod
 `nix profile` is great for quick, single-machine package management. nixy adds a declarative layer on top of Nix for when you need:
 
 - **A unified lockfile**: All packages pinned to the same nixpkgs version
-- **Easy sync**: Copy `flake.nix` to a new machine, run `nixy sync`, done
-- **Version-controlled config**: `flake.nix` is designed for git
+- **Easy sync**: Copy `packages.json` to a new machine, run `nixy sync`, done
+- **Version-controlled config**: `packages.json` + `flake.lock` are designed for git
 
 nixy and `nix profile` use separate paths (`~/.local/state/nixy/env` vs `~/.nix-profile`) and don't interfere with each other. Use `nix profile` for quick experiments, nixy for your reproducible base environment - or use both together.
 
@@ -254,14 +254,14 @@ Run `nixy self-upgrade` to automatically update to the latest version. Alternati
 Delete the `nixy` binary (typically `~/.local/bin/nixy` or `~/.cargo/bin/nixy`). Your flake.nix files remain and work with standard `nix` commands.
 
 **Why not use `nix profile` directly?**
-`nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `flake.nix` as the source of truth, which can be copied, version-controlled, and shared.
+`nix profile` lacks built-in reproducibility - there's no official way to export your packages and recreate the same environment on another machine. nixy uses `packages.json` as the source of truth and generates a reproducible `flake.nix`, which can be copied, version-controlled, and shared.
 
 **How do I rollback to a previous state?**
-Since nixy is declarative, your `flake.nix` and `flake.lock` files *are* the state. If you version control them with git (recommended), rollback is simple:
+Since nixy is declarative, your `packages.json` and `flake.lock` files *are* the state. If you version control them with git (recommended), rollback is simple:
 
 ```bash
-git checkout HEAD~1 -- flake.nix flake.lock  # Revert to previous commit
-nixy sync                                     # Apply the old state
+git checkout HEAD~1 -- packages.json flake.lock  # Revert to previous commit
+nixy sync                                         # Regenerate flake.nix and apply
 ```
 
 This is more powerful than `nix profile rollback` - you can go back to any point in history, see why changes were made via commit messages, and experiment with branches.
