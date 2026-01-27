@@ -24,9 +24,6 @@ pub enum Error {
     #[error("Invalid profile name '{0}'. Use only letters, numbers, dashes, and underscores.")]
     InvalidProfileName(String),
 
-    #[error("No flake.nix found at {0}. Run 'nixy install <package>' to create one.")]
-    NoFlakeFound(String),
-
     #[error("Nix command failed: {0}")]
     NixCommand(String),
 

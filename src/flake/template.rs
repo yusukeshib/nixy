@@ -10,10 +10,12 @@
 //! all installed packages.
 
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 
 use super::parser::collect_local_packages;
 use super::{LocalFlake, LocalPackage};
+use crate::error::Result;
 use crate::state::{CustomPackage, PackageState};
 
 /// Intermediate representation for building flake content
@@ -241,6 +243,15 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
     builder.add_local_packages(&local_packages);
     builder.add_custom_packages(&state.custom_packages);
     builder.build()
+}
+
+/// Regenerate flake.nix from state
+pub fn regenerate_flake(flake_dir: &Path, state: &PackageState) -> Result<()> {
+    let flake_path = flake_dir.join("flake.nix");
+    fs::create_dir_all(flake_dir)?;
+    let content = generate_flake(state, Some(flake_dir));
+    fs::write(&flake_path, content)?;
+    Ok(())
 }
 
 #[cfg(test)]

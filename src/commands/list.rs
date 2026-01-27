@@ -1,19 +1,13 @@
 use crate::config::Config;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::flake::parser::collect_local_packages;
-use crate::profile::{get_flake_dir, get_flake_path};
+use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
 use super::info;
 
 pub fn run(config: &Config) -> Result<()> {
-    let flake_path = get_flake_path(config);
-
-    if !flake_path.exists() {
-        return Err(Error::NoFlakeFound(flake_path.display().to_string()));
-    }
-
-    info(&format!("Packages in {}:", flake_path.display()));
+    info("Installed packages:");
 
     // Get the flake directory
     let flake_dir = get_flake_dir(config)?;

@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::cli::UninstallArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::template::generate_flake;
+use crate::flake::template::{generate_flake, regenerate_flake};
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
@@ -16,8 +16,11 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     let flake_path = flake_dir.join("flake.nix");
     let state_path = get_state_path(&flake_dir);
 
+    // Auto-regenerate flake.nix if missing
     if !flake_path.exists() {
-        return Err(Error::NoFlakeFound(flake_path.display().to_string()));
+        let state = PackageState::load(&state_path)?;
+        info("Regenerating flake.nix from packages.json...");
+        regenerate_flake(&flake_dir, &state)?;
     }
 
     // Load state and save original for rollback
