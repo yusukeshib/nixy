@@ -58,6 +58,22 @@ nixy is not a replacement for `nix profile` - it's a complement that adds reprod
 
 nixy and `nix profile` use separate paths (`~/.local/state/nixy/env` vs `~/.nix-profile`) and don't interfere with each other. Use `nix profile` for quick experiments, nixy for your reproducible base environment - or use both together.
 
+## Comparison with Other Tools
+
+### vs devbox
+
+[devbox](https://github.com/jetify-com/devbox) is a **development environment tool** - think of it as a replacement for asdf, nvm, or pyenv. It manages per-project dependencies and isolated shells.
+
+nixy is a **package manager** - think of it as a replacement for Homebrew. It manages your globally installed CLI tools.
+
+Different tools for different jobs.
+
+### vs home-manager
+
+[home-manager](https://github.com/nix-community/home-manager) manages your entire home directory - dotfiles, services, and packages. It's powerful but requires learning Nix.
+
+nixy only manages packages. If you want full home configuration, use home-manager. If you just want Homebrew-style package management with Nix's reproducibility, use nixy.
+
 ## Quick Start
 
 nixy uses **profiles** to organize packages. A "default" profile is created automatically on first use. You can create additional profiles later for different contexts (work, personal, projects).
