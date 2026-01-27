@@ -81,9 +81,16 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
                     .unwrap_or(&profile.dir)
                     .join(&target)
             };
-            fs::canonicalize(resolved.parent().unwrap_or(&resolved))?
+            let candidate = resolved.parent().unwrap_or(&resolved);
+            match fs::canonicalize(candidate) {
+                Ok(path) => path,
+                Err(_) => candidate.to_path_buf(),
+            }
         } else {
-            fs::canonicalize(&profile.dir)?
+            match fs::canonicalize(&profile.dir) {
+                Ok(path) => path,
+                Err(_) => profile.dir.clone(),
+            }
         };
         match Nix::build(&flake_dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
