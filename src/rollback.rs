@@ -78,11 +78,13 @@ pub fn set_context(ctx: RollbackContext) {
 ///
 /// Note: Silently fails if the mutex is poisoned (which indicates a prior panic).
 pub fn clear_context() {
-    // Mark operation as completed to prevent late rollback
-    COMPLETED.store(true, Ordering::SeqCst);
+    // First clear the rollback context so that once COMPLETED is true,
+    // there is definitely no context left to roll back.
     if let Ok(mut guard) = ROLLBACK_CONTEXT.lock() {
         *guard = None;
     }
+    // Mark operation as completed to prevent late rollback
+    COMPLETED.store(true, Ordering::SeqCst);
 }
 
 /// Take the rollback context (for use in signal handler)
