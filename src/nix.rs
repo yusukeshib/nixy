@@ -46,9 +46,11 @@ impl Nix {
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !output.status.success() {
-            return Err(Error::NixCommand(
-                "Failed to get current system".to_string(),
-            ));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to get current system: {}",
+                stderr.trim()
+            )));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -64,16 +66,20 @@ impl Nix {
         cmd.env("NIXPKGS_ALLOW_UNFREE", "1");
         cmd.args(["build", &ref_str, "--out-link", &out_link_str, "--impure"]);
 
-        let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
+        let output = cmd.output().map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        if !status.success() {
-            return Err(Error::NixCommand("Failed to build environment".to_string()));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to build environment: {}",
+                stderr.trim()
+            )));
         }
 
         Ok(())
     }
 
-    /// Search for packages in nixpkgs (passes through to stdout)
+    /// Search for packages in nixpkgs (passes through to stdout/stderr)
     pub fn search(query: &str) -> Result<()> {
         let status = Command::new("nix")
             .args(NIX_FLAGS)
@@ -82,7 +88,10 @@ impl Nix {
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixCommand("Search failed".to_string()));
+            return Err(Error::NixCommand(format!(
+                "Search failed for query '{}'",
+                query
+            )));
         }
 
         Ok(())
@@ -99,10 +108,14 @@ impl Nix {
 
         cmd.arg("--flake").arg(flake_dir);
 
-        let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
+        let output = cmd.output().map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        if !status.success() {
-            return Err(Error::NixCommand("Failed to update flake".to_string()));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to update flake: {}",
+                stderr.trim()
+            )));
         }
 
         Ok(())
@@ -110,15 +123,19 @@ impl Nix {
 
     /// Update all flake inputs
     pub fn flake_update_all(flake_dir: &Path) -> Result<()> {
-        let status = Command::new("nix")
+        let output = Command::new("nix")
             .args(NIX_FLAGS)
             .args(["flake", "update", "--flake"])
             .arg(flake_dir)
-            .status()
+            .output()
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        if !status.success() {
-            return Err(Error::NixCommand("Failed to update flake".to_string()));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to update flake: {}",
+                stderr.trim()
+            )));
         }
 
         Ok(())
