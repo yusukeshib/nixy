@@ -75,9 +75,47 @@ pub const NIX_FLAGS: &[&str] = &[
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::{Mutex, MutexGuard};
+
+    // Mutex to serialize tests that modify environment variables
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    /// Guard that saves and restores environment variables on drop
+    struct EnvGuard {
+        _mutex_guard: MutexGuard<'static, ()>,
+        saved_config_dir: Option<String>,
+        saved_env: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+            Self {
+                _mutex_guard: guard,
+                saved_config_dir: env::var("NIXY_CONFIG_DIR").ok(),
+                saved_env: env::var("NIXY_ENV").ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // Restore original values
+            match &self.saved_config_dir {
+                Some(val) => env::set_var("NIXY_CONFIG_DIR", val),
+                None => env::remove_var("NIXY_CONFIG_DIR"),
+            }
+            match &self.saved_env {
+                Some(val) => env::set_var("NIXY_ENV", val),
+                None => env::remove_var("NIXY_ENV"),
+            }
+        }
+    }
 
     #[test]
     fn test_config_uses_dot_config_not_platform_specific() {
+        let _guard = EnvGuard::new();
+
         // Ensure we use ~/.config/nixy, not platform-specific paths like
         // ~/Library/Application Support on macOS
         env::remove_var("NIXY_CONFIG_DIR");
@@ -100,6 +138,8 @@ mod tests {
 
     #[test]
     fn test_config_env_uses_local_state() {
+        let _guard = EnvGuard::new();
+
         env::remove_var("NIXY_CONFIG_DIR");
         env::remove_var("NIXY_ENV");
 
@@ -115,6 +155,8 @@ mod tests {
 
     #[test]
     fn test_config_respects_env_vars() {
+        let _guard = EnvGuard::new();
+
         env::set_var("NIXY_CONFIG_DIR", "/custom/config");
         env::set_var("NIXY_ENV", "/custom/env");
 
@@ -130,8 +172,5 @@ mod tests {
             PathBuf::from("/custom/env"),
             "Should respect NIXY_ENV"
         );
-
-        env::remove_var("NIXY_CONFIG_DIR");
-        env::remove_var("NIXY_ENV");
     }
 }

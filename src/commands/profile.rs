@@ -6,12 +6,12 @@ use crate::error::{Error, Result};
 use crate::flake::template::generate_flake;
 use crate::nix::Nix;
 use crate::profile::{
-    get_active_profile, has_legacy_flake, list_profiles, migrate_legacy_flake, set_active_profile,
-    validate_profile_name, Profile,
+    get_active_profile, get_flake_dir, has_legacy_flake, list_profiles, migrate_legacy_flake,
+    set_active_profile, validate_profile_name, Profile,
 };
 use crate::state::{get_state_path, PackageState};
 
-use super::{info, success, warn};
+use super::{error, info, success, warn};
 
 pub fn run(config: &Config, args: ProfileArgs) -> Result<()> {
     match args.command {
@@ -68,10 +68,13 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        match Nix::build(&profile.dir, "default", &config.env_link) {
+        // Use get_flake_dir to resolve symlinks consistently with sync/upgrade
+        let flake_dir = get_flake_dir(config)?;
+        match Nix::build(&flake_dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
-            Err(_) => {
+            Err(e) => {
                 warn("Profile switched but environment build failed. Run 'nixy sync' to rebuild.");
+                error(&format!("{}", e));
                 success(&format!("Switched to profile '{}'", name));
             }
         }
