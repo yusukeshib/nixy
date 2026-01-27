@@ -1217,6 +1217,64 @@ fn test_list_shows_installed_packages() {
         "Should not show (none) when packages exist: {}",
         stdout
     );
+
+    // Should show source info
+    assert!(
+        stdout.contains("(nixpkgs)"),
+        "Should show (nixpkgs) for standard packages: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_shows_source_info() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with packages.json
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create packages.json with both standard and custom packages
+    let state_content = r#"{
+  "version": 1,
+  "packages": ["ripgrep"],
+  "custom_packages": [
+    {
+      "name": "neovim",
+      "input_name": "neovim-nightly",
+      "input_url": "github:nix-community/neovim-nightly-overlay",
+      "package_output": "packages",
+      "source_name": null
+    }
+  ]
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+
+    // Set active profile
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().arg("list").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "List should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Standard package should show (nixpkgs)
+    assert!(
+        stdout.contains("ripgrep") && stdout.contains("(nixpkgs)"),
+        "Should show ripgrep with (nixpkgs) source: {}",
+        stdout
+    );
+
+    // Custom package should show its URL
+    assert!(
+        stdout.contains("neovim") && stdout.contains("github:nix-community/neovim-nightly-overlay"),
+        "Should show neovim with its flake URL: {}",
+        stdout
+    );
 }
 
 // =============================================================================
