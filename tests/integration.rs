@@ -159,6 +159,14 @@ fn test_sync_no_flake() {
         !stderr.contains("No flake.nix found"),
         "Should not fail with NoFlakeFound error"
     );
+
+    // Command should succeed (empty env builds successfully)
+    assert!(
+        output.status.success(),
+        "Sync should succeed with empty flake: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
 }
 
 // =============================================================================
@@ -392,6 +400,14 @@ fn test_upgrade_no_flake() {
     assert!(
         !stderr.contains("No flake.nix found"),
         "Should not fail with NoFlakeFound error"
+    );
+
+    // Command should succeed (nix flake update works on empty flake)
+    assert!(
+        output.status.success(),
+        "Upgrade should succeed with empty flake: stdout={}, stderr={}",
+        stdout,
+        stderr
     );
 }
 
