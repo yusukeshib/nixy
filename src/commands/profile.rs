@@ -75,7 +75,11 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             let resolved = if target.is_absolute() {
                 target
             } else {
-                profile.flake_path.parent().unwrap_or(&profile.dir).join(&target)
+                profile
+                    .flake_path
+                    .parent()
+                    .unwrap_or(&profile.dir)
+                    .join(&target)
             };
             fs::canonicalize(resolved.parent().unwrap_or(&resolved))?
         } else {
