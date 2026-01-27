@@ -1,5 +1,15 @@
+//! Error types for nixy.
+//!
+//! This module defines all error types used throughout the application.
+//! Errors are categorized into domain-specific variants (e.g., `PackageNotFound`,
+//! `ProfileNotFound`) and generic variants (e.g., `Io`, `Regex`).
+//!
+//! The `Usage` variant is special - it's used for user-facing error messages
+//! that don't need the "Error:" prefix.
+
 use thiserror::Error;
 
+/// All possible errors that can occur in nixy
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Package '{0}' not found in nixpkgs or is not a valid derivation")]

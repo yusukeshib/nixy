@@ -1,8 +1,215 @@
+//! Flake.nix template generation.
+//!
+//! This module generates `flake.nix` content from the package state. It handles:
+//! - Standard nixpkgs packages
+//! - Custom packages from external flakes
+//! - Local packages (`.nix` files in `packages/` directory)
+//! - Local flakes (subdirectories with `flake.nix`)
+//!
+//! The generated flake uses `buildEnv` to create a unified environment with
+//! all installed packages.
+
 use std::collections::HashSet;
 use std::path::Path;
 
 use super::parser::collect_local_packages;
-use crate::state::PackageState;
+use super::{LocalFlake, LocalPackage};
+use crate::state::{CustomPackage, PackageState};
+
+/// Intermediate representation for building flake content
+struct FlakeBuilder {
+    /// Additional flake inputs (beyond nixpkgs)
+    inputs: String,
+    /// Set of input names already added
+    seen_inputs: HashSet<String>,
+    /// Overlay expressions for pkgs customization
+    overlays: String,
+    /// Standard package entries (pkg = pkgs.pkg)
+    standard_entries: String,
+    /// Local package entries
+    local_entries: String,
+    /// Custom package entries from external flakes
+    custom_entries: String,
+    /// Package names for buildEnv paths
+    buildenv_paths: Vec<String>,
+}
+
+impl FlakeBuilder {
+    fn new() -> Self {
+        Self {
+            inputs: String::new(),
+            seen_inputs: HashSet::new(),
+            overlays: String::new(),
+            standard_entries: String::new(),
+            local_entries: String::new(),
+            custom_entries: String::new(),
+            buildenv_paths: Vec::new(),
+        }
+    }
+
+    /// Add standard nixpkgs packages
+    fn add_standard_packages(&mut self, packages: &[&String]) {
+        let entries: Vec<String> = packages
+            .iter()
+            .map(|pkg| format!("          {} = pkgs.{};", pkg, pkg))
+            .collect();
+
+        if !entries.is_empty() {
+            self.standard_entries = format!("{}\n", entries.join("\n"));
+        }
+
+        self.buildenv_paths
+            .extend(packages.iter().map(|p| p.to_string()));
+    }
+
+    /// Add local flake-type packages from packages/ directory
+    fn add_local_flakes(&mut self, flakes: &[LocalFlake]) {
+        for flake in flakes {
+            self.inputs.push_str(&format!(
+                "    {}.url = \"path:./packages/{}\";\n",
+                flake.name, flake.name
+            ));
+            self.seen_inputs.insert(flake.name.clone());
+            self.local_entries.push_str(&format!(
+                "          {} = inputs.{}.packages.${{system}}.default;\n",
+                flake.name, flake.name
+            ));
+            self.buildenv_paths.push(flake.name.clone());
+        }
+    }
+
+    /// Add local .nix file packages from packages/ directory
+    fn add_local_packages(&mut self, packages: &[LocalPackage]) {
+        for pkg in packages {
+            if let (Some(input_name), Some(input_url)) = (&pkg.input_name, &pkg.input_url) {
+                if self.seen_inputs.insert(input_name.clone()) {
+                    self.inputs
+                        .push_str(&format!("    {}.url = \"{}\";\n", input_name, input_url));
+                }
+            }
+
+            if let Some(overlay) = &pkg.overlay {
+                self.overlays.push_str(&format!("          {}\n", overlay));
+            }
+
+            self.local_entries
+                .push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
+            self.buildenv_paths.push(pkg.name.clone());
+        }
+    }
+
+    /// Add custom packages from external flakes
+    fn add_custom_packages(&mut self, packages: &[CustomPackage]) {
+        for pkg in packages {
+            if self.seen_inputs.insert(pkg.input_name.clone()) {
+                self.inputs.push_str(&format!(
+                    "    {}.url = \"{}\";\n",
+                    pkg.input_name, pkg.input_url
+                ));
+            }
+
+            self.custom_entries.push_str(&format!(
+                "          {} = inputs.{}.{}.${{system}}.{};\n",
+                pkg.name,
+                pkg.input_name,
+                pkg.package_output,
+                pkg.source_package_name()
+            ));
+            self.buildenv_paths.push(pkg.name.clone());
+        }
+    }
+
+    /// Build the output function parameters
+    fn build_output_params(&self) -> String {
+        if self.seen_inputs.is_empty() {
+            "self, nixpkgs".to_string()
+        } else {
+            let mut inputs_list: Vec<_> = self.seen_inputs.iter().cloned().collect();
+            inputs_list.sort();
+            format!("self, nixpkgs, {}", inputs_list.join(", "))
+        }
+    }
+
+    /// Build the pkgs definition (with or without overlays)
+    fn build_pkgs_definition(&self) -> (String, &'static str) {
+        if self.overlays.is_empty() {
+            (
+                String::new(),
+                "let pkgs = nixpkgs.legacyPackages.${system};",
+            )
+        } else {
+            let overlays_content = format!("overlays = [\n{}        ];", self.overlays);
+            let pkgs_def = format!(
+                "pkgsFor = system: import nixpkgs {{
+        inherit system;
+        {}
+      }};
+",
+                overlays_content
+            );
+            (pkgs_def, "let pkgs = pkgsFor system;")
+        }
+    }
+
+    /// Build the buildEnv paths section
+    fn build_paths_section(&self) -> String {
+        if self.buildenv_paths.is_empty() {
+            String::new()
+        } else {
+            let paths: Vec<String> = self
+                .buildenv_paths
+                .iter()
+                .map(|p| format!("              {}", p))
+                .collect();
+            format!("{}\n", paths.join("\n"))
+        }
+    }
+
+    /// Generate the final flake.nix content
+    fn build(self) -> String {
+        let output_params = self.build_output_params();
+        let (pkgs_def, pkgs_binding) = self.build_pkgs_definition();
+        let buildenv_paths_str = self.build_paths_section();
+
+        format!(
+            r#"{{
+  description = "nixy managed packages";
+
+  inputs = {{
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+{all_inputs}  }};
+
+  outputs = {{ {output_params} }}@inputs:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+      {pkgs_def}
+    in {{
+      packages = forAllSystems (system:
+        {pkgs_binding}
+        in rec {{
+{pkg_entries}{local_entries}{custom_entries}
+          default = pkgs.buildEnv {{
+            name = "nixy-env";
+            paths = [
+{buildenv_paths_str}            ];
+            extraOutputsToInstall = [ "man" "doc" "info" ];
+          }};
+        }});
+    }};
+}}
+"#,
+            all_inputs = self.inputs,
+            output_params = output_params,
+            pkgs_def = pkgs_def,
+            pkgs_binding = pkgs_binding,
+            pkg_entries = self.standard_entries,
+            local_entries = self.local_entries,
+            custom_entries = self.custom_entries,
+            buildenv_paths_str = buildenv_paths_str,
+        )
+    }
+}
 
 /// Generate flake.nix content from package state
 pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String {
@@ -28,178 +235,12 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
         })
         .collect();
 
-    // Build package entries for standard packages
-    let pkg_entries: String = filtered_packages
-        .iter()
-        .map(|pkg| format!("          {} = pkgs.{};", pkg, pkg))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Build local inputs
-    let mut local_inputs = String::new();
-    let mut seen_inputs: HashSet<String> = HashSet::new();
-    let mut local_overlays = String::new();
-    let mut local_packages_entries = String::new();
-
-    // Handle flake-type packages
-    for flake in &local_flakes {
-        local_inputs.push_str(&format!(
-            "    {}.url = \"path:./packages/{}\";\n",
-            flake.name, flake.name
-        ));
-        seen_inputs.insert(flake.name.clone());
-        local_packages_entries.push_str(&format!(
-            "          {} = inputs.{}.packages.${{system}}.default;\n",
-            flake.name, flake.name
-        ));
-    }
-
-    // Handle regular local packages
-    for pkg in &local_packages {
-        if let (Some(input_name), Some(input_url)) = (&pkg.input_name, &pkg.input_url) {
-            local_inputs.push_str(&format!("    {}.url = \"{}\";\n", input_name, input_url));
-            seen_inputs.insert(input_name.clone());
-        }
-
-        if let Some(overlay) = &pkg.overlay {
-            local_overlays.push_str(&format!("          {}\n", overlay));
-        }
-
-        local_packages_entries
-            .push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
-    }
-
-    // Build custom inputs and packages from state
-    let mut custom_inputs = String::new();
-    let mut custom_packages_entries = String::new();
-
-    for pkg in &state.custom_packages {
-        // Add the input if not already present
-        if seen_inputs.insert(pkg.input_name.clone()) {
-            custom_inputs.push_str(&format!(
-                "    {}.url = \"{}\";\n",
-                pkg.input_name, pkg.input_url
-            ));
-        }
-
-        custom_packages_entries.push_str(&format!(
-            "          {} = inputs.{}.{}.${{system}}.{};\n",
-            pkg.name,
-            pkg.input_name,
-            pkg.package_output,
-            pkg.source_package_name()
-        ));
-    }
-
-    // Build buildEnv paths
-    let mut buildenv_paths: Vec<String> = filtered_packages.iter().map(|p| p.to_string()).collect();
-    buildenv_paths.extend(local_packages.iter().map(|p| p.name.clone()));
-    buildenv_paths.extend(local_flakes.iter().map(|f| f.name.clone()));
-    buildenv_paths.extend(state.custom_packages.iter().map(|p| p.name.clone()));
-
-    let buildenv_paths_str: String = buildenv_paths
-        .iter()
-        .map(|p| format!("              {}", p))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Build output parameters
-    let output_params = if seen_inputs.is_empty() {
-        "self, nixpkgs".to_string()
-    } else {
-        let mut inputs_list: Vec<_> = seen_inputs.into_iter().collect();
-        inputs_list.sort();
-        format!("self, nixpkgs, {}", inputs_list.join(", "))
-    };
-
-    // Build overlays section
-    let overlays_content = if !local_overlays.is_empty() {
-        format!("overlays = [\n{}        ];", local_overlays)
-    } else {
-        String::new()
-    };
-
-    // Build pkgs definition
-    let pkgs_def = if !local_overlays.is_empty() {
-        format!(
-            "pkgsFor = system: import nixpkgs {{
-        inherit system;
-        {}
-      }};
-",
-            overlays_content
-        )
-    } else {
-        String::new()
-    };
-
-    let pkgs_binding = if !local_overlays.is_empty() {
-        "let pkgs = pkgsFor system;"
-    } else {
-        "let pkgs = nixpkgs.legacyPackages.${system};"
-    };
-
-    // Format sections with proper trailing newlines
-    let all_inputs = format!("{}{}", local_inputs, custom_inputs);
-    let all_inputs = if all_inputs.is_empty() {
-        String::new()
-    } else {
-        all_inputs
-    };
-
-    let pkg_entries = if pkg_entries.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", pkg_entries)
-    };
-
-    let local_packages_entries = if local_packages_entries.is_empty() {
-        String::new()
-    } else {
-        local_packages_entries
-    };
-
-    let custom_packages_entries = if custom_packages_entries.is_empty() {
-        String::new()
-    } else {
-        custom_packages_entries
-    };
-
-    let buildenv_paths_str = if buildenv_paths_str.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", buildenv_paths_str)
-    };
-
-    format!(
-        r#"{{
-  description = "nixy managed packages";
-
-  inputs = {{
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-{all_inputs}  }};
-
-  outputs = {{ {output_params} }}@inputs:
-    let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
-      {pkgs_def}
-    in {{
-      packages = forAllSystems (system:
-        {pkgs_binding}
-        in rec {{
-{pkg_entries}{local_packages_entries}{custom_packages_entries}
-          default = pkgs.buildEnv {{
-            name = "nixy-env";
-            paths = [
-{buildenv_paths_str}            ];
-            extraOutputsToInstall = [ "man" "doc" "info" ];
-          }};
-        }});
-    }};
-}}
-"#
-    )
+    let mut builder = FlakeBuilder::new();
+    builder.add_standard_packages(&filtered_packages);
+    builder.add_local_flakes(&local_flakes);
+    builder.add_local_packages(&local_packages);
+    builder.add_custom_packages(&state.custom_packages);
+    builder.build()
 }
 
 #[cfg(test)]
