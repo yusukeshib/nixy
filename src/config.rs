@@ -75,9 +75,15 @@ pub const NIX_FLAGS: &[&str] = &[
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that modify environment variables
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_config_uses_dot_config_not_platform_specific() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
         // Ensure we use ~/.config/nixy, not platform-specific paths like
         // ~/Library/Application Support on macOS
         env::remove_var("NIXY_CONFIG_DIR");
@@ -100,6 +106,8 @@ mod tests {
 
     #[test]
     fn test_config_env_uses_local_state() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
         env::remove_var("NIXY_CONFIG_DIR");
         env::remove_var("NIXY_ENV");
 
@@ -115,6 +123,8 @@ mod tests {
 
     #[test]
     fn test_config_respects_env_vars() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
         env::set_var("NIXY_CONFIG_DIR", "/custom/config");
         env::set_var("NIXY_ENV", "/custom/env");
 

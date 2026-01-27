@@ -11,7 +11,7 @@ use crate::profile::{
 };
 use crate::state::{get_state_path, PackageState};
 
-use super::{info, success, warn};
+use super::{error, info, success, warn};
 
 pub fn run(config: &Config, args: ProfileArgs) -> Result<()> {
     match args.command {
@@ -68,10 +68,24 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        match Nix::build(&profile.dir, "default", &config.env_link) {
+        // Resolve symlinks in flake.nix to get the actual flake directory
+        // This is needed because nix doesn't handle symlinked flake.nix well
+        let flake_dir = if profile.flake_path.is_symlink() {
+            let target = fs::read_link(&profile.flake_path)?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                profile.flake_path.parent().unwrap_or(&profile.dir).join(&target)
+            };
+            fs::canonicalize(resolved.parent().unwrap_or(&resolved))?
+        } else {
+            fs::canonicalize(&profile.dir)?
+        };
+        match Nix::build(&flake_dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
-            Err(_) => {
+            Err(e) => {
                 warn("Profile switched but environment build failed. Run 'nixy sync' to rebuild.");
+                error(&format!("{}", e));
                 success(&format!("Switched to profile '{}'", name));
             }
         }
