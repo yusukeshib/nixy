@@ -5,6 +5,7 @@ mod error;
 mod flake;
 mod nix;
 mod profile;
+mod rollback;
 mod state;
 
 use clap::Parser;
@@ -15,6 +16,9 @@ use error::Error;
 use nix::Nix;
 
 fn main() {
+    // Initialize signal handler for Ctrl+C rollback
+    rollback::init_signal_handler();
+
     // Check dependencies
     if let Err(e) = Nix::check_installed() {
         commands::error(&e.to_string());
