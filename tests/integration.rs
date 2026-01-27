@@ -125,11 +125,13 @@ fn test_config_no_shell() {
 
 #[test]
 fn test_list_no_flake() {
+    // list command no longer requires flake.nix - it reads from packages.json
     let env = TestEnv::new();
     let output = env.cmd().arg("list").output().unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should show "(none)" for empty state
+    assert!(stdout.contains("(none)") || stdout.contains("Installed packages"));
 }
 
 // =============================================================================
@@ -138,11 +140,25 @@ fn test_list_no_flake() {
 
 #[test]
 fn test_sync_no_flake() {
+    // sync now auto-regenerates flake.nix from packages.json
     let env = TestEnv::new();
     let output = env.cmd().arg("sync").output().unwrap();
-    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
+
+    // Should mention regenerating flake.nix
+    assert!(
+        stdout.contains("Regenerating flake.nix") || stdout.contains("Syncing"),
+        "Expected regeneration or syncing message: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+
+    // Should NOT fail with "No flake.nix found"
+    assert!(
+        !stderr.contains("No flake.nix found"),
+        "Should not fail with NoFlakeFound error"
+    );
 }
 
 // =============================================================================
@@ -358,11 +374,25 @@ fn test_install_already_installed() {
 
 #[test]
 fn test_upgrade_no_flake() {
+    // upgrade now auto-regenerates flake.nix from packages.json
     let env = TestEnv::new();
     let output = env.cmd().arg("upgrade").output().unwrap();
-    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
+
+    // Should mention regenerating flake.nix
+    assert!(
+        stdout.contains("Regenerating flake.nix") || stdout.contains("Updating"),
+        "Expected regeneration or updating message: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+
+    // Should NOT fail with "No flake.nix found"
+    assert!(
+        !stderr.contains("No flake.nix found"),
+        "Should not fail with NoFlakeFound error"
+    );
 }
 
 // =============================================================================
@@ -378,11 +408,28 @@ fn test_uninstall_requires_package() {
 
 #[test]
 fn test_uninstall_no_flake() {
+    // uninstall now auto-regenerates flake.nix from packages.json
+    // but should still fail because the package is not installed
     let env = TestEnv::new();
     let output = env.cmd().args(["uninstall", "hello"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No flake.nix found") || stderr.contains("flake"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should NOT fail with "No flake.nix found"
+    assert!(
+        !stderr.contains("No flake.nix found"),
+        "Should not fail with NoFlakeFound error: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+
+    // Should fail because package is not installed
+    assert!(
+        stderr.contains("not found") || stderr.contains("not installed"),
+        "Expected 'not found' or 'not installed' error: stderr={}",
+        stderr
+    );
 }
 
 // =============================================================================

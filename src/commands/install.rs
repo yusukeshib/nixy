@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::flake::is_flake_file;
 use crate::flake::parser::parse_local_package_attr;
-use crate::flake::template::generate_flake;
+use crate::flake::template::regenerate_flake;
 use crate::nix::Nix;
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, CustomPackage, PackageState};
@@ -298,15 +298,6 @@ fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
         return Err(e);
     }
 
-    Ok(())
-}
-
-/// Regenerate flake.nix from state
-fn regenerate_flake(flake_dir: &Path, state: &PackageState) -> Result<()> {
-    let flake_path = flake_dir.join("flake.nix");
-    fs::create_dir_all(flake_dir)?;
-    let content = generate_flake(state, Some(flake_dir));
-    fs::write(&flake_path, content)?;
     Ok(())
 }
 
