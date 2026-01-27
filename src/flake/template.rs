@@ -133,7 +133,10 @@ impl FlakeBuilder {
     /// Build the pkgs definition (with or without overlays)
     fn build_pkgs_definition(&self) -> (String, &'static str) {
         if self.overlays.is_empty() {
-            (String::new(), "let pkgs = nixpkgs.legacyPackages.${system};")
+            (
+                String::new(),
+                "let pkgs = nixpkgs.legacyPackages.${system};",
+            )
         } else {
             let overlays_content = format!("overlays = [\n{}        ];", self.overlays);
             let pkgs_def = format!(

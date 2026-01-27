@@ -3,7 +3,6 @@ mod commands;
 mod config;
 mod error;
 mod flake;
-mod migration;
 mod nix;
 mod profile;
 mod state;
@@ -14,7 +13,6 @@ use cli::{Cli, Commands};
 use config::Config;
 use error::Error;
 use nix::Nix;
-use profile::get_flake_dir;
 
 fn main() {
     // Check dependencies
@@ -25,12 +23,6 @@ fn main() {
 
     let cli = Cli::parse();
     let config = Config::new();
-
-    // Run migration if needed (one-time migration from marker-based to state-based)
-    if let Err(e) = run_migration(&config) {
-        commands::error(&format!("Migration failed: {}", e));
-        std::process::exit(1);
-    }
 
     let result = match cli.command {
         Commands::Install(args) => commands::install::run(&config, args),
@@ -60,22 +52,4 @@ fn main() {
         }
         std::process::exit(1);
     }
-}
-
-/// Run migration if needed for the active profile
-fn run_migration(config: &Config) -> error::Result<()> {
-    // Get the active profile directory
-    let flake_dir = match get_flake_dir(config) {
-        Ok(dir) => dir,
-        Err(_) => return Ok(()), // No profile yet, nothing to migrate
-    };
-
-    // Check if migration is needed
-    if migration::needs_migration(&flake_dir) {
-        commands::info("Migrating to new state-based format...");
-        migration::migrate(&flake_dir)?;
-        commands::success("Migration complete. Package state is now stored in packages.json");
-    }
-
-    Ok(())
 }
