@@ -71,6 +71,9 @@ pub enum Error {
 
     #[error("Regex error: {0}")]
     Regex(#[from] regex::Error),
+
+    #[error("Interactive prompt error: {0}")]
+    Dialoguer(#[from] dialoguer::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

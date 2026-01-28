@@ -1,6 +1,9 @@
 use std::fs;
+use std::io::{self, IsTerminal};
 
-use crate::cli::{ProfileArgs, ProfileCommands};
+use dialoguer::{Confirm, Select};
+
+use crate::cli::ProfileArgs;
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::{Error, Result};
 use crate::flake::template::generate_flake;
@@ -14,14 +17,81 @@ use crate::state::{get_state_path, PackageState};
 use super::{error, info, success, warn};
 
 pub fn run(config: &Config, args: ProfileArgs) -> Result<()> {
-    match args.command {
-        Some(ProfileCommands::Switch { name, c: create }) => switch(config, &name, create),
-        Some(ProfileCommands::List) => list(config),
-        Some(ProfileCommands::Delete { name, force }) => delete(config, &name, force),
+    match (args.name, args.c, args.d) {
+        (None, false, false) => interactive_select(config),
+        (Some(name), false, false) => switch(config, &name, false),
+        (Some(name), true, false) => switch(config, &name, true),
+        (Some(name), false, true) => delete_interactive(config, &name),
+        (None, _, _) => Err(Error::Usage(
+            "Profile name required with -c or -d flag".to_string(),
+        )),
+        _ => unreachable!(),
+    }
+}
+
+fn interactive_select(config: &Config) -> Result<()> {
+    let active = get_active_profile(config);
+    let profiles = list_profiles(config)?;
+
+    // Check for legacy flake
+    if profiles.is_empty() && has_legacy_flake(config) {
+        info("Legacy flake detected at default location.");
+        info("Run 'nixy profile default' to migrate to the new profile structure.");
+        return Ok(());
+    }
+
+    if profiles.is_empty() {
+        info("No profiles found.");
+        info("Create a profile with: nixy profile <name> -c");
+        return Ok(());
+    }
+
+    // If not a TTY, just list profiles
+    if !io::stdin().is_terminal() {
+        info("Available profiles:");
+        for name in &profiles {
+            if *name == active {
+                println!("  * {} (active)", name);
+            } else {
+                println!("    {}", name);
+            }
+        }
+        return Ok(());
+    }
+
+    // Build selection items with active marker
+    let items: Vec<String> = profiles
+        .iter()
+        .map(|name| {
+            if *name == active {
+                format!("{} (active)", name)
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+
+    // Find index of active profile
+    let active_index = profiles.iter().position(|n| *n == active).unwrap_or(0);
+
+    let selection = Select::new()
+        .with_prompt("Select profile")
+        .items(&items)
+        .default(active_index)
+        .interact_opt()?;
+
+    match selection {
+        Some(idx) => {
+            let selected = &profiles[idx];
+            if *selected == active {
+                info(&format!("Already on profile '{}'", selected));
+                Ok(())
+            } else {
+                switch(config, selected, false)
+            }
+        }
         None => {
-            // Show current profile
-            let active = get_active_profile(config);
-            info(&format!("Active profile: {}", active));
+            // User pressed Esc
             Ok(())
         }
     }
@@ -51,7 +121,7 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
             state.save(&state_path)?;
         } else {
             return Err(Error::Usage(format!(
-                "Profile '{}' does not exist. Use -c to create it: nixy profile switch -c {}",
+                "Profile '{}' does not exist. Use -c to create it: nixy profile {} -c",
                 name, name
             )));
         }
@@ -88,37 +158,7 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
     Ok(())
 }
 
-fn list(config: &Config) -> Result<()> {
-    let active = get_active_profile(config);
-    info("Available profiles:");
-
-    let profiles = list_profiles(config)?;
-
-    if profiles.is_empty() {
-        // Check for legacy flake
-        if has_legacy_flake(config) {
-            println!("  * default (active, legacy location)");
-            println!();
-            info("Run 'nixy profile switch default' to migrate to the new profile structure.");
-        } else {
-            println!("  (no profiles)");
-            println!();
-            info("Create a profile with: nixy profile switch -c <name>");
-        }
-    } else {
-        for name in profiles {
-            if name == active {
-                println!("  * {} (active)", name);
-            } else {
-                println!("    {}", name);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn delete(config: &Config, name: &str, force: bool) -> Result<()> {
+fn delete_interactive(config: &Config, name: &str) -> Result<()> {
     validate_profile_name(name)?;
 
     let profile = Profile::new(name, config);
@@ -132,12 +172,26 @@ fn delete(config: &Config, name: &str, force: bool) -> Result<()> {
         return Err(Error::CannotDeleteActiveProfile);
     }
 
-    if !force {
-        warn(&format!(
-            "This will delete profile '{}' and all its packages.",
-            name
+    // If not a TTY, require explicit confirmation
+    if !io::stdin().is_terminal() {
+        return Err(Error::Usage(
+            "Cannot delete profile non-interactively. Use a terminal for confirmation.".to_string(),
         ));
-        return Err(Error::Usage("Use --force to confirm deletion.".to_string()));
+    }
+
+    warn(&format!(
+        "This will delete profile '{}' and all its packages.",
+        name
+    ));
+
+    let confirmed = Confirm::new()
+        .with_prompt("Are you sure?")
+        .default(false)
+        .interact()?;
+
+    if !confirmed {
+        info("Deletion cancelled.");
+        return Ok(());
     }
 
     info(&format!("Deleting profile '{}'...", name));

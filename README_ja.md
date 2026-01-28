@@ -68,9 +68,10 @@ nixy upgrade            # 全てアップグレード
 | `nixy search <query>` | パッケージを検索 |
 | `nixy upgrade` | 全 input をアップグレード |
 | `nixy sync` | flake.nix から再ビルド |
-| `nixy profile` | 現在のプロファイルを表示 |
-| `nixy profile switch <name>` | プロファイルを切り替え（`-c` で作成） |
-| `nixy profile list` | 全プロファイルを表示 |
+| `nixy profile` | プロファイル一覧 + 対話的 TUI 選択 |
+| `nixy profile <name>` | プロファイルを切り替え |
+| `nixy profile <name> -c` | プロファイルを作成して切り替え |
+| `nixy profile <name> -d` | プロファイルを削除（確認あり） |
 | `nixy self-upgrade` | nixy 自体をアップグレード |
 
 ## プロファイル
@@ -78,13 +79,15 @@ nixy upgrade            # 全てアップグレード
 用途別にパッケージセットを分けて管理：
 
 ```bash
-nixy profile switch -c work     # 新しいプロファイルを作成して切り替え
+nixy profile work -c            # 新しいプロファイルを作成して切り替え
 nixy install slack terraform    # 仕事用パッケージをインストール
 
-nixy profile switch -c personal # 別のプロファイル
+nixy profile personal -c        # 別のプロファイル
 nixy install spotify            # 別のパッケージ
 
-nixy profile list               # 全プロファイルを表示
+nixy profile                    # 対話的プロファイル選択
+nixy profile work               # 既存のプロファイルに切り替え
+nixy profile old -d             # プロファイルを削除（確認あり）
 ```
 
 各プロファイルは `~/.config/nixy/profiles/<name>/` に独自の `flake.nix` を持ちます。

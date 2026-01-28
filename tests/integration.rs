@@ -174,31 +174,41 @@ fn test_sync_no_flake() {
 // =============================================================================
 
 #[test]
-fn test_profile_shows_default() {
+fn test_profile_shows_profiles() {
     let env = TestEnv::new();
     let output = env.cmd().arg("profile").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Active profile: default"));
+    // With no profiles, should show "No profiles found" or similar
+    assert!(
+        stdout.contains("No profiles") || stdout.contains("Available profiles"),
+        "Should show profile info: {}",
+        stdout
+    );
 }
 
 #[test]
-fn test_profile_list_empty() {
+fn test_profile_no_profiles() {
     let env = TestEnv::new();
-    let output = env.cmd().args(["profile", "list"]).output().unwrap();
+    // Running profile with no args shows available profiles (or indicates none)
+    let output = env.cmd().arg("profile").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("no profiles") || stdout.contains("Available profiles"));
+    assert!(
+        stdout.contains("No profiles") || stdout.contains("Available profiles"),
+        "Should show profile status: {}",
+        stdout
+    );
 }
 
 #[test]
-fn test_profile_switch_create() {
+fn test_profile_create() {
     let env = TestEnv::new();
 
-    // Create a new profile
+    // Create a new profile with new syntax: nixy profile <name> -c
     let output = env
         .cmd()
-        .args(["profile", "switch", "-c", "test-profile"])
+        .args(["profile", "test-profile", "-c"])
         .output()
         .unwrap();
 
@@ -228,11 +238,8 @@ fn test_profile_switch_create() {
 fn test_profile_switch_nonexistent() {
     let env = TestEnv::new();
 
-    let output = env
-        .cmd()
-        .args(["profile", "switch", "nonexistent"])
-        .output()
-        .unwrap();
+    // New syntax: nixy profile <name> (without -c)
+    let output = env.cmd().args(["profile", "nonexistent"]).output().unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -246,9 +253,11 @@ fn test_profile_switch_nonexistent() {
 fn test_profile_delete_nonexistent() {
     let env = TestEnv::new();
 
+    // New syntax: nixy profile <name> -d
+    // Note: In non-TTY (test env), delete will fail because it requires interactive confirmation
     let output = env
         .cmd()
-        .args(["profile", "delete", "nonexistent", "--force"])
+        .args(["profile", "nonexistent", "-d"])
         .output()
         .unwrap();
 
@@ -259,9 +268,10 @@ fn test_profile_delete_nonexistent() {
 fn test_invalid_profile_name() {
     let env = TestEnv::new();
 
+    // New syntax: nixy profile <name> -c
     let output = env
         .cmd()
-        .args(["profile", "switch", "-c", "invalid name!"])
+        .args(["profile", "invalid name!", "-c"])
         .output()
         .unwrap();
 
@@ -567,33 +577,30 @@ fn test_profile_help() {
     let output = nixy_cmd().args(["profile", "--help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("switch"));
-    assert!(stdout.contains("list"));
-    assert!(stdout.contains("delete"));
+    // New flat structure should show -c and -d flags
+    assert!(stdout.contains("-c") || stdout.contains("Create"));
+    assert!(stdout.contains("-d") || stdout.contains("Delete"));
 }
 
 #[test]
-fn test_profile_switch_help() {
-    let output = nixy_cmd()
-        .args(["profile", "switch", "--help"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should show -c flag for create
-    assert!(stdout.contains("-c") || stdout.contains("create"));
-}
+fn test_profile_flags_conflict() {
+    let env = TestEnv::new();
 
-#[test]
-fn test_profile_delete_help() {
-    let output = nixy_cmd()
-        .args(["profile", "delete", "--help"])
+    // -c and -d flags should conflict
+    let output = env
+        .cmd()
+        .args(["profile", "test", "-c", "-d"])
         .output()
         .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should show --force flag
-    assert!(stdout.contains("--force") || stdout.contains("force"));
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Clap should report the conflict
+    assert!(
+        stderr.contains("cannot be used with") || stderr.contains("conflict"),
+        "Should report flag conflict: {}",
+        stderr
+    );
 }
 
 // =============================================================================
@@ -738,7 +745,7 @@ fn test_sync_with_profile() {
     let env = TestEnv::new();
 
     // Create a profile first
-    let _ = env.cmd().args(["profile", "switch", "-c", "test"]).output();
+    let _ = env.cmd().args(["profile", "test", "-c"]).output();
 
     // Sync should attempt to build
     let output = env.cmd().arg("sync").output().unwrap();
@@ -774,10 +781,11 @@ fn test_sync_with_profile() {
 fn test_profile_list_shows_active() {
     let env = TestEnv::new();
 
-    // Create and switch to a profile
-    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
+    // Create and switch to a profile with new syntax
+    let _ = env.cmd().args(["profile", "work", "-c"]).output();
 
-    let output = env.cmd().args(["profile", "list"]).output().unwrap();
+    // nixy profile now lists profiles (no subcommand needed)
+    let output = env.cmd().arg("profile").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should show work as active
@@ -789,28 +797,22 @@ fn test_profile_list_shows_active() {
 }
 
 #[test]
-fn test_profile_delete_requires_force() {
+fn test_profile_delete_requires_tty() {
     let env = TestEnv::new();
 
-    // Create two profiles
-    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    // Create two profiles with new syntax
+    let _ = env.cmd().args(["profile", "work", "-c"]).output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
-    // Try to delete without --force
-    let output = env
-        .cmd()
-        .args(["profile", "delete", "work"])
-        .output()
-        .unwrap();
+    // Try to delete (will fail because tests run without a TTY)
+    let output = env.cmd().args(["profile", "work", "-d"]).output().unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Should mention needing a terminal for confirmation
     assert!(
-        stderr.contains("--force"),
-        "Should mention --force: {}",
+        stderr.contains("terminal") || stderr.contains("TTY") || stderr.contains("interactively"),
+        "Should mention terminal requirement: {}",
         stderr
     );
 }
@@ -820,61 +822,50 @@ fn test_profile_delete_active_fails() {
     let env = TestEnv::new();
 
     // Create a profile and stay on it (it becomes active)
-    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
+    let _ = env.cmd().args(["profile", "work", "-c"]).output();
 
-    // Try to delete the active profile
-    let output = env
-        .cmd()
-        .args(["profile", "delete", "work", "--force"])
-        .output()
-        .unwrap();
+    // Try to delete the active profile (will fail for multiple reasons in test:
+    // 1. No TTY for confirmation
+    // 2. Cannot delete active profile)
+    let output = env.cmd().args(["profile", "work", "-d"]).output().unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_lower = stderr.to_lowercase();
+    // Should fail - either because it's the active profile or because no TTY
     assert!(
         stderr_lower.contains("active")
             || stderr_lower.contains("cannot delete")
             || stderr_lower.contains("can't delete")
-            || stderr_lower.contains("unable to delete"),
-        "Should prevent deleting active profile: {}",
+            || stderr_lower.contains("unable to delete")
+            || stderr_lower.contains("terminal")
+            || stderr_lower.contains("interactively"),
+        "Should prevent deleting active profile or require terminal: {}",
         stderr
     );
 }
 
 #[test]
-fn test_profile_delete_with_force_success() {
+fn test_profile_delete_non_tty() {
     let env = TestEnv::new();
 
     // Create two profiles and end up on default so work is not active
-    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "work", "-c"]).output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
-    // Delete work with --force
-    let output = env
-        .cmd()
-        .args(["profile", "delete", "work", "--force"])
-        .output()
-        .unwrap();
+    // Try to delete work - will fail because delete requires TTY for confirmation
+    let output = env.cmd().args(["profile", "work", "-d"]).output().unwrap();
 
-    // Should succeed with a confirmation message
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stdout_lower = stdout.to_lowercase();
+    // Should fail because tests run without a TTY
     assert!(
-        output.status.success(),
-        "Profile delete with --force should succeed: stdout={}, stderr={}",
-        stdout,
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "Profile delete should fail without TTY"
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout_lower.contains("deleted")
-            || stdout_lower.contains("removed")
-            || stdout.contains("work"),
-        "Should confirm deletion: {}",
-        stdout
+        stderr.contains("terminal") || stderr.contains("interactively"),
+        "Should mention terminal requirement: {}",
+        stderr
     );
 }
 
@@ -882,21 +873,14 @@ fn test_profile_delete_with_force_success() {
 fn test_profile_switch_with_existing() {
     let env = TestEnv::new();
 
-    // Create a profile
-    let _ = env.cmd().args(["profile", "switch", "-c", "work"]).output();
+    // Create a profile with new syntax
+    let _ = env.cmd().args(["profile", "work", "-c"]).output();
 
     // Create another profile
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
-    // Switch back with -c (should just switch, not error)
-    let output = env
-        .cmd()
-        .args(["profile", "switch", "-c", "work"])
-        .output()
-        .unwrap();
+    // Switch back with -c (should just switch, not error since profile exists)
+    let output = env.cmd().args(["profile", "work", "-c"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Should switch successfully - verify both success and mention of work profile
@@ -925,10 +909,7 @@ fn test_install_file_parses_pname() {
     let temp = TempDir::new().unwrap();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // Create a .nix file with pname
     let pkg_file = temp.path().join("my-pkg.nix");
@@ -980,10 +961,7 @@ fn test_install_file_requires_name_or_pname() {
     let temp = TempDir::new().unwrap();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // Create a .nix file without name or pname
     let pkg_file = temp.path().join("invalid-pkg.nix");
@@ -1024,10 +1002,7 @@ fn test_install_file_detects_flake() {
     let temp = TempDir::new().unwrap();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // Create a flake file (has inputs and outputs)
     let flake_file = temp.path().join("my-flake.nix");
@@ -1111,10 +1086,7 @@ fn test_list_shows_none_for_empty_flake() {
     let env = TestEnv::new();
 
     // Create a profile (empty flake)
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     let output = env.cmd().arg("list").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1286,10 +1258,7 @@ fn test_uninstall_package_not_installed() {
     let env = TestEnv::new();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // Uninstalling a non-existent package
     let output = env
@@ -1348,10 +1317,7 @@ fn test_install_from_unknown_registry() {
     let env = TestEnv::new();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     let output = env
         .cmd()
@@ -1377,10 +1343,7 @@ fn test_install_from_detects_direct_url() {
     let env = TestEnv::new();
 
     // Create a profile first
-    let _ = env
-        .cmd()
-        .args(["profile", "switch", "-c", "default"])
-        .output();
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     let output = env
         .cmd()

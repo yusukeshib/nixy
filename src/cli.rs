@@ -85,37 +85,16 @@ pub struct UninstallArgs {
 
 #[derive(Args)]
 pub struct ProfileArgs {
-    #[command(subcommand)]
-    pub command: Option<ProfileCommands>,
-}
+    /// Profile name
+    pub name: Option<String>,
 
-#[derive(Subcommand)]
-pub enum ProfileCommands {
-    /// Switch to a different profile
-    #[command(alias = "use")]
-    Switch {
-        /// Profile name
-        name: String,
+    /// Create the profile if it doesn't exist
+    #[arg(short, conflicts_with = "d")]
+    pub c: bool,
 
-        /// Create the profile if it doesn't exist
-        #[arg(short)]
-        c: bool,
-    },
-
-    /// List all profiles
-    #[command(alias = "ls")]
-    List,
-
-    /// Delete a profile
-    #[command(alias = "rm")]
-    Delete {
-        /// Profile name to delete
-        name: String,
-
-        /// Force deletion without confirmation
-        #[arg(long)]
-        force: bool,
-    },
+    /// Delete the specified profile
+    #[arg(short, conflicts_with = "c")]
+    pub d: bool,
 }
 
 #[derive(Args)]
