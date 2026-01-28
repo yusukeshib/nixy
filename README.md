@@ -72,9 +72,10 @@ nixy upgrade            # Upgrade all
 | `nixy search <query>` | Search for packages |
 | `nixy upgrade` | Upgrade all inputs |
 | `nixy sync` | Rebuild from flake.nix |
-| `nixy profile` | Show current profile |
-| `nixy profile switch <name>` | Switch profile (`-c` to create) |
-| `nixy profile list` | List all profiles |
+| `nixy profile` | List profiles + interactive TUI selection |
+| `nixy profile <name>` | Switch to profile |
+| `nixy profile <name> -c` | Create and switch to profile |
+| `nixy profile <name> -d` | Delete profile (with confirmation) |
 | `nixy self-upgrade` | Upgrade nixy itself |
 
 ## Profiles
@@ -82,13 +83,15 @@ nixy upgrade            # Upgrade all
 Maintain separate package sets for different contexts:
 
 ```bash
-nixy profile switch -c work     # Create and switch to new profile
+nixy profile work -c            # Create and switch to new profile
 nixy install slack terraform    # Install work packages
 
-nixy profile switch -c personal # Another profile
+nixy profile personal -c        # Another profile
 nixy install spotify            # Different packages
 
-nixy profile list               # See all profiles
+nixy profile                    # Interactive profile selector
+nixy profile work               # Switch to existing profile
+nixy profile old -d             # Delete a profile (with confirmation)
 ```
 
 Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`.
