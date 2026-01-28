@@ -9,9 +9,9 @@ nixy is a Homebrew-style wrapper for Nix using flake.nix. It's a Rust CLI tool t
 When adding new features or fixing bugs, follow this workflow:
 
 ### 1. Create a Feature Branch with Worktree
-For new features, use `git wt` to work in an isolated directory:
+For new features, use [worktrunk](https://github.com/max-sixty/worktrunk) to work in an isolated directory:
 ```bash
-git wt <username>/<feature-name>
+wt switch --create <username>/<feature-name>
 ```
 This creates the branch and worktree automatically, then switches to the worktree directory.
 This keeps the main worktree clean and allows parallel development.
@@ -93,9 +93,9 @@ gh pr create --title "Feature description" --body "## Summary
 
 ### 8. Cleanup Worktree (after PR is merged)
 ```bash
-git wt -d <username>/<feature-name>
+wt remove <username>/<feature-name>
 ```
-This removes both the worktree and the branch.
+This removes the worktree and deletes the branch if merged.
 
 Commit message style:
 - Start with verb (Add, Fix, Update, Make, etc.)

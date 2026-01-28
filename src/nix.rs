@@ -71,19 +71,15 @@ impl Nix {
         let ref_str = flake_ref(flake_dir, Some(output));
         let out_link_str = out_link.to_string_lossy();
 
-        let mut cmd = Command::new("nix");
-        cmd.args(NIX_FLAGS);
-        cmd.env("NIXPKGS_ALLOW_UNFREE", "1");
-        cmd.args(["build", &ref_str, "--out-link", &out_link_str, "--impure"]);
+        let status = Command::new("nix")
+            .args(NIX_FLAGS)
+            .env("NIXPKGS_ALLOW_UNFREE", "1")
+            .args(["build", &ref_str, "--out-link", &out_link_str, "--impure"])
+            .status()
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        let output = cmd.output().map_err(|e| Error::NixCommand(e.to_string()))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::NixCommand(format!(
-                "Failed to build environment: {}",
-                stderr.trim()
-            )));
+        if !status.success() {
+            return Err(Error::NixCommand("Failed to build environment".to_string()));
         }
 
         Ok(())
@@ -118,14 +114,10 @@ impl Nix {
 
         cmd.arg("--flake").arg(flake_dir);
 
-        let output = cmd.output().map_err(|e| Error::NixCommand(e.to_string()))?;
+        let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::NixCommand(format!(
-                "Failed to update flake: {}",
-                stderr.trim()
-            )));
+        if !status.success() {
+            return Err(Error::NixCommand("Failed to update flake".to_string()));
         }
 
         Ok(())
@@ -133,19 +125,15 @@ impl Nix {
 
     /// Update all flake inputs
     pub fn flake_update_all(flake_dir: &Path) -> Result<()> {
-        let output = Command::new("nix")
+        let status = Command::new("nix")
             .args(NIX_FLAGS)
             .args(["flake", "update", "--flake"])
             .arg(flake_dir)
-            .output()
+            .status()
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::NixCommand(format!(
-                "Failed to update flake: {}",
-                stderr.trim()
-            )));
+        if !status.success() {
+            return Err(Error::NixCommand("Failed to update flake".to_string()));
         }
 
         Ok(())
