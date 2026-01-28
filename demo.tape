@@ -3,54 +3,59 @@
 
 Output demo.gif
 
-Set FontSize 16
+Set FontSize 13
 Set Width 800
-Set Height 500
+Set Height 600
 Set Theme "Catppuccin Mocha"
 Set Shell "bash"
 Set TypingSpeed 50ms
 
 # Hidden setup
-Hide
-Type "export NIXY_CONFIG_DIR=/tmp/nixy-demo-config NIXY_ENV=/tmp/nixy-demo-env"
-Enter
-Type "alias nixy='./nixy'"
-Enter
-Sleep 500ms
-Show
+# Hide
+# Type "export NIXY_CONFIG_DIR=/tmp/nixy-demo-config NIXY_ENV=/tmp/nixy-demo-env"
+# Enter
+# Show
 
-Type "# Install packages like Homebrew"
+Type "# Add packages like Homebrew"
 Enter
 Sleep 500ms
 
-Type "nixy install ripgrep"
+Type "nixy add ripgrep"
 Enter
-Sleep 6s
+Wait
 
-Type "nixy install fzf"
+Type "nixy add fzf"
 Enter
-Sleep 5s
+Wait
 
-Type "# See what's installed"
+Type "# See what's added"
 Enter
 Sleep 500ms
 
 Type "nixy list"
 Enter
-Sleep 2s
+Wait
 
 Type "# Search for packages"
 Enter
 Sleep 500ms
 
-Type "nixy search nodejs"
+Type "nixy search vhs"
 Enter
-Sleep 3s
+Wait
 
-Type "# Check the generated flake.nix"
+Type "# Create a new profile"
 Enter
 Sleep 500ms
 
-Type "head -30 $NIXY_CONFIG_DIR/flake.nix"
+Type "nixy profile work -c"
 Enter
-Sleep 3s
+Wait
+
+Type "# Switch to a profile"
+Enter
+Sleep 500ms
+
+Type "nixy profile default"
+Enter
+Wait
