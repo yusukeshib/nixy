@@ -46,19 +46,44 @@ pub fn is_flake_file(path: &Path) -> bool {
     for entry in attrset.attrpath_values() {
         if let Some(attrpath) = entry.attrpath() {
             // Get first component of the path
-            if let Some(rnix::ast::Attr::Ident(ident)) = attrpath.attrs().next() {
-                if let Some(token) = ident.ident_token() {
-                    match token.text() {
-                        "inputs" => has_inputs = true,
-                        "outputs" => has_outputs = true,
-                        _ => {}
+            let attr_name = match attrpath.attrs().next() {
+                Some(rnix::ast::Attr::Ident(ident)) => {
+                    ident.ident_token().map(|t| t.text().to_string())
+                }
+                Some(rnix::ast::Attr::Str(s)) => {
+                    // Handle quoted attribute names like { "inputs" = ...; }
+                    // Extract the string value, returning None if it contains interpolation
+                    let mut result = String::new();
+                    for part in s.parts() {
+                        match part {
+                            rnix::ast::InterpolPart::Literal(lit) => {
+                                result.push_str(&lit.to_string());
+                            }
+                            rnix::ast::InterpolPart::Interpolation(_) => {
+                                return false; // Can't handle dynamic attribute names
+                            }
+                        }
                     }
+                    Some(result)
+                }
+                _ => None,
+            };
+
+            if let Some(name) = attr_name {
+                match name.as_str() {
+                    "inputs" => has_inputs = true,
+                    "outputs" => has_outputs = true,
+                    _ => {}
+                }
+                // Early return once both are found
+                if has_inputs && has_outputs {
+                    return true;
                 }
             }
         }
     }
 
-    has_inputs && has_outputs
+    false
 }
 
 /// Local package information parsed from .nix files
@@ -168,5 +193,20 @@ mod tests {
         let path = temp.path().join("invalid.nix");
         fs::write(&path, r#"{ inputs = outputs = }"#).unwrap();
         assert!(!is_flake_file(&path));
+    }
+
+    #[test]
+    fn test_is_flake_file_quoted_attrs() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("quoted-flake.nix");
+        fs::write(
+            &path,
+            r#"{
+            "inputs".nixpkgs.url = "github:NixOS/nixpkgs";
+            "outputs" = { nixpkgs, ... }: { };
+        }"#,
+        )
+        .unwrap();
+        assert!(is_flake_file(&path));
     }
 }
