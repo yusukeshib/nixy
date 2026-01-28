@@ -25,7 +25,9 @@ pub fn run(config: &Config, args: ProfileArgs) -> Result<()> {
         (None, _, _) => Err(Error::Usage(
             "Profile name required with -c or -d flag".to_string(),
         )),
-        _ => unreachable!(),
+        (Some(_), true, true) => Err(Error::Usage(
+            "Options -c (create) and -d (delete) cannot be used together".to_string(),
+        )),
     }
 }
 
