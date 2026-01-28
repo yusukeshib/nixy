@@ -52,25 +52,8 @@ pub fn is_flake_file(path: &Path) -> bool {
                 }
                 Some(rnix::ast::Attr::Str(s)) => {
                     // Handle quoted attribute names like { "inputs" = ...; }
-                    // Extract the string value, returning None if it contains interpolation
-                    let mut result = String::new();
-                    let mut has_interpolation = false;
-                    for part in s.parts() {
-                        match part {
-                            rnix::ast::InterpolPart::Literal(lit) => {
-                                result.push_str(&lit.to_string());
-                            }
-                            rnix::ast::InterpolPart::Interpolation(_) => {
-                                // Can't evaluate dynamic attribute names, skip this attribute
-                                has_interpolation = true;
-                            }
-                        }
-                    }
-                    if has_interpolation {
-                        None
-                    } else {
-                        Some(result)
-                    }
+                    // Reuse shared helper; returns None if it contains interpolation
+                    parser::extract_string_value(&s)
                 }
                 _ => None,
             };

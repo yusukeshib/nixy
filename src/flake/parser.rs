@@ -93,8 +93,10 @@ fn extract_expr_value(expr: &rnix::ast::Expr) -> Option<String> {
     }
 }
 
-/// Extract the string value from a Str node, handling escape sequences
-fn extract_string_value(s: &rnix::ast::Str) -> Option<String> {
+/// Extract the string value from a Str node, handling escape sequences.
+///
+/// Returns None if the string contains interpolation (cannot be evaluated statically).
+pub fn extract_string_value(s: &rnix::ast::Str) -> Option<String> {
     let mut result = String::new();
     for part in s.parts() {
         match part {
