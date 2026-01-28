@@ -79,7 +79,9 @@ impl Nix {
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixCommand("Failed to build environment".to_string()));
+            return Err(Error::NixCommand(
+                "Failed to build environment. See output above for details.".to_string(),
+            ));
         }
 
         Ok(())
@@ -117,7 +119,9 @@ impl Nix {
         let status = cmd.status().map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixCommand("Failed to update flake".to_string()));
+            return Err(Error::NixCommand(
+                "Failed to update flake. See output above for details.".to_string(),
+            ));
         }
 
         Ok(())
@@ -133,7 +137,9 @@ impl Nix {
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
         if !status.success() {
-            return Err(Error::NixCommand("Failed to update flake".to_string()));
+            return Err(Error::NixCommand(
+                "Failed to update flake. See output above for details.".to_string(),
+            ));
         }
 
         Ok(())

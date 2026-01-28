@@ -142,20 +142,97 @@ PR=<number> REPO="owner/repo" INTERVAL=300; LAST=$(gh api repos/$REPO/pulls/$PR/
 
 ### pr-feedback-loop
 When user asks to monitor and resolve PR feedback automatically:
-1. Start pr-watch in background
-2. When new feedback arrives:
-   - Read the comments
+
+**Prerequisites (one-time setup):**
+```bash
+gh extension install ChrisCarini/gh-copilot-review
+```
+
+Add these to `.claude/settings.json` to avoid permission prompts:
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api graphql:*)",
+      "Bash(gh copilot-review:*)",
+      "Bash(cargo test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
+```
+
+**Workflow:**
+1. Check for existing unresolved review threads (not just new comments)
+2. For each unresolved thread:
+   - Read the feedback
    - Fix the code issues
-   - Run tests (`cargo test --test integration`)
+   - Run tests (`cargo test`)
    - Commit and push changes
-   - Resolve review threads via GraphQL:
-     ```
-     gh api graphql -f query='query { repository(owner: "OWNER", name: "REPO") { pullRequest(number: NUM) { reviewThreads(first: 50) { nodes { id isResolved } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id'
-     ```
-     Then for each thread_id:
-     ```
-     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } } }'
-     ```
-   - Copilot automatically re-reviews on new commits (no manual trigger needed)
-3. Continue monitoring
-4. When Copilot review has no new change feedback, the task is complete
+   - Resolve the thread
+3. Request Copilot re-review:
+   - First check if `gh-copilot-review` extension is installed: `gh extension list | grep copilot-review`
+   - If not installed: `gh extension install ChrisCarini/gh-copilot-review`
+   - Request review: `gh copilot-review <PR>`
+4. Verify Copilot is assigned:
+   - Check requested reviewers: `gh api repos/$OWNER/$REPO/pulls/$PR --jq '.requested_reviewers[].login'`
+   - Should show "Copilot" in the list
+5. Wait for review to complete:
+   - Poll every 30 seconds: `gh api repos/$OWNER/$REPO/pulls/$PR/reviews --jq 'length'`
+   - Review is complete when count increases (typically takes 30-90 seconds)
+6. Check for new unresolved threads and repeat until none remain
+
+**Key commands:**
+
+Get unresolved threads with their comments:
+```bash
+gh api graphql -f query='
+  query($owner: String!, $repo: String!, $pr: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $pr) {
+        reviewThreads(first: 100) {
+          nodes {
+            id
+            isResolved
+            comments(first: 10) {
+              nodes {
+                body
+                path
+                line
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+' -f owner=OWNER -f repo=REPO -F pr=NUM
+```
+
+Resolve a thread after fixing the issue:
+```bash
+gh api graphql -f query='
+  mutation($threadId: ID!) {
+    resolveReviewThread(input: {threadId: $threadId}) {
+      thread { isResolved }
+    }
+  }
+' -f threadId=THREAD_ID
+```
+
+Request Copilot re-review (reliable, doesn't depend on auto-review):
+```bash
+gh copilot-review <PR>
+```
+
+Check if Copilot has been requested to review:
+```bash
+gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
+```
+
+If Copilot hasn't been requested, add them as a reviewer:
+```bash
+gh pr edit $PR --add-reviewer copilot
+```
