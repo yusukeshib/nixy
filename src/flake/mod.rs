@@ -34,7 +34,7 @@ pub fn is_flake_file(path: &Path) -> bool {
         None => return false,
     };
 
-    // Flake must be an attribute set at the top level
+    // Flake must be an attribute set at the top level (recursive or not)
     let attrset = match expr {
         rnix::ast::Expr::AttrSet(a) => a,
         _ => return false,
@@ -54,17 +54,23 @@ pub fn is_flake_file(path: &Path) -> bool {
                     // Handle quoted attribute names like { "inputs" = ...; }
                     // Extract the string value, returning None if it contains interpolation
                     let mut result = String::new();
+                    let mut has_interpolation = false;
                     for part in s.parts() {
                         match part {
                             rnix::ast::InterpolPart::Literal(lit) => {
                                 result.push_str(&lit.to_string());
                             }
                             rnix::ast::InterpolPart::Interpolation(_) => {
-                                return false; // Can't handle dynamic attribute names
+                                // Can't evaluate dynamic attribute names, skip this attribute
+                                has_interpolation = true;
                             }
                         }
                     }
-                    Some(result)
+                    if has_interpolation {
+                        None
+                    } else {
+                        Some(result)
+                    }
                 }
                 _ => None,
             };
@@ -191,6 +197,8 @@ mod tests {
     fn test_is_flake_file_invalid_syntax() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("invalid.nix");
+        // Invalid Nix: chained assignment (`{ inputs = outputs = }`) is malformed syntax.
+        // is_flake_file must treat parse errors as non-flakes.
         fs::write(&path, r#"{ inputs = outputs = }"#).unwrap();
         assert!(!is_flake_file(&path));
     }
@@ -204,6 +212,38 @@ mod tests {
             r#"{
             "inputs".nixpkgs.url = "github:NixOS/nixpkgs";
             "outputs" = { nixpkgs, ... }: { };
+        }"#,
+        )
+        .unwrap();
+        assert!(is_flake_file(&path));
+    }
+
+    #[test]
+    fn test_is_flake_file_recursive_attrset() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("rec-flake.nix");
+        fs::write(
+            &path,
+            r#"rec {
+            inputs.nixpkgs.url = "github:NixOS/nixpkgs";
+            outputs = { nixpkgs, ... }: { };
+        }"#,
+        )
+        .unwrap();
+        assert!(is_flake_file(&path));
+    }
+
+    #[test]
+    fn test_is_flake_file_with_interpolated_attr_skipped() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("interpolated-flake.nix");
+        // File with an interpolated attribute name should still detect inputs/outputs
+        fs::write(
+            &path,
+            r#"{
+            inputs.nixpkgs.url = "github:NixOS/nixpkgs";
+            "${"dynamic"}" = "value";
+            outputs = { nixpkgs, ... }: { };
         }"#,
         )
         .unwrap();
