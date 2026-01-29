@@ -14,15 +14,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Install a package from nixpkgs
+    /// Install a package from nixpkgs [alias: add]
     #[command(alias = "add")]
     Install(InstallArgs),
 
-    /// Uninstall a package
+    /// Uninstall a package [alias: remove]
     #[command(alias = "remove")]
     Uninstall(UninstallArgs),
 
-    /// List packages in flake.nix
+    /// List packages in flake.nix [alias: ls]
     #[command(alias = "ls")]
     List,
 
@@ -49,9 +49,6 @@ pub enum Commands {
 
     /// Upgrade nixy to the latest version
     SelfUpgrade(SelfUpgradeArgs),
-
-    /// Show nixy version
-    Version,
 }
 
 #[derive(Args)]

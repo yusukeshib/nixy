@@ -66,11 +66,11 @@ nixy upgrade            # 全てアップグレード
 
 | コマンド | 説明 |
 |---------|------|
-| `nixy install <pkg>` | パッケージをインストール |
+| `nixy install <pkg>` | パッケージをインストール（エイリアス: `add`） |
 | `nixy install --from <flake> <pkg>` | flake URL からインストール |
 | `nixy install --file <path>` | nix ファイルからインストール |
-| `nixy uninstall <pkg>` | パッケージをアンインストール |
-| `nixy list` | インストール済みパッケージを表示 |
+| `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
+| `nixy list` | インストール済みパッケージを表示（エイリアス: `ls`） |
 | `nixy search <query>` | パッケージを検索 |
 | `nixy upgrade` | 全 input をアップグレード |
 | `nixy sync` | flake.nix から再ビルド |

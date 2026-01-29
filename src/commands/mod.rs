@@ -7,8 +7,6 @@ pub mod self_upgrade;
 pub mod sync;
 pub mod uninstall;
 pub mod upgrade;
-pub mod version;
-
 use colored::Colorize;
 
 /// Print info message

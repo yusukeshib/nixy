@@ -70,11 +70,11 @@ nixy upgrade            # Upgrade all
 
 | Command | Description |
 |---------|-------------|
-| `nixy install <pkg>` | Install a package |
+| `nixy install <pkg>` | Install a package (alias: `add`) |
 | `nixy install --from <flake> <pkg>` | Install from a flake URL |
 | `nixy install --file <path>` | Install from a nix file |
-| `nixy uninstall <pkg>` | Uninstall a package |
-| `nixy list` | List installed packages |
+| `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
+| `nixy list` | List installed packages (alias: `ls`) |
 | `nixy search <query>` | Search for packages |
 | `nixy upgrade` | Upgrade all inputs |
 | `nixy sync` | Rebuild from flake.nix |

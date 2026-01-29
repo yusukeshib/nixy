@@ -40,14 +40,6 @@ impl TestEnv {
 // =============================================================================
 
 #[test]
-fn test_version() {
-    let output = nixy_cmd().arg("version").output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("nixy version"));
-}
-
-#[test]
 fn test_version_flag() {
     let output = nixy_cmd().arg("--version").output().unwrap();
     assert!(output.status.success());
@@ -536,14 +528,6 @@ fn test_help_shows_profile_command() {
     assert!(stdout.contains("profile"));
 }
 
-#[test]
-fn test_help_shows_version_command() {
-    let output = nixy_cmd().arg("--help").output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("version"));
-}
-
 // =============================================================================
 // Install subcommand help tests
 // =============================================================================
@@ -601,20 +585,6 @@ fn test_profile_flags_conflict() {
         "Should report flag conflict: {}",
         stderr
     );
-}
-
-// =============================================================================
-// Version format tests
-// =============================================================================
-
-#[test]
-fn test_version_shows_semver_format() {
-    let output = nixy_cmd().arg("version").output().unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should contain version in semver-like format (X.Y.Z)
-    let has_version = stdout.contains("0.1") || stdout.contains("version");
-    assert!(has_version, "Should show version: {}", stdout);
 }
 
 // =============================================================================

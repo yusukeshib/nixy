@@ -38,10 +38,6 @@ fn main() {
         Commands::Config { shell } => commands::config::run(&shell),
         Commands::Profile(args) => commands::profile::run(&config, args),
         Commands::SelfUpgrade(args) => commands::self_upgrade::run(args.force),
-        Commands::Version => {
-            commands::version::run();
-            Ok(())
-        }
     };
 
     if let Err(e) = result {
