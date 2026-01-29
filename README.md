@@ -29,7 +29,7 @@ curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix 
 curl -fsSL https://raw.githubusercontent.com/yusukeshib/nixy/main/install.sh | bash
 
 # Or with cargo
-cargo install nixy
+cargo install nixy-rs
 
 # Or with nix
 nix profile install github:yusukeshib/nixy
