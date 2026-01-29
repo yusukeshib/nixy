@@ -2,6 +2,12 @@
 
 [日本語版はこちら](README_ja.md)
 
+## Why nixy?
+
+I was frustrated with asdf and Homebrew while working, and tried to learn Nix several times—but the steep learning curve made me give up every time. What I really wanted was a simple asdf/Homebrew alternative that uses Nix's massive package repository and reproducibility under the hood.
+
+So I built nixy—a simple Rust wrapper with profile support. It runs smoothly and I love it.
+
 ![nixy demo](demo.gif)
 
 **Reproducible Nix packages, simple commands.** Install packages with a single command, sync them across all your machines.
