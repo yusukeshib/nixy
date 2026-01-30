@@ -12,7 +12,9 @@ use crate::error::{Error, Result};
 use crate::nix::Nix;
 
 /// Deserialize a Vec that might be null in the JSON
-fn deserialize_null_as_empty_vec<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+fn deserialize_null_as_empty_vec<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
