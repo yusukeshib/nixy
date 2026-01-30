@@ -66,6 +66,21 @@ pub enum Error {
     #[error("State file error: {0}")]
     StateFile(String),
 
+    #[error("Nixhub API error: {0}")]
+    NixhubApi(String),
+
+    #[error("Package '{0}' not found on Nixhub")]
+    NixhubPackageNotFound(String),
+
+    #[error("Version '{1}' not found for package '{0}' on Nixhub")]
+    NixhubVersionNotFound(String, String),
+
+    #[error("Failed to resolve package '{0}' version '{1}': {2}")]
+    NixhubResolve(String, String, String),
+
+    #[error("Cannot reach Nixhub API. Check your internet connection.")]
+    NixhubUnreachable,
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

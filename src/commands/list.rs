@@ -16,8 +16,10 @@ struct PackageEntry {
 
 /// Source of a package
 enum PackageSource {
-    /// Standard nixpkgs package
+    /// Standard nixpkgs package (legacy, no version info)
     Nixpkgs,
+    /// Resolved nixpkgs package with version
+    NixpkgsVersioned { version: String },
     /// Custom package from an external flake
     Custom { url: String },
     /// Local package from packages/ directory
@@ -27,10 +29,22 @@ enum PackageSource {
 impl PackageSource {
     fn display(&self) -> String {
         match self {
-            PackageSource::Nixpkgs => "nixpkgs".to_string(),
+            PackageSource::Nixpkgs | PackageSource::NixpkgsVersioned { .. } => {
+                "nixpkgs".to_string()
+            }
             PackageSource::Custom { url } => url.clone(),
             PackageSource::Local => "local".to_string(),
         }
+    }
+}
+
+/// Format package name with version if available
+fn format_package_name(entry: &PackageEntry) -> String {
+    match &entry.source {
+        PackageSource::NixpkgsVersioned { version } => {
+            format!("{}@{}", entry.name, version)
+        }
+        _ => entry.name.clone(),
     }
 }
 
@@ -48,13 +62,24 @@ pub fn run(config: &Config) -> Result<()> {
     let mut entries: Vec<PackageEntry> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    // Add standard nixpkgs packages
+    // Add legacy nixpkgs packages (no version info)
     for name in &state.packages {
         entries.push(PackageEntry {
             name: name.clone(),
             source: PackageSource::Nixpkgs,
         });
         seen.insert(name.clone());
+    }
+
+    // Add resolved nixpkgs packages (with version info)
+    for pkg in &state.resolved_packages {
+        entries.push(PackageEntry {
+            name: pkg.name.clone(),
+            source: PackageSource::NixpkgsVersioned {
+                version: pkg.resolved_version.clone(),
+            },
+        });
+        seen.insert(pkg.name.clone());
     }
 
     // Add custom packages
@@ -98,13 +123,18 @@ pub fn run(config: &Config) -> Result<()> {
     if entries.is_empty() {
         println!("  (none)");
     } else {
-        // Calculate column width for alignment
-        let max_name_len = entries.iter().map(|e| e.name.len()).max().unwrap_or(0);
+        // Calculate column width for alignment (using formatted name with version)
+        let max_name_len = entries
+            .iter()
+            .map(|e| format_package_name(e).len())
+            .max()
+            .unwrap_or(0);
 
         for entry in entries {
+            let formatted_name = format_package_name(&entry);
             println!(
                 "  {:<width$}  ({})",
-                entry.name,
+                formatted_name,
                 entry.source.display(),
                 width = max_name_len
             );

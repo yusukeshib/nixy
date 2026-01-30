@@ -1438,9 +1438,11 @@ fn test_install_reverts_flake_on_sync_failure() {
             "On success, state should contain the installed package"
         );
         let current_flake = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+        // Check for either legacy format (pkgs.hello) or new Nixhub format (inputs.nixpkgs-*)
         assert!(
-            current_flake.contains("hello = pkgs.hello"),
-            "On success, flake should contain the installed package"
+            current_flake.contains("hello = pkgs.hello")
+                || current_flake.contains("hello = inputs.nixpkgs-"),
+            "On success, flake should contain the installed package (legacy or Nixhub format)"
         );
     }
 }

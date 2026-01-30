@@ -88,6 +88,7 @@ impl Nix {
     }
 
     /// Search for packages in nixpkgs (passes through to stdout/stderr)
+    #[allow(dead_code)]
     pub fn search(query: &str) -> Result<()> {
         let status = Command::new("nix")
             .args(NIX_FLAGS)
@@ -171,6 +172,7 @@ impl Nix {
     }
 
     /// Validate that a package exists in nixpkgs
+    #[allow(dead_code)]
     pub fn validate_package(pkg: &str) -> Result<bool> {
         let attr = format!("nixpkgs#{}.type", pkg);
 

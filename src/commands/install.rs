@@ -9,9 +9,10 @@ use crate::flake::is_flake_file;
 use crate::flake::parser::parse_local_package_attr;
 use crate::flake::template::regenerate_flake;
 use crate::nix::Nix;
+use crate::nixhub::{parse_package_spec, NixhubClient};
 use crate::profile::get_flake_dir;
 use crate::rollback::{self, RollbackContext};
-use crate::state::{get_state_path, CustomPackage, PackageState};
+use crate::state::{get_state_path, CustomPackage, PackageState, ResolvedNixpkgPackage};
 
 use super::{info, success, warn};
 
@@ -29,12 +30,15 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         return install_from_registry(config, &from, &pkg);
     }
 
-    // Standard nixpkgs install
-    let pkg = args.package.ok_or_else(|| {
+    // Standard nixpkgs install (via Nixhub)
+    let pkg_spec_str = args.package.ok_or_else(|| {
         Error::Usage(
-            "Usage: nixy install <package> or nixy install --file <path> or nixy install --from <registry> <package>".to_string(),
+            "Usage: nixy install <package>[@version] or nixy install --file <path> or nixy install --from <registry> <package>".to_string(),
         )
     })?;
+
+    // Parse package spec (e.g., "nodejs@20" or "ripgrep")
+    let pkg_spec = parse_package_spec(&pkg_spec_str);
 
     // Get flake directory
     let flake_dir = get_flake_dir(config)?;
@@ -44,22 +48,42 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     let mut state = PackageState::load(&state_path)?;
 
     // Check if package is already installed
-    if state.has_package(&pkg) {
-        success(&format!("Package '{}' is already installed", pkg));
+    if state.has_package(&pkg_spec.name) {
+        success(&format!("Package '{}' is already installed", pkg_spec.name));
         return Ok(());
     }
 
-    // Validate package exists in nixpkgs
-    info(&format!("Validating package {}...", pkg));
-    if !Nix::validate_package(&pkg)? {
-        return Err(Error::PackageNotFound(pkg));
-    }
+    // Resolve package via Nixhub
+    let version_display = pkg_spec.version.as_deref().unwrap_or("latest");
+    info(&format!(
+        "Resolving {}@{} via Nixhub...",
+        pkg_spec.name, version_display
+    ));
+
+    let client = NixhubClient::new();
+    let resolved = client.resolve_for_current_system(
+        &pkg_spec.name,
+        pkg_spec.version.as_deref().unwrap_or("latest"),
+    )?;
+
+    info(&format!(
+        "Found {} version {} (commit {})",
+        resolved.name,
+        resolved.version,
+        &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
+    ));
 
     // Save original state for rollback
     let original_state = state.clone();
 
-    // Add package to state
-    state.add_package(&pkg);
+    // Add resolved package to state
+    state.add_resolved_package(ResolvedNixpkgPackage {
+        name: resolved.name.clone(),
+        version_spec: pkg_spec.version.clone(),
+        resolved_version: resolved.version.clone(),
+        attribute_path: resolved.attribute_path.clone(),
+        commit_hash: resolved.commit_hash.clone(),
+    });
     state.save(&state_path)?;
 
     // Regenerate flake.nix (rollback state if this fails)
@@ -78,7 +102,10 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         created_dir: None,
     });
 
-    info(&format!("Installing {}...", pkg));
+    info(&format!(
+        "Installing {}@{}...",
+        resolved.name, resolved.version
+    ));
     if let Err(e) = super::sync::run(config) {
         // Clear rollback context since we're handling the error here
         rollback::clear_context();

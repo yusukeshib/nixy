@@ -54,31 +54,48 @@ nixy config fish | source
 ### 3. 使い始める
 
 ```bash
-nixy install ripgrep    # パッケージをインストール
-nixy install nodejs git # 複数同時にインストール
-nixy list               # インストール済みを表示
-nixy search python      # パッケージを検索
-nixy uninstall nodejs   # パッケージを削除
-nixy upgrade            # 全てアップグレード
+nixy install ripgrep        # 最新バージョンをインストール
+nixy install nodejs@20      # 特定のメジャーバージョン
+nixy install python@3.11.5  # 厳密なバージョン
+nixy list                   # バージョン付きでパッケージを表示
+nixy search python          # パッケージ + バージョン一覧を検索
+nixy uninstall nodejs       # パッケージを削除
+nixy upgrade                # バージョン制約内でアップグレード
+nixy upgrade nodejs         # 特定のパッケージをアップグレード
 ```
 
 ## コマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `nixy install <pkg>` | パッケージをインストール（エイリアス: `add`） |
+| `nixy install <pkg>[@version]` | バージョン指定でインストール（エイリアス: `add`） |
 | `nixy install --from <flake> <pkg>` | flake URL からインストール |
 | `nixy install --file <path>` | nix ファイルからインストール |
 | `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
-| `nixy list` | インストール済みパッケージを表示（エイリアス: `ls`） |
-| `nixy search <query>` | パッケージを検索 |
-| `nixy upgrade` | 全 input をアップグレード |
+| `nixy list` | バージョン付きでパッケージを表示（エイリアス: `ls`） |
+| `nixy search <query>` | パッケージ + バージョン情報を検索 |
+| `nixy upgrade [pkg...]` | バージョン制約内でアップグレード |
 | `nixy sync` | flake.nix から再ビルド |
 | `nixy profile` | プロファイル一覧 + 対話的 TUI 選択 |
 | `nixy profile <name>` | プロファイルを切り替え |
 | `nixy profile <name> -c` | プロファイルを作成して切り替え |
 | `nixy profile <name> -d` | プロファイルを削除（確認あり） |
 | `nixy self-upgrade` | nixy 自体をアップグレード |
+
+### バージョン指定
+
+nixy は [Nixhub](https://nixhub.io) 経由で柔軟なバージョン指定をサポート：
+
+```bash
+nixy install nodejs           # 最新バージョン
+nixy install nodejs@20        # 最新の 20.x.x（semver 範囲）
+nixy install nodejs@20.11     # 最新の 20.11.x
+nixy install nodejs@20.11.0   # 厳密なバージョン
+```
+
+`nixy upgrade nodejs` を実行すると、バージョン制約が尊重されます：
+- `nodejs`（バージョンなし）→ 最新に更新
+- `nodejs@20` → 最新の 20.x.x に更新
 
 ## プロファイル
 
