@@ -102,19 +102,28 @@ nixy profile old -d             # Delete a profile (with confirmation)
 
 Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`.
 
-## Sync Across Machines
+## How nixy works
 
-```bash
-# Back up (on current machine)
-cp ~/.config/nixy/profiles/default/packages.json ~/dotfiles/
-cp ~/.config/nixy/profiles/default/flake.lock ~/dotfiles/
+nixy is **purely declarative** - `packages.json` is the source of truth, and `flake.nix` is regenerated from it on every operation.
 
-# Restore (on new machine)
-mkdir -p ~/.config/nixy/profiles/default
-cp ~/dotfiles/packages.json ~/.config/nixy/profiles/default/
-cp ~/dotfiles/flake.lock ~/.config/nixy/profiles/default/
-nixy sync
 ```
+┌─────────────────┐      ┌─────────────┐      ┌─────────────────────────────┐
+│ packages.json   │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
+│ (source of truth)│ generate │ (+ flake.lock)│ nix build │      (symlink to /nix/store) │
+└─────────────────┘      └─────────────┘      └─────────────────────────────┘
+                                                            │
+                                                            ▼
+                                              eval "$(nixy config zsh)" adds
+                                              this path to your $PATH
+```
+
+Unlike `nix profile` which maintains mutable state, nixy:
+1. Regenerates `flake.nix` from `packages.json` on every operation
+2. Runs `nix build` to create a combined environment in `/nix/store`
+3. Creates a symlink at `~/.local/state/nixy/env` pointing to that environment
+4. Your shell config just adds `~/.local/state/nixy/env/bin` to `$PATH`
+
+This means syncing is simple: copy `packages.json` + `flake.lock` to another machine, run `nixy sync`, and you have the exact same environment.
 
 ## FAQ
 
@@ -142,9 +151,7 @@ nixy sync
 ## Advanced
 
 <details>
-<summary>How nixy works</summary>
-
-nixy is **purely declarative** - `packages.json` is the source of truth, and `flake.nix` is regenerated from it on every operation. Unlike `nix profile` which maintains mutable state, nixy uses `nix build --out-link` to create a symlink to your environment.
+<summary>Profile directory structure</summary>
 
 ```
 ~/.config/nixy/profiles/default/

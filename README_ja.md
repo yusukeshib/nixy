@@ -98,19 +98,28 @@ nixy profile old -d             # プロファイルを削除（確認あり）
 
 各プロファイルは `~/.config/nixy/profiles/<name>/` に独自の `flake.nix` を持ちます。
 
-## 複数マシンで同期
+## nixy の仕組み
 
-```bash
-# バックアップ（現在のマシンで）
-cp ~/.config/nixy/profiles/default/packages.json ~/dotfiles/
-cp ~/.config/nixy/profiles/default/flake.lock ~/dotfiles/
+nixy は**純粋に宣言的** - `packages.json` が真実の源であり、`flake.nix` は操作のたびにそこから再生成されます。
 
-# リストア（新しいマシンで）
-mkdir -p ~/.config/nixy/profiles/default
-cp ~/dotfiles/packages.json ~/.config/nixy/profiles/default/
-cp ~/dotfiles/flake.lock ~/.config/nixy/profiles/default/
-nixy sync
 ```
+┌─────────────────┐      ┌─────────────┐      ┌─────────────────────────────┐
+│ packages.json   │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
+│  (真実の源)      │ 生成  │ (+ flake.lock)│ nix build │   (/nix/store へのシンボリックリンク)│
+└─────────────────┘      └─────────────┘      └─────────────────────────────┘
+                                                            │
+                                                            ▼
+                                              eval "$(nixy config zsh)" で
+                                              このパスを $PATH に追加
+```
+
+可変な状態を持つ `nix profile` とは異なり、nixy は：
+1. 操作のたびに `packages.json` から `flake.nix` を再生成
+2. `nix build` を実行して `/nix/store` に統合された環境を作成
+3. `~/.local/state/nixy/env` にその環境へのシンボリックリンクを作成
+4. シェル設定が `~/.local/state/nixy/env/bin` を `$PATH` に追加
+
+つまり同期は簡単：`packages.json` + `flake.lock` を別のマシンにコピーして `nixy sync` を実行すれば、全く同じ環境が再現できます。
 
 ## FAQ
 
@@ -138,9 +147,7 @@ nixy sync
 ## 詳細
 
 <details>
-<summary>nixy の仕組み</summary>
-
-nixy は**純粋に宣言的** - `packages.json` が真実の源であり、`flake.nix` は操作のたびにそこから再生成されます。可変な状態を持つ `nix profile` とは異なり、nixy は `nix build --out-link` を使って環境へのシンボリックリンクを作成します。
+<summary>プロファイルのディレクトリ構造</summary>
 
 ```
 ~/.config/nixy/profiles/default/
