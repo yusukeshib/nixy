@@ -54,11 +54,31 @@ pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
 
             let available = Nix::get_flake_inputs(&lock_file)?;
             let mut invalid = Vec::new();
+            let mut legacy_packages = Vec::new();
 
             for input in &flake_inputs_to_update {
                 if !available.contains(*input) {
-                    invalid.push((*input).clone());
+                    // Check if this is a legacy or custom package name
+                    if state.packages.contains(*input)
+                        || state.custom_packages.iter().any(|p| &p.name == *input)
+                    {
+                        legacy_packages.push((*input).clone());
+                    } else {
+                        invalid.push((*input).clone());
+                    }
                 }
+            }
+
+            // Provide clearer error for legacy packages
+            if !legacy_packages.is_empty() {
+                warn(
+                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
+                );
+                warn(&format!(
+                    "Legacy packages ({}) are upgraded when you run 'nixy upgrade' without arguments.",
+                    legacy_packages.join(", ")
+                ));
+                return Ok(());
             }
 
             if !invalid.is_empty() {

@@ -48,7 +48,14 @@ impl CustomPackage {
     }
 }
 
-/// State file for tracking installed packages
+/// State file for tracking installed packages.
+///
+/// The state tracks three categories of packages:
+/// - `packages`: Legacy format (v1) - simple package names like "hello", kept for backwards
+///   compatibility. These are resolved via the default nixpkgs input.
+/// - `resolved_packages`: Nixhub-resolved packages with pinned versions and nixpkgs commits.
+///   Supports version syntax like "nodejs@20" with reproducible builds.
+/// - `custom_packages`: Packages from custom flake URLs (e.g., github:owner/repo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageState {
     pub version: u32,
@@ -58,6 +65,7 @@ pub struct PackageState {
     /// Packages resolved via Nixhub with specific versions and commits
     #[serde(default)]
     pub resolved_packages: Vec<ResolvedNixpkgPackage>,
+    /// Packages from custom flake URLs
     #[serde(default)]
     pub custom_packages: Vec<CustomPackage>,
 }
