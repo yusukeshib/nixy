@@ -58,31 +58,48 @@ nixy config fish | source
 ### 3. Start using
 
 ```bash
-nixy install ripgrep    # Install a package
-nixy install nodejs git # Install multiple
-nixy list               # See installed packages
-nixy search python      # Find packages
-nixy uninstall nodejs   # Remove a package
-nixy upgrade            # Upgrade all
+nixy install ripgrep        # Install latest version
+nixy install nodejs@20      # Install specific major version
+nixy install python@3.11.5  # Install exact version
+nixy list                   # See installed packages with versions
+nixy search python          # Find packages + available versions
+nixy uninstall nodejs       # Remove a package
+nixy upgrade                # Upgrade all within version constraints
+nixy upgrade nodejs         # Upgrade specific package
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `nixy install <pkg>` | Install a package (alias: `add`) |
+| `nixy install <pkg>[@version]` | Install a package with optional version (alias: `add`) |
 | `nixy install --from <flake> <pkg>` | Install from a flake URL |
 | `nixy install --file <path>` | Install from a nix file |
 | `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
-| `nixy list` | List installed packages (alias: `ls`) |
-| `nixy search <query>` | Search for packages |
-| `nixy upgrade` | Upgrade all inputs |
+| `nixy list` | List installed packages with versions (alias: `ls`) |
+| `nixy search <query>` | Search for packages with version info |
+| `nixy upgrade [pkg...]` | Upgrade packages within version constraints |
 | `nixy sync` | Rebuild from flake.nix |
 | `nixy profile` | List profiles + interactive TUI selection |
 | `nixy profile <name>` | Switch to profile |
 | `nixy profile <name> -c` | Create and switch to profile |
 | `nixy profile <name> -d` | Delete profile (with confirmation) |
 | `nixy self-upgrade` | Upgrade nixy itself |
+
+### Version Specification
+
+nixy supports flexible version constraints via [Nixhub](https://nixhub.io):
+
+```bash
+nixy install nodejs           # Latest version
+nixy install nodejs@20        # Latest 20.x.x (semver range)
+nixy install nodejs@20.11     # Latest 20.11.x
+nixy install nodejs@20.11.0   # Exact version
+```
+
+When you run `nixy upgrade nodejs`, it respects your version constraint:
+- `nodejs` (no version) → upgrades to absolute latest
+- `nodejs@20` → upgrades to latest 20.x.x
 
 ## Profiles
 

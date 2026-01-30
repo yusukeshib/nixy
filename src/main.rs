@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod flake;
 mod nix;
+mod nixhub;
 mod profile;
 mod rollback;
 mod state;

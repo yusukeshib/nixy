@@ -9,14 +9,14 @@
 //! The generated flake uses `buildEnv` to create a unified environment with
 //! all installed packages.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use super::parser::collect_local_packages;
 use super::{LocalFlake, LocalPackage};
 use crate::error::Result;
-use crate::state::{CustomPackage, PackageState};
+use crate::state::{CustomPackage, PackageState, ResolvedNixpkgPackage};
 
 /// Intermediate representation for building flake content
 struct FlakeBuilder {
@@ -26,8 +26,10 @@ struct FlakeBuilder {
     seen_inputs: HashSet<String>,
     /// Overlay expressions for pkgs customization
     overlays: String,
-    /// Standard package entries (pkg = pkgs.pkg)
+    /// Standard package entries (pkg = pkgs.pkg) - legacy packages
     standard_entries: String,
+    /// Resolved package entries from Nixhub (with specific nixpkgs commits)
+    resolved_entries: String,
     /// Local package entries
     local_entries: String,
     /// Custom package entries from external flakes
@@ -43,13 +45,14 @@ impl FlakeBuilder {
             seen_inputs: HashSet::new(),
             overlays: String::new(),
             standard_entries: String::new(),
+            resolved_entries: String::new(),
             local_entries: String::new(),
             custom_entries: String::new(),
             buildenv_paths: Vec::new(),
         }
     }
 
-    /// Add standard nixpkgs packages
+    /// Add standard nixpkgs packages (legacy, from default nixpkgs)
     fn add_standard_packages(&mut self, packages: &[&String]) {
         let entries: Vec<String> = packages
             .iter()
@@ -62,6 +65,41 @@ impl FlakeBuilder {
 
         self.buildenv_paths
             .extend(packages.iter().map(|p| p.to_string()));
+    }
+
+    /// Add resolved nixpkgs packages (with specific commits from Nixhub)
+    fn add_resolved_packages(&mut self, packages: &[ResolvedNixpkgPackage]) {
+        if packages.is_empty() {
+            return;
+        }
+
+        // Group packages by commit hash
+        let mut by_commit: HashMap<&str, Vec<&ResolvedNixpkgPackage>> = HashMap::new();
+        for pkg in packages {
+            by_commit.entry(&pkg.commit_hash).or_default().push(pkg);
+        }
+
+        // Add inputs and entries for each commit
+        for (commit, pkgs) in &by_commit {
+            let input_name = format!("nixpkgs-{}", &commit[..8.min(commit.len())]);
+
+            // Add input if not already seen
+            if self.seen_inputs.insert(input_name.clone()) {
+                self.inputs.push_str(&format!(
+                    "    {}.url = \"github:NixOS/nixpkgs/{}\";\n",
+                    input_name, commit
+                ));
+            }
+
+            // Add package entries
+            for pkg in pkgs {
+                self.resolved_entries.push_str(&format!(
+                    "          {} = inputs.{}.legacyPackages.${{system}}.{};\n",
+                    pkg.name, input_name, pkg.attribute_path
+                ));
+                self.buildenv_paths.push(pkg.name.clone());
+            }
+        }
     }
 
     /// Add local flake-type packages from packages/ directory
@@ -190,7 +228,7 @@ impl FlakeBuilder {
       packages = forAllSystems (system:
         {pkgs_binding}
         in rec {{
-{pkg_entries}{local_entries}{custom_entries}
+{pkg_entries}{resolved_entries}{local_entries}{custom_entries}
           default = pkgs.buildEnv {{
             name = "nixy-env";
             paths = [
@@ -206,6 +244,7 @@ impl FlakeBuilder {
             pkgs_def = pkgs_def,
             pkgs_binding = pkgs_binding,
             pkg_entries = self.standard_entries,
+            resolved_entries = self.resolved_entries,
             local_entries = self.local_entries,
             custom_entries = self.custom_entries,
             buildenv_paths_str = buildenv_paths_str,
@@ -227,8 +266,8 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
         (Vec::new(), Vec::new())
     };
 
-    // Filter out local packages from standard packages list
-    let filtered_packages: Vec<&String> = state
+    // Filter out local packages from legacy packages list
+    let filtered_legacy_packages: Vec<&String> = state
         .packages
         .iter()
         .filter(|pkg| {
@@ -237,8 +276,20 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
         })
         .collect();
 
+    // Filter out local packages from resolved packages list
+    let filtered_resolved_packages: Vec<ResolvedNixpkgPackage> = state
+        .resolved_packages
+        .iter()
+        .filter(|pkg| {
+            !local_packages.iter().any(|lp| lp.name == pkg.name)
+                && !local_flakes.iter().any(|lf| lf.name == pkg.name)
+        })
+        .cloned()
+        .collect();
+
     let mut builder = FlakeBuilder::new();
-    builder.add_standard_packages(&filtered_packages);
+    builder.add_standard_packages(&filtered_legacy_packages);
+    builder.add_resolved_packages(&filtered_resolved_packages);
     builder.add_local_flakes(&local_flakes);
     builder.add_local_packages(&local_packages);
     builder.add_custom_packages(&state.custom_packages);
@@ -257,7 +308,7 @@ pub fn regenerate_flake(flake_dir: &Path, state: &PackageState) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::CustomPackage;
+    use crate::state::{CustomPackage, ResolvedNixpkgPackage};
 
     #[test]
     fn test_generate_empty_flake() {
@@ -443,5 +494,133 @@ mod tests {
         assert!(flake.contains("default = pkgs.buildEnv"));
         assert!(flake.contains("paths = ["));
         assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" ]"));
+    }
+
+    #[test]
+    fn test_generate_flake_with_resolved_packages() {
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123def456".to_string(),
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Should have nixpkgs input with commit hash
+        assert!(flake.contains("nixpkgs-abc123de.url = \"github:NixOS/nixpkgs/abc123def456\""));
+
+        // Should have package entry using attribute_path
+        assert!(
+            flake.contains("nodejs = inputs.nixpkgs-abc123de.legacyPackages.${system}.nodejs_20;")
+        );
+
+        // Should have nodejs in paths
+        let paths_start = flake.find("paths = [").unwrap();
+        let paths_end = flake[paths_start..].find("];").unwrap();
+        let paths_section = &flake[paths_start..paths_start + paths_end];
+        assert!(paths_section.contains("nodejs"));
+    }
+
+    #[test]
+    fn test_resolved_packages_share_commit_input() {
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123def456".to_string(),
+        });
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "python".to_string(),
+            version_spec: Some("3.11".to_string()),
+            resolved_version: "3.11.5".to_string(),
+            attribute_path: "python311".to_string(),
+            commit_hash: "abc123def456".to_string(), // Same commit
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Input should only appear once
+        let count = flake.matches("nixpkgs-abc123de.url").count();
+        assert_eq!(count, 1, "Same commit input should only appear once");
+
+        // Both packages should use the same input
+        assert!(
+            flake.contains("nodejs = inputs.nixpkgs-abc123de.legacyPackages.${system}.nodejs_20;")
+        );
+        assert!(
+            flake.contains("python = inputs.nixpkgs-abc123de.legacyPackages.${system}.python311;")
+        );
+    }
+
+    #[test]
+    fn test_resolved_packages_different_commits() {
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123def456".to_string(),
+        });
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "python".to_string(),
+            version_spec: Some("3.11".to_string()),
+            resolved_version: "3.11.5".to_string(),
+            attribute_path: "python311".to_string(),
+            commit_hash: "xyz789ghi012".to_string(), // Different commit
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Should have two different nixpkgs inputs
+        assert!(flake.contains("nixpkgs-abc123de.url = \"github:NixOS/nixpkgs/abc123def456\""));
+        assert!(flake.contains("nixpkgs-xyz789gh.url = \"github:NixOS/nixpkgs/xyz789ghi012\""));
+
+        // Each package should use its own input
+        assert!(
+            flake.contains("nodejs = inputs.nixpkgs-abc123de.legacyPackages.${system}.nodejs_20;")
+        );
+        assert!(
+            flake.contains("python = inputs.nixpkgs-xyz789gh.legacyPackages.${system}.python311;")
+        );
+    }
+
+    #[test]
+    fn test_mixed_legacy_and_resolved_packages() {
+        let mut state = PackageState::default();
+        // Legacy package (uses default nixpkgs)
+        state.add_package("ripgrep");
+        // Resolved package (uses specific commit)
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123def456".to_string(),
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Should have default nixpkgs for legacy
+        assert!(flake.contains("nixpkgs.url = \"github:NixOS/nixpkgs/nixos-unstable\""));
+        assert!(flake.contains("ripgrep = pkgs.ripgrep;"));
+
+        // Should have specific commit for resolved
+        assert!(flake.contains("nixpkgs-abc123de.url = \"github:NixOS/nixpkgs/abc123def456\""));
+        assert!(
+            flake.contains("nodejs = inputs.nixpkgs-abc123de.legacyPackages.${system}.nodejs_20;")
+        );
+
+        // Both should be in paths
+        let paths_start = flake.find("paths = [").unwrap();
+        let paths_end = flake[paths_start..].find("];").unwrap();
+        let paths_section = &flake[paths_start..paths_start + paths_end];
+        assert!(paths_section.contains("ripgrep"));
+        assert!(paths_section.contains("nodejs"));
     }
 }

@@ -13,6 +13,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
+/// Package resolved via Nixhub API with specific nixpkgs commit
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResolvedNixpkgPackage {
+    /// Package name (e.g., "nodejs")
+    pub name: String,
+    /// Version spec as specified by user (e.g., "20" for semver range)
+    /// None means latest, used for upgrade behavior
+    #[serde(default)]
+    pub version_spec: Option<String>,
+    /// Resolved version (e.g., "20.11.0")
+    pub resolved_version: String,
+    /// Nix attribute path (e.g., "nodejs_20")
+    pub attribute_path: String,
+    /// nixpkgs commit hash
+    pub commit_hash: String,
+}
+
 /// Custom package installed from a flake registry
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CustomPackage {
@@ -35,7 +52,12 @@ impl CustomPackage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageState {
     pub version: u32,
+    /// Legacy: simple package names (version 1 format, kept for backwards compatibility)
+    #[serde(default)]
     pub packages: Vec<String>,
+    /// Packages resolved via Nixhub with specific versions and commits
+    #[serde(default)]
+    pub resolved_packages: Vec<ResolvedNixpkgPackage>,
     #[serde(default)]
     pub custom_packages: Vec<CustomPackage>,
 }
@@ -43,8 +65,9 @@ pub struct PackageState {
 impl Default for PackageState {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             packages: Vec::new(),
+            resolved_packages: Vec::new(),
             custom_packages: Vec::new(),
         }
     }
@@ -52,13 +75,24 @@ impl Default for PackageState {
 
 impl PackageState {
     /// Load state from a file, or return default if file doesn't exist
+    /// Automatically migrates from version 1 to version 2 format
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
 
         let content = fs::read_to_string(path)?;
-        serde_json::from_str(&content).map_err(|e| Error::StateFile(e.to_string()))
+        let mut state: Self =
+            serde_json::from_str(&content).map_err(|e| Error::StateFile(e.to_string()))?;
+
+        // Migrate from version 1 to version 2 if needed
+        if state.version < 2 {
+            state.version = 2;
+            // Note: Old packages in state.packages remain as-is for backwards compatibility
+            // They will be migrated to resolved_packages when upgraded or re-added
+        }
+
+        Ok(state)
     }
 
     /// Save state to a file atomically
@@ -78,12 +112,29 @@ impl PackageState {
         Ok(())
     }
 
-    /// Add a standard nixpkgs package
+    /// Add a standard nixpkgs package (legacy method for backwards compatibility)
+    #[allow(dead_code)]
     pub fn add_package(&mut self, name: &str) {
         if !self.packages.contains(&name.to_string()) {
             self.packages.push(name.to_string());
             self.packages.sort();
         }
+    }
+
+    /// Add a resolved nixpkgs package (new method with version info)
+    pub fn add_resolved_package(&mut self, pkg: ResolvedNixpkgPackage) {
+        // Remove from legacy packages if present
+        self.packages.retain(|p| p != &pkg.name);
+        // Remove any existing resolved package with the same name
+        self.resolved_packages.retain(|p| p.name != pkg.name);
+        self.resolved_packages.push(pkg);
+        self.resolved_packages.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Get a resolved package by name
+    #[allow(dead_code)]
+    pub fn get_resolved_package(&self, name: &str) -> Option<&ResolvedNixpkgPackage> {
+        self.resolved_packages.iter().find(|p| p.name == name)
     }
 
     /// Add a custom package from a registry
@@ -94,12 +145,21 @@ impl PackageState {
         self.custom_packages.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
-    /// Remove a package by name (checks both standard and custom)
+    /// Remove a package by name (checks legacy, resolved, and custom)
     pub fn remove_package(&mut self, name: &str) -> bool {
-        let removed_standard = self.packages.iter().position(|p| p == name).map(|i| {
+        let removed_legacy = self.packages.iter().position(|p| p == name).map(|i| {
             self.packages.remove(i);
             true
         });
+
+        let removed_resolved = self
+            .resolved_packages
+            .iter()
+            .position(|p| p.name == name)
+            .map(|i| {
+                self.resolved_packages.remove(i);
+                true
+            });
 
         let removed_custom = self
             .custom_packages
@@ -110,23 +170,34 @@ impl PackageState {
                 true
             });
 
-        removed_standard.unwrap_or(false) || removed_custom.unwrap_or(false)
+        removed_legacy.unwrap_or(false)
+            || removed_resolved.unwrap_or(false)
+            || removed_custom.unwrap_or(false)
     }
 
-    /// Check if a package is installed (either standard or custom)
+    /// Check if a package is installed (legacy, resolved, or custom)
     pub fn has_package(&self, name: &str) -> bool {
         self.packages.contains(&name.to_string())
+            || self.resolved_packages.iter().any(|p| p.name == name)
             || self.custom_packages.iter().any(|p| p.name == name)
+    }
+
+    /// Check if a package is a legacy (non-resolved) package
+    #[allow(dead_code)]
+    pub fn is_legacy_package(&self, name: &str) -> bool {
+        self.packages.contains(&name.to_string())
     }
 }
 
 #[cfg(test)]
 impl PackageState {
-    /// Get all package names (standard + custom) - test helper
+    /// Get all package names (legacy + resolved + custom) - test helper
     pub fn all_package_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.packages.clone();
+        names.extend(self.resolved_packages.iter().map(|p| p.name.clone()));
         names.extend(self.custom_packages.iter().map(|p| p.name.clone()));
         names.sort();
+        names.dedup();
         names
     }
 }
@@ -144,8 +215,9 @@ mod tests {
     #[test]
     fn test_default_state() {
         let state = PackageState::default();
-        assert_eq!(state.version, 1);
+        assert_eq!(state.version, 2);
         assert!(state.packages.is_empty());
+        assert!(state.resolved_packages.is_empty());
         assert!(state.custom_packages.is_empty());
     }
 
@@ -302,6 +374,102 @@ mod tests {
 
         let state = PackageState::load(&path).unwrap();
         assert!(state.packages.is_empty());
+        assert!(state.resolved_packages.is_empty());
         assert!(state.custom_packages.is_empty());
+    }
+
+    #[test]
+    fn test_add_resolved_package() {
+        let mut state = PackageState::default();
+        let pkg = ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123".to_string(),
+        };
+        state.add_resolved_package(pkg.clone());
+
+        assert_eq!(state.resolved_packages.len(), 1);
+        assert!(state.has_package("nodejs"));
+        assert_eq!(
+            state
+                .get_resolved_package("nodejs")
+                .unwrap()
+                .resolved_version,
+            "20.11.0"
+        );
+    }
+
+    #[test]
+    fn test_add_resolved_package_removes_legacy() {
+        let mut state = PackageState::default();
+        state.add_package("nodejs");
+        assert!(state.packages.contains(&"nodejs".to_string()));
+
+        let pkg = ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123".to_string(),
+        };
+        state.add_resolved_package(pkg);
+
+        // Legacy should be removed
+        assert!(!state.packages.contains(&"nodejs".to_string()));
+        // But resolved should exist
+        assert_eq!(state.resolved_packages.len(), 1);
+        assert!(state.has_package("nodejs"));
+    }
+
+    #[test]
+    fn test_remove_resolved_package() {
+        let mut state = PackageState::default();
+        let pkg = ResolvedNixpkgPackage {
+            name: "nodejs".to_string(),
+            version_spec: Some("20".to_string()),
+            resolved_version: "20.11.0".to_string(),
+            attribute_path: "nodejs_20".to_string(),
+            commit_hash: "abc123".to_string(),
+        };
+        state.add_resolved_package(pkg);
+
+        assert!(state.remove_package("nodejs"));
+        assert!(!state.has_package("nodejs"));
+        assert!(state.resolved_packages.is_empty());
+    }
+
+    #[test]
+    fn test_is_legacy_package() {
+        let mut state = PackageState::default();
+        state.add_package("legacy-pkg");
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "resolved-pkg".to_string(),
+            version_spec: None,
+            resolved_version: "1.0.0".to_string(),
+            attribute_path: "resolved-pkg".to_string(),
+            commit_hash: "abc123".to_string(),
+        });
+
+        assert!(state.is_legacy_package("legacy-pkg"));
+        assert!(!state.is_legacy_package("resolved-pkg"));
+    }
+
+    #[test]
+    fn test_migration_from_v1() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("packages.json");
+
+        // Write a v1 state file
+        let v1_content = r#"{"version":1,"packages":["ripgrep","fzf"],"custom_packages":[]}"#;
+        fs::write(&path, v1_content).unwrap();
+
+        // Load should migrate to v2
+        let state = PackageState::load(&path).unwrap();
+        assert_eq!(state.version, 2);
+        // Legacy packages should be preserved
+        assert_eq!(state.packages, vec!["ripgrep", "fzf"]);
+        assert!(state.resolved_packages.is_empty());
     }
 }
