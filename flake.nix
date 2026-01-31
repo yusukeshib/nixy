@@ -13,13 +13,15 @@
 
         nixy = pkgs.rustPlatform.buildRustPackage {
           pname = "nixy";
-          version = "0.1.0";
+          version = "0.2.0";
 
           src = ./.;
 
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
+
+          doCheck = false; # Integration tests require Nix runtime
 
           meta = with pkgs.lib; {
             description = "Homebrew-style wrapper for Nix using flake.nix";
