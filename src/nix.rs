@@ -312,7 +312,9 @@ impl Nix {
         }
 
         let position = String::from_utf8_lossy(&output.stdout);
-        // Position format is "path:line", we only want the path
+        // Position format is "path:line", we only want the path.
+        // Using rsplit_once is safe here because Nix store paths never contain colons
+        // (Nix doesn't run on Windows, and Unix paths don't use colons as path separators).
         let path = position
             .rsplit_once(':')
             .map(|(p, _)| p)

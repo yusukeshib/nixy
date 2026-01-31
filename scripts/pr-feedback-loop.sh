@@ -24,19 +24,25 @@ check_and_request_copilot() {
         echo "✓ Copilot is already assigned as reviewer"
     else
         echo "→ Requesting Copilot review..."
-        gh copilot-review $PR
+        if ! gh copilot-review "$PR"; then
+            echo "✗ Failed to request Copilot review."
+            echo "  Make sure the GitHub CLI Copilot extension is installed:"
+            echo "  gh extension install ChrisCarini/gh-copilot-review"
+            exit 1
+        fi
         echo "✓ Copilot review requested"
     fi
 }
 
 # Get unresolved thread count
+# Note: Fetches up to 100 review threads. Very large PRs may have more.
 get_unresolved_count() {
-    gh api graphql -f query='query { repository(owner: "'"$OWNER"'", name: "'"$REPO_NAME"'") { pullRequest(number: '$PR') { reviewThreads(first: 50) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' 2>/dev/null || echo "0"
+    gh api graphql -f query='query { repository(owner: "'"$OWNER"'", name: "'"$REPO_NAME"'") { pullRequest(number: '$PR') { reviewThreads(first: 100) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' 2>/dev/null || echo "0"
 }
 
 # Get unresolved threads with details
 get_unresolved_threads() {
-    gh api graphql -f query='query { repository(owner: "'"$OWNER"'", name: "'"$REPO_NAME"'") { pullRequest(number: '$PR') { reviewThreads(first: 50) { nodes { id isResolved comments(first: 1) { nodes { body path line } } } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id: .id, path: .comments.nodes[0].path, line: .comments.nodes[0].line, body: .comments.nodes[0].body}'
+    gh api graphql -f query='query { repository(owner: "'"$OWNER"'", name: "'"$REPO_NAME"'") { pullRequest(number: '$PR') { reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { nodes { body path line } } } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id: .id, path: .comments.nodes[0].path, line: .comments.nodes[0].line, body: .comments.nodes[0].body}'
 }
 
 # Get Copilot review count
