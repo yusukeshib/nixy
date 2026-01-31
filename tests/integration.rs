@@ -1730,6 +1730,55 @@ stdenv.mkDerivation {
 }
 
 #[test]
+fn test_file_with_custom_package() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a custom package
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create packages.json with a custom package (from external flake)
+    let state_content = r#"{
+  "version": 2,
+  "packages": [],
+  "resolved_packages": [],
+  "custom_packages": [
+    {
+      "name": "neovim",
+      "input_name": "neovim-nightly",
+      "input_url": "github:nix-community/neovim-nightly-overlay",
+      "package_output": "packages",
+      "source_name": null
+    }
+  ]
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["file", "neovim"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The command may succeed or fail depending on nix/network availability
+    // If it succeeds, check the output contains a flake.nix path
+    if output.status.success() {
+        assert!(
+            stdout.contains("flake.nix"),
+            "Should output path to flake.nix: {}",
+            stdout
+        );
+    } else {
+        // If it fails, it should be a nix-related failure (prefetch), not a lookup failure
+        assert!(
+            !stderr.contains("not installed"),
+            "Should find the custom package in state: stderr={}",
+            stderr
+        );
+    }
+}
+
+#[test]
 fn test_file_help() {
     let output = nixy_cmd().args(["file", "--help"]).output().unwrap();
     assert!(output.status.success());
