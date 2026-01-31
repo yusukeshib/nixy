@@ -18,6 +18,12 @@ if [ -z "$PR" ]; then
     exit 1
 fi
 
+# Validate PR is a positive integer to prevent command injection
+if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
+    echo "Error: PR number must be a positive integer, got: $PR"
+    exit 1
+fi
+
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 OWNER=$(gh repo view --json owner -q .owner.login)
 REPO_NAME=$(gh repo view --json name -q .name)
