@@ -163,20 +163,24 @@ Add to `.claude/settings.json` to avoid permission prompts:
 }
 ```
 
+**Script commands:**
+```bash
+./scripts/pr-feedback-loop.sh <PR>              # Full feedback loop
+./scripts/pr-feedback-loop.sh <PR> status       # Show current status
+./scripts/pr-feedback-loop.sh <PR> threads      # Show unresolved threads
+./scripts/pr-feedback-loop.sh <PR> resolve-all  # Resolve all threads
+./scripts/pr-feedback-loop.sh <PR> request      # Request Copilot review
+./scripts/pr-feedback-loop.sh <PR> wait         # Wait for new review
+```
+
 **Workflow:**
-1. Run the feedback loop script to check status and wait for Copilot review:
-   ```bash
-   ./scripts/pr-feedback-loop.sh <PR>
-   ```
-2. If there are unresolved threads, the script will display them
+1. Check status: `./scripts/pr-feedback-loop.sh <PR> status`
+2. If there are unresolved threads: `./scripts/pr-feedback-loop.sh <PR> threads`
 3. For each unresolved thread:
    - Read the feedback
    - Fix the code issues
    - Run tests (`cargo test`)
    - Commit and push changes
-   - Resolve the thread via GitHub UI or GraphQL:
-     ```bash
-     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } } }'
-     ```
-4. Run the script again to request re-review and wait for results
-5. Repeat until no unresolved threads remain
+4. Resolve all threads: `./scripts/pr-feedback-loop.sh <PR> resolve-all`
+5. Request re-review and wait: `./scripts/pr-feedback-loop.sh <PR> request` then `./scripts/pr-feedback-loop.sh <PR> wait`
+6. Repeat until no unresolved threads remain
