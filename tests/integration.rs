@@ -1658,6 +1658,78 @@ fn test_file_with_local_flake_package() {
 }
 
 #[test]
+fn test_file_local_package_uses_pname_not_filename() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a local package where filename differs from pname
+    let profile_dir = env.config_dir.join("profiles/default");
+    let packages_dir = profile_dir.join("packages");
+    std::fs::create_dir_all(&packages_dir).unwrap();
+
+    // Create a local package file with pname different from filename
+    let local_pkg_content = r#"{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "actual-package-name";
+  version = "1.0.0";
+  src = ./.;
+}"#;
+    // Filename is "different-filename.nix" but pname is "actual-package-name"
+    std::fs::write(
+        packages_dir.join("different-filename.nix"),
+        local_pkg_content,
+    )
+    .unwrap();
+
+    // Create empty packages.json
+    let state_content = r#"{
+  "version": 2,
+  "packages": [],
+  "resolved_packages": [],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    // Should find package by pname, not filename
+    let output = env
+        .cmd()
+        .args(["file", "actual-package-name"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "Should find local package by pname: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("different-filename.nix"),
+        "Should output the actual file path: {}",
+        stdout
+    );
+
+    // Should NOT find package by filename
+    let output = env
+        .cmd()
+        .args(["file", "different-filename"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "Should NOT find package by filename when pname differs"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not installed"),
+        "Should report not installed for filename: {}",
+        stderr
+    );
+}
+
+#[test]
 fn test_file_help() {
     let output = nixy_cmd().args(["file", "--help"]).output().unwrap();
     assert!(output.status.success());
