@@ -1570,6 +1570,94 @@ fn test_file_with_resolved_package() {
 }
 
 #[test]
+fn test_file_with_local_package() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a local package
+    let profile_dir = env.config_dir.join("profiles/default");
+    let packages_dir = profile_dir.join("packages");
+    std::fs::create_dir_all(&packages_dir).unwrap();
+
+    // Create a local package file
+    let local_pkg_content = r#"{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "my-local-pkg";
+  version = "1.0.0";
+  src = ./.;
+}"#;
+    std::fs::write(packages_dir.join("my-local-pkg.nix"), local_pkg_content).unwrap();
+
+    // Create empty packages.json
+    let state_content = r#"{
+  "version": 2,
+  "packages": [],
+  "resolved_packages": [],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["file", "my-local-pkg"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should succeed and output the local file path
+    assert!(
+        output.status.success(),
+        "Should find local package: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("my-local-pkg.nix"),
+        "Should output path to local package file: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_file_with_local_flake_package() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a local flake package
+    let profile_dir = env.config_dir.join("profiles/default");
+    let pkg_dir = profile_dir.join("packages").join("my-flake-pkg");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+
+    // Create a local flake.nix
+    let flake_content = r#"{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }: {};
+}"#;
+    std::fs::write(pkg_dir.join("flake.nix"), flake_content).unwrap();
+
+    // Create empty packages.json
+    let state_content = r#"{
+  "version": 2,
+  "packages": [],
+  "resolved_packages": [],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["file", "my-flake-pkg"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should succeed and output the local flake path
+    assert!(
+        output.status.success(),
+        "Should find local flake package: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("my-flake-pkg") && stdout.contains("flake.nix"),
+        "Should output path to local flake.nix: {}",
+        stdout
+    );
+}
+
+#[test]
 fn test_file_help() {
     let output = nixy_cmd().args(["file", "--help"]).output().unwrap();
     assert!(output.status.success());

@@ -34,7 +34,22 @@ pub fn run(config: &Config, args: FileArgs) -> Result<()> {
         let system = Nix::current_system()?;
         Nix::get_package_source_path("nixos-unstable", &args.package, &system)?
     } else {
-        return Err(Error::PackageNotInstalled(args.package));
+        // Check for local packages in the packages/ directory
+        let local_nix = flake_dir
+            .join("packages")
+            .join(format!("{}.nix", args.package));
+        let local_flake = flake_dir
+            .join("packages")
+            .join(&args.package)
+            .join("flake.nix");
+
+        if local_nix.is_file() {
+            local_nix
+        } else if local_flake.is_file() {
+            local_flake
+        } else {
+            return Err(Error::PackageNotInstalled(args.package));
+        }
     };
 
     println!("{}", path.display());
