@@ -15,6 +15,9 @@ pub enum Error {
     #[error("Package '{0}' not found in nixpkgs or is not a valid derivation")]
     PackageNotFound(String),
 
+    #[error("Package '{0}' is not installed")]
+    PackageNotInstalled(String),
+
     #[error("Profile '{0}' does not exist")]
     ProfileNotFound(String),
 

@@ -49,6 +49,9 @@ pub enum Commands {
 
     /// Upgrade nixy to the latest version
     SelfUpgrade(SelfUpgradeArgs),
+
+    /// Show path to package source file in Nix store
+    File(FileArgs),
 }
 
 #[derive(Args)]
@@ -99,4 +102,10 @@ pub struct SelfUpgradeArgs {
     /// Force reinstall even if already at latest version
     #[arg(long, short)]
     pub force: bool,
+}
+
+#[derive(Args)]
+pub struct FileArgs {
+    /// Package name
+    pub package: String,
 }

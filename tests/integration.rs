@@ -1446,3 +1446,137 @@ fn test_install_reverts_flake_on_sync_failure() {
         );
     }
 }
+
+// =============================================================================
+// File command tests
+// =============================================================================
+
+#[test]
+fn test_file_requires_package() {
+    let env = TestEnv::new();
+    let output = env.cmd().arg("file").output().unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn test_file_nonexistent_package() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    let output = env
+        .cmd()
+        .args(["file", "nonexistent-package"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not installed"),
+        "Should indicate package is not installed: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_file_with_legacy_package() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a legacy package in packages.json
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create packages.json with a legacy package
+    let state_content = r#"{
+  "version": 2,
+  "packages": ["hello"],
+  "resolved_packages": [],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["file", "hello"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The command may succeed or fail depending on nix availability
+    // If it succeeds, check the output contains a nix store path
+    if output.status.success() {
+        assert!(
+            stdout.contains("/nix/store/") && stdout.contains(".nix"),
+            "Should output a .nix file path in nix store: {}",
+            stdout
+        );
+    } else {
+        // If it fails, it should be a nix-related failure, not a lookup failure
+        assert!(
+            !stderr.contains("not installed"),
+            "Should find the package in state: stderr={}",
+            stderr
+        );
+    }
+}
+
+#[test]
+fn test_file_with_resolved_package() {
+    let env = TestEnv::new();
+
+    // Create a profile directory with a resolved package
+    let profile_dir = env.config_dir.join("profiles/default");
+    std::fs::create_dir_all(&profile_dir).unwrap();
+
+    // Create packages.json with a resolved package
+    let state_content = r#"{
+  "version": 2,
+  "packages": [],
+  "resolved_packages": [
+    {
+      "name": "hello",
+      "version_spec": null,
+      "resolved_version": "2.12.1",
+      "attribute_path": "hello",
+      "commit_hash": "nixos-unstable"
+    }
+  ],
+  "custom_packages": []
+}"#;
+    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+
+    let output = env.cmd().args(["file", "hello"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The command may succeed or fail depending on nix availability
+    if output.status.success() {
+        assert!(
+            stdout.contains("/nix/store/") && stdout.contains(".nix"),
+            "Should output a .nix file path in nix store: {}",
+            stdout
+        );
+    } else {
+        // If it fails, it should be a nix-related failure
+        assert!(
+            !stderr.contains("not installed"),
+            "Should find the package in state: stderr={}",
+            stderr
+        );
+    }
+}
+
+#[test]
+fn test_file_help() {
+    let output = nixy_cmd().args(["file", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("source") || stdout.contains("path") || stdout.contains("package"),
+        "Help should describe the file command: {}",
+        stdout
+    );
+}

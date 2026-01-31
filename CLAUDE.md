@@ -165,7 +165,11 @@ Add these to `.claude/settings.json` to avoid permission prompts:
 ```
 
 **Workflow:**
-1. **Request Copilot review immediately** (do this first, before monitoring):
+1. **Check if Copilot is already assigned as reviewer:**
+   ```bash
+   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login' | grep -q "Copilot"
+   ```
+   If Copilot is NOT assigned, request Copilot review:
    ```bash
    gh copilot-review <PR>
    ```

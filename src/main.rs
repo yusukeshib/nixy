@@ -39,6 +39,7 @@ fn main() {
         Commands::Config { shell } => commands::config::run(&shell),
         Commands::Profile(args) => commands::profile::run(&config, args),
         Commands::SelfUpgrade(args) => commands::self_upgrade::run(args.force),
+        Commands::File(args) => commands::file::run(&config, args),
     };
 
     if let Err(e) = result {
