@@ -130,6 +130,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Update flake.nix version
+        run: |
+          sed -i 's/version = "[^"]*";/version = "${{ needs.check-version.outputs.version }}";/' flake.nix
+          if git diff --quiet flake.nix; then
+            echo "flake.nix already has correct version"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add flake.nix
+            git commit -m "Sync flake.nix version to ${{ needs.check-version.outputs.version }}"
+            git push origin main
+          fi
+
       - name: Create tag
         run: |
           git config user.name "github-actions[bot]"
