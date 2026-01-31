@@ -148,13 +148,12 @@ When user asks to monitor and resolve PR feedback automatically:
 gh extension install ChrisCarini/gh-copilot-review
 ```
 
-Add these to `.claude/settings.json` to avoid permission prompts:
+Add to `.claude/settings.json` to avoid permission prompts:
 ```json
 {
   "permissions": {
     "allow": [
-      "Bash(gh api graphql:*)",
-      "Bash(gh copilot-review:*)",
+      "Bash(./scripts/pr-feedback-loop.sh:*)",
       "Bash(cargo test:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
@@ -164,86 +163,24 @@ Add these to `.claude/settings.json` to avoid permission prompts:
 }
 ```
 
+**Script commands:**
+```bash
+./scripts/pr-feedback-loop.sh <PR>              # Full feedback loop
+./scripts/pr-feedback-loop.sh <PR> status       # Show current status
+./scripts/pr-feedback-loop.sh <PR> threads      # Show unresolved threads
+./scripts/pr-feedback-loop.sh <PR> resolve-all  # Resolve all threads
+./scripts/pr-feedback-loop.sh <PR> request      # Request Copilot review
+./scripts/pr-feedback-loop.sh <PR> wait         # Wait for new review
+```
+
 **Workflow:**
-1. **Request Copilot review immediately** (do this first, before monitoring):
-   ```bash
-   gh copilot-review <PR>
-   ```
-   Then verify Copilot was added:
-   ```bash
-   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-   # Should output "Copilot"
-   ```
-2. Check for existing unresolved review threads (not just new comments)
+1. Check status: `./scripts/pr-feedback-loop.sh <PR> status`
+2. If there are unresolved threads: `./scripts/pr-feedback-loop.sh <PR> threads`
 3. For each unresolved thread:
    - Read the feedback
    - Fix the code issues
    - Run tests (`cargo test`)
    - Commit and push changes
-   - Resolve the thread
-4. Request Copilot re-review: `gh copilot-review <PR>`
-5. Verify Copilot is assigned:
-   ```bash
-   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-   # Should output "Copilot"
-   ```
-6. Wait for review to complete and check for issues:
-   - Poll every 30 seconds for unresolved threads:
-     ```bash
-     gh api graphql -f query='query { repository(owner: "'$OWNER'", name: "'$REPO'") { pullRequest(number: '$PR') { reviewThreads(first: 50) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
-     ```
-   - If count is 0, review is complete with no issues - PR is ready to merge
-   - If count > 0, there are unresolved threads to address
-7. For any new unresolved threads, repeat from step 3
-
-**Key commands:**
-
-Get unresolved threads with their comments:
-```bash
-gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $pr) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            comments(first: 10) {
-              nodes {
-                body
-                path
-                line
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-' -f owner=OWNER -f repo=REPO -F pr=NUM
-```
-
-Resolve a thread after fixing the issue:
-```bash
-gh api graphql -f query='
-  mutation($threadId: ID!) {
-    resolveReviewThread(input: {threadId: $threadId}) {
-      thread { isResolved }
-    }
-  }
-' -f threadId=THREAD_ID
-```
-
-Request Copilot review (**this is the only reliable method**):
-```bash
-gh copilot-review <PR>
-```
-
-**IMPORTANT:** Always verify Copilot was added after requesting:
-```bash
-gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-# Should output "Copilot"
-```
-
-**Note:** `gh pr edit $PR --add-reviewer copilot` and the REST API do NOT work reliably.
-Only `gh copilot-review <PR>` (from the ChrisCarini/gh-copilot-review extension) works.
+4. Resolve all threads: `./scripts/pr-feedback-loop.sh <PR> resolve-all`
+5. Request re-review and wait: `./scripts/pr-feedback-loop.sh <PR> request` then `./scripts/pr-feedback-loop.sh <PR> wait`
+6. Repeat until no unresolved threads remain

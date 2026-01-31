@@ -80,6 +80,7 @@ nixy upgrade nodejs         # 特定のパッケージをアップグレード
 | `nixy profile <name>` | プロファイルを切り替え |
 | `nixy profile <name> -c` | プロファイルを作成して切り替え |
 | `nixy profile <name> -d` | プロファイルを削除（確認あり） |
+| `nixy file <pkg>` | パッケージのソースファイルパスを表示 |
 | `nixy self-upgrade` | nixy 自体をアップグレード |
 
 ### バージョン指定

@@ -8,7 +8,7 @@
 //! - Captures stderr for better error messages
 //! - Handles path escaping for flake references
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::config::NIX_FLAGS;
@@ -259,6 +259,68 @@ impl Nix {
         }
 
         Ok(Vec::new())
+    }
+
+    /// Prefetch a flake and return its store path
+    pub fn flake_prefetch(url: &str) -> Result<PathBuf> {
+        let output = Command::new("nix")
+            .args(NIX_FLAGS)
+            .args(["flake", "prefetch", "--json", url])
+            .output()
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to prefetch flake '{}': {}",
+                url,
+                stderr.trim()
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).map_err(|e| Error::NixCommand(e.to_string()))?;
+
+        json["storePath"]
+            .as_str()
+            .map(PathBuf::from)
+            .ok_or_else(|| Error::NixCommand("Missing storePath in flake prefetch output".into()))
+    }
+
+    /// Get package source path via meta.position
+    /// Returns the file path (without line number) from the position attribute
+    pub fn get_package_source_path(commit: &str, attr: &str, system: &str) -> Result<PathBuf> {
+        let flake_ref = format!(
+            "github:NixOS/nixpkgs/{}#legacyPackages.{}.{}.meta.position",
+            commit, system, attr
+        );
+
+        let output = Command::new("nix")
+            .args(NIX_FLAGS)
+            .args(["eval", "--raw", &flake_ref])
+            .output()
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to get source path for '{}': {}",
+                attr,
+                stderr.trim()
+            )));
+        }
+
+        let position = String::from_utf8_lossy(&output.stdout);
+        // Position format is "path:line", we only want the path.
+        // Using rsplit_once is safe here because Nix store paths never contain colons
+        // (Nix doesn't run on Windows, and Unix paths don't use colons as path separators).
+        let path = position
+            .rsplit_once(':')
+            .map(|(p, _)| p)
+            .unwrap_or(&position);
+
+        Ok(PathBuf::from(path))
     }
 
     /// Get flake inputs from flake.lock

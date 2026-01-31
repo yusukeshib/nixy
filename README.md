@@ -84,6 +84,7 @@ nixy upgrade nodejs         # Upgrade specific package
 | `nixy profile <name>` | Switch to profile |
 | `nixy profile <name> -c` | Create and switch to profile |
 | `nixy profile <name> -d` | Delete profile (with confirmation) |
+| `nixy file <pkg>` | Show path to package source file in Nix store |
 | `nixy self-upgrade` | Upgrade nixy itself |
 
 ### Version Specification
