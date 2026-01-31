@@ -148,13 +148,12 @@ When user asks to monitor and resolve PR feedback automatically:
 gh extension install ChrisCarini/gh-copilot-review
 ```
 
-Add these to `.claude/settings.json` to avoid permission prompts:
+Add to `.claude/settings.json` to avoid permission prompts:
 ```json
 {
   "permissions": {
     "allow": [
-      "Bash(gh api graphql:*)",
-      "Bash(gh copilot-review:*)",
+      "Bash(./scripts/pr-feedback-loop.sh:*)",
       "Bash(cargo test:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
@@ -165,89 +164,19 @@ Add these to `.claude/settings.json` to avoid permission prompts:
 ```
 
 **Workflow:**
-1. **Check if Copilot is already assigned as reviewer:**
+1. Run the feedback loop script to check status and wait for Copilot review:
    ```bash
-   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login' | grep -q "Copilot"
+   ./scripts/pr-feedback-loop.sh <PR>
    ```
-   If Copilot is NOT assigned, request Copilot review:
-   ```bash
-   gh copilot-review <PR>
-   ```
-   Then verify Copilot was added:
-   ```bash
-   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-   # Should output "Copilot"
-   ```
-2. Check for existing unresolved review threads (not just new comments)
+2. If there are unresolved threads, the script will display them
 3. For each unresolved thread:
    - Read the feedback
    - Fix the code issues
    - Run tests (`cargo test`)
    - Commit and push changes
-   - Resolve the thread
-4. Request Copilot re-review: `gh copilot-review <PR>`
-5. Verify Copilot is assigned:
-   ```bash
-   gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-   # Should output "Copilot"
-   ```
-6. Wait for review to complete and check for issues:
-   - Poll every 30 seconds for unresolved threads:
+   - Resolve the thread via GitHub UI or GraphQL:
      ```bash
-     gh api graphql -f query='query { repository(owner: "'$OWNER'", name: "'$REPO'") { pullRequest(number: '$PR') { reviewThreads(first: 50) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } } }'
      ```
-   - If count is 0, review is complete with no issues - PR is ready to merge
-   - If count > 0, there are unresolved threads to address
-7. For any new unresolved threads, repeat from step 3
-
-**Key commands:**
-
-Get unresolved threads with their comments:
-```bash
-gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $pr) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            comments(first: 10) {
-              nodes {
-                body
-                path
-                line
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-' -f owner=OWNER -f repo=REPO -F pr=NUM
-```
-
-Resolve a thread after fixing the issue:
-```bash
-gh api graphql -f query='
-  mutation($threadId: ID!) {
-    resolveReviewThread(input: {threadId: $threadId}) {
-      thread { isResolved }
-    }
-  }
-' -f threadId=THREAD_ID
-```
-
-Request Copilot review (**this is the only reliable method**):
-```bash
-gh copilot-review <PR>
-```
-
-**IMPORTANT:** Always verify Copilot was added after requesting:
-```bash
-gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
-# Should output "Copilot"
-```
-
-**Note:** `gh pr edit $PR --add-reviewer copilot` and the REST API do NOT work reliably.
-Only `gh copilot-review <PR>` (from the ChrisCarini/gh-copilot-review extension) works.
+4. Run the script again to request re-review and wait for results
+5. Repeat until no unresolved threads remain
