@@ -4,7 +4,8 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "nixy",
-    about = "Homebrew-style wrapper for Nix using flake.nix"
+    about = "Homebrew-style wrapper for Nix using flake.nix",
+    disable_help_subcommand = true
 )]
 #[command(version)]
 pub struct Cli {
