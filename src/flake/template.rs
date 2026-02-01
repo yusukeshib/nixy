@@ -147,7 +147,9 @@ impl FlakeBuilder {
             let path = if let Some(dir) = packages_dir {
                 // Use a URL-style path for flake URLs, handling spaces in the path
                 let abs_path = dir.join(&flake.name);
-                // Resolve symlinks to actual paths for Nix compatibility
+                // Try to resolve symlinks to actual paths for Nix compatibility. This can
+                // fail not only for broken symlinks but also due to permission issues or
+                // missing intermediate directories, in which case we fall back to abs_path.
                 let resolved_path = abs_path.canonicalize().unwrap_or(abs_path);
                 let path_str = resolved_path.to_string_lossy();
                 // Escape spaces in the path for the flake URL
@@ -214,7 +216,10 @@ impl FlakeBuilder {
             // Update package expression to use absolute path if needed
             let package_expr = if let Some(dir) = packages_dir {
                 let abs_path = dir.join(format!("{}.nix", pkg.name));
-                // Resolve symlinks to actual paths for Nix compatibility
+                // Try to resolve symlinks to actual paths for Nix compatibility.
+                // canonicalize() can also fail for reasons other than broken symlinks
+                // (for example, missing intermediate directories or permission issues),
+                // in which case we intentionally fall back to the original abs_path.
                 let resolved_path = abs_path.canonicalize().unwrap_or(abs_path);
                 let path_str = resolved_path.to_string_lossy();
                 // Only replace if the expression is a simple ./packages/<name>.nix reference
