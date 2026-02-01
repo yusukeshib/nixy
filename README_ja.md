@@ -71,6 +71,7 @@ nixy upgrade nodejs         # 特定のパッケージをアップグレード
 | `nixy install <pkg>[@version]` | バージョン指定でインストール（エイリアス: `add`） |
 | `nixy install --from <flake> <pkg>` | flake URL からインストール |
 | `nixy install --file <path>` | nix ファイルからインストール |
+| `nixy install <pkg> --platform <platform>` | 特定のプラットフォームのみにインストール |
 | `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
 | `nixy list` | バージョン付きでパッケージを表示（エイリアス: `ls`） |
 | `nixy search <query>` | パッケージ + バージョン情報を検索 |
@@ -97,6 +98,26 @@ nixy install nodejs@20.11.0   # 厳密なバージョン
 `nixy upgrade nodejs` を実行すると、バージョン制約が尊重されます：
 - `nodejs`（バージョンなし）→ 最新に更新
 - `nodejs@20` → 最新の 20.x.x に更新
+
+### プラットフォーム固有のインストール
+
+特定のプラットフォームにのみパッケージをインストール：
+
+```bash
+nixy install terminal-notifier --platform darwin   # macOS のみ
+nixy install linux-tool --platform linux           # Linux のみ
+nixy install specific --platform aarch64-darwin    # Apple Silicon のみ
+```
+
+有効なプラットフォーム名：
+- `darwin` または `macos` → `x86_64-darwin` と `aarch64-darwin` の両方
+- `linux` → `x86_64-linux` と `aarch64-linux` の両方
+- フルネーム: `x86_64-darwin`, `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
+
+プラットフォーム固有のパッケージは `nixy list` で制限が表示されます：
+```
+terminal-notifier@2.0.0  (nixpkgs) [darwin]
+```
 
 ## プロファイル
 

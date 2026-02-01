@@ -18,6 +18,14 @@ use super::{LocalFlake, LocalPackage};
 use crate::error::Result;
 use crate::state::{CustomPackage, PackageState, ResolvedNixpkgPackage};
 
+/// A package path entry with optional platform restrictions
+struct PathEntry {
+    /// Package name (variable name in the flake)
+    name: String,
+    /// Platform restrictions (None means all platforms)
+    platforms: Option<Vec<String>>,
+}
+
 /// Intermediate representation for building flake content
 struct FlakeBuilder {
     /// Additional flake inputs (beyond nixpkgs)
@@ -34,8 +42,8 @@ struct FlakeBuilder {
     local_entries: String,
     /// Custom package entries from external flakes
     custom_entries: String,
-    /// Package names for buildEnv paths
-    buildenv_paths: Vec<String>,
+    /// Package names for buildEnv paths with platform restrictions
+    buildenv_paths: Vec<PathEntry>,
 }
 
 impl FlakeBuilder {
@@ -64,7 +72,10 @@ impl FlakeBuilder {
         }
 
         self.buildenv_paths
-            .extend(packages.iter().map(|p| p.to_string()));
+            .extend(packages.iter().map(|p| PathEntry {
+                name: p.to_string(),
+                platforms: None,
+            }));
     }
 
     /// Add resolved nixpkgs packages (with specific commits from Nixhub)
@@ -97,7 +108,10 @@ impl FlakeBuilder {
                     "          {} = inputs.{}.legacyPackages.${{system}}.{};\n",
                     pkg.name, input_name, pkg.attribute_path
                 ));
-                self.buildenv_paths.push(pkg.name.clone());
+                self.buildenv_paths.push(PathEntry {
+                    name: pkg.name.clone(),
+                    platforms: pkg.platforms.clone(),
+                });
             }
         }
     }
@@ -114,7 +128,10 @@ impl FlakeBuilder {
                 "          {} = inputs.{}.packages.${{system}}.default;\n",
                 flake.name, flake.name
             ));
-            self.buildenv_paths.push(flake.name.clone());
+            self.buildenv_paths.push(PathEntry {
+                name: flake.name.clone(),
+                platforms: None,
+            });
         }
     }
 
@@ -134,7 +151,10 @@ impl FlakeBuilder {
 
             self.local_entries
                 .push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
-            self.buildenv_paths.push(pkg.name.clone());
+            self.buildenv_paths.push(PathEntry {
+                name: pkg.name.clone(),
+                platforms: None,
+            });
         }
     }
 
@@ -155,7 +175,10 @@ impl FlakeBuilder {
                 pkg.package_output,
                 pkg.source_package_name()
             ));
-            self.buildenv_paths.push(pkg.name.clone());
+            self.buildenv_paths.push(PathEntry {
+                name: pkg.name.clone(),
+                platforms: pkg.platforms.clone(),
+            });
         }
     }
 
@@ -191,25 +214,13 @@ impl FlakeBuilder {
         }
     }
 
-    /// Build the buildEnv paths section
-    fn build_paths_section(&self) -> String {
-        if self.buildenv_paths.is_empty() {
-            String::new()
-        } else {
-            let paths: Vec<String> = self
-                .buildenv_paths
-                .iter()
-                .map(|p| format!("              {}", p))
-                .collect();
-            format!("{}\n", paths.join("\n"))
-        }
-    }
-
     /// Generate the final flake.nix content
     fn build(self) -> String {
         let output_params = self.build_output_params();
         let (pkgs_def, pkgs_binding) = self.build_pkgs_definition();
-        let buildenv_paths_str = self.build_paths_section();
+        let (paths_content, _has_platform_conditionals) = self.build_paths_section_with_info();
+
+        let paths_section = format!("paths = [\n{}            ];", paths_content);
 
         format!(
             r#"{{
@@ -231,8 +242,7 @@ impl FlakeBuilder {
 {pkg_entries}{resolved_entries}{local_entries}{custom_entries}
           default = pkgs.buildEnv {{
             name = "nixy-env";
-            paths = [
-{buildenv_paths_str}            ];
+            {paths_section}
             extraOutputsToInstall = [ "man" "doc" "info" ];
           }};
         }});
@@ -247,8 +257,65 @@ impl FlakeBuilder {
             resolved_entries = self.resolved_entries,
             local_entries = self.local_entries,
             custom_entries = self.custom_entries,
-            buildenv_paths_str = buildenv_paths_str,
+            paths_section = paths_section,
         )
+    }
+
+    /// Build the buildEnv paths section and return whether it has platform conditionals
+    fn build_paths_section_with_info(&self) -> (String, bool) {
+        if self.buildenv_paths.is_empty() {
+            return (String::new(), false);
+        }
+
+        // Group packages by their platform restrictions
+        // None means all platforms, Some([...]) means specific platforms
+        let mut universal: Vec<&str> = Vec::new();
+        let mut by_platforms: HashMap<Vec<String>, Vec<&str>> = HashMap::new();
+
+        for entry in &self.buildenv_paths {
+            match &entry.platforms {
+                None => universal.push(&entry.name),
+                Some(platforms) => {
+                    let mut sorted_platforms = platforms.clone();
+                    sorted_platforms.sort();
+                    by_platforms
+                        .entry(sorted_platforms)
+                        .or_default()
+                        .push(&entry.name);
+                }
+            }
+        }
+
+        let has_conditionals = !by_platforms.is_empty();
+        let mut result = String::new();
+
+        // Add universal packages (no platform restriction)
+        for pkg in &universal {
+            result.push_str(&format!("              {}\n", pkg));
+        }
+
+        // Add platform-specific packages with lib.optionals
+        let mut platform_groups: Vec<_> = by_platforms.into_iter().collect();
+        platform_groups.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (platforms, packages) in platform_groups {
+            let platforms_str = platforms
+                .iter()
+                .map(|p| format!("\"{}\"", p))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let packages_str = packages
+                .iter()
+                .map(|p| format!("\n                {}", p))
+                .collect::<Vec<_>>()
+                .join("");
+            result.push_str(&format!(
+                "            ] ++ pkgs.lib.optionals (builtins.elem system [ {} ]) [{}\n",
+                platforms_str, packages_str
+            ));
+        }
+
+        (result, has_conditionals)
     }
 }
 
@@ -357,6 +424,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -426,6 +494,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -444,6 +513,7 @@ mod tests {
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
             source_name: None,
+            platforms: None,
         });
         state.add_custom_package(CustomPackage {
             name: "world".to_string(),
@@ -451,6 +521,7 @@ mod tests {
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -471,6 +542,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -505,6 +577,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123def456".to_string(),
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -533,6 +606,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123def456".to_string(),
+            platforms: None,
         });
         state.add_resolved_package(ResolvedNixpkgPackage {
             name: "python".to_string(),
@@ -540,6 +614,7 @@ mod tests {
             resolved_version: "3.11.5".to_string(),
             attribute_path: "python311".to_string(),
             commit_hash: "abc123def456".to_string(), // Same commit
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -566,6 +641,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123def456".to_string(),
+            platforms: None,
         });
         state.add_resolved_package(ResolvedNixpkgPackage {
             name: "python".to_string(),
@@ -573,6 +649,7 @@ mod tests {
             resolved_version: "3.11.5".to_string(),
             attribute_path: "python311".to_string(),
             commit_hash: "xyz789ghi012".to_string(), // Different commit
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -602,6 +679,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123def456".to_string(),
+            platforms: None,
         });
 
         let flake = generate_flake(&state, None);
@@ -622,5 +700,87 @@ mod tests {
         let paths_section = &flake[paths_start..paths_start + paths_end];
         assert!(paths_section.contains("ripgrep"));
         assert!(paths_section.contains("nodejs"));
+    }
+
+    #[test]
+    fn test_platform_specific_resolved_package() {
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "terminal-notifier".to_string(),
+            version_spec: None,
+            resolved_version: "2.0.0".to_string(),
+            attribute_path: "terminal-notifier".to_string(),
+            commit_hash: "abc123def456".to_string(),
+            platforms: Some(vec![
+                "aarch64-darwin".to_string(),
+                "x86_64-darwin".to_string(),
+            ]),
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Should have conditional path using lib.optionals
+        assert!(
+            flake.contains("lib.optionals"),
+            "Should use lib.optionals for platform-specific packages"
+        );
+        assert!(
+            flake.contains("aarch64-darwin") && flake.contains("x86_64-darwin"),
+            "Should include darwin platforms"
+        );
+        assert!(
+            flake.contains("terminal-notifier"),
+            "Should include the package name"
+        );
+    }
+
+    #[test]
+    fn test_mixed_universal_and_platform_specific() {
+        let mut state = PackageState::default();
+        // Universal package
+        state.add_package("hello");
+        // Platform-specific package
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "terminal-notifier".to_string(),
+            version_spec: None,
+            resolved_version: "2.0.0".to_string(),
+            attribute_path: "terminal-notifier".to_string(),
+            commit_hash: "abc123def456".to_string(),
+            platforms: Some(vec![
+                "aarch64-darwin".to_string(),
+                "x86_64-darwin".to_string(),
+            ]),
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Universal package should be in the main paths list
+        assert!(flake.contains("hello"));
+        // Platform-specific should use lib.optionals
+        assert!(flake.contains("lib.optionals"));
+        assert!(flake.contains("terminal-notifier"));
+    }
+
+    #[test]
+    fn test_platform_specific_custom_package() {
+        let mut state = PackageState::default();
+        state.add_custom_package(CustomPackage {
+            name: "neovim".to_string(),
+            input_name: "neovim-nightly".to_string(),
+            input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
+            package_output: "packages".to_string(),
+            source_name: None,
+            platforms: Some(vec![
+                "x86_64-linux".to_string(),
+                "aarch64-linux".to_string(),
+            ]),
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // Should have conditional path
+        assert!(flake.contains("lib.optionals"));
+        assert!(flake.contains("x86_64-linux") && flake.contains("aarch64-linux"));
+        assert!(flake.contains("neovim"));
     }
 }

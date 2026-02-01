@@ -28,6 +28,10 @@ pub struct ResolvedNixpkgPackage {
     pub attribute_path: String,
     /// nixpkgs commit hash
     pub commit_hash: String,
+    /// Platform restrictions (e.g., ["x86_64-darwin", "aarch64-darwin"])
+    /// None means all platforms
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platforms: Option<Vec<String>>,
 }
 
 /// Custom package installed from a flake registry
@@ -39,6 +43,10 @@ pub struct CustomPackage {
     pub package_output: String, // e.g., "packages" or "legacyPackages"
     #[serde(default)]
     pub source_name: Option<String>, // The actual package name in the source flake (for aliases)
+    /// Platform restrictions (e.g., ["x86_64-darwin", "aarch64-darwin"])
+    /// None means all platforms
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platforms: Option<Vec<String>>,
 }
 
 impl CustomPackage {
@@ -215,6 +223,50 @@ pub fn get_state_path(profile_dir: &Path) -> std::path::PathBuf {
     profile_dir.join("packages.json")
 }
 
+/// All valid Nix system platforms
+pub const VALID_PLATFORMS: &[&str] = &[
+    "x86_64-darwin",
+    "aarch64-darwin",
+    "x86_64-linux",
+    "aarch64-linux",
+];
+
+/// Platform aliases that expand to multiple platforms
+const PLATFORM_ALIASES: &[(&str, &[&str])] = &[
+    ("darwin", &["x86_64-darwin", "aarch64-darwin"]),
+    ("macos", &["x86_64-darwin", "aarch64-darwin"]),
+    ("linux", &["x86_64-linux", "aarch64-linux"]),
+];
+
+/// Normalize platform names, expanding aliases like "darwin" to full platform names.
+/// Returns an error message if any platform is invalid.
+pub fn normalize_platforms(platforms: &[String]) -> std::result::Result<Vec<String>, String> {
+    let mut result = Vec::new();
+    for p in platforms {
+        let p_lower = p.to_lowercase();
+        // Check if it's an alias
+        if let Some((_, expanded)) = PLATFORM_ALIASES.iter().find(|(alias, _)| *alias == p_lower) {
+            for exp in *expanded {
+                if !result.contains(&exp.to_string()) {
+                    result.push(exp.to_string());
+                }
+            }
+        } else if VALID_PLATFORMS.contains(&p_lower.as_str()) {
+            if !result.contains(&p_lower) {
+                result.push(p_lower);
+            }
+        } else {
+            return Err(format!(
+                "Invalid platform '{}'. Valid platforms: darwin, macos, linux, {}",
+                p,
+                VALID_PLATFORMS.join(", ")
+            ));
+        }
+    }
+    result.sort();
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +320,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         };
         state.add_custom_package(pkg.clone());
 
@@ -284,6 +337,7 @@ mod tests {
             input_url: "github:old/overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         };
         state.add_custom_package(pkg1);
 
@@ -293,6 +347,7 @@ mod tests {
             input_url: "github:new/overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         };
         state.add_custom_package(pkg2);
 
@@ -320,6 +375,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         };
         state.add_custom_package(pkg);
 
@@ -343,6 +399,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         let names = state.all_package_names();
@@ -362,6 +419,7 @@ mod tests {
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
             source_name: None,
+            platforms: None,
         });
 
         state.save(&path).unwrap();
@@ -395,6 +453,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123".to_string(),
+            platforms: None,
         };
         state.add_resolved_package(pkg.clone());
 
@@ -421,6 +480,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123".to_string(),
+            platforms: None,
         };
         state.add_resolved_package(pkg);
 
@@ -440,6 +500,7 @@ mod tests {
             resolved_version: "20.11.0".to_string(),
             attribute_path: "nodejs_20".to_string(),
             commit_hash: "abc123".to_string(),
+            platforms: None,
         };
         state.add_resolved_package(pkg);
 
@@ -458,6 +519,7 @@ mod tests {
             resolved_version: "1.0.0".to_string(),
             attribute_path: "resolved-pkg".to_string(),
             commit_hash: "abc123".to_string(),
+            platforms: None,
         });
 
         assert!(state.is_legacy_package("legacy-pkg"));
@@ -479,5 +541,63 @@ mod tests {
         // Legacy packages should be preserved
         assert_eq!(state.packages, vec!["ripgrep", "fzf"]);
         assert!(state.resolved_packages.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_platforms_darwin_alias() {
+        let result = normalize_platforms(&["darwin".to_string()]).unwrap();
+        assert_eq!(result, vec!["aarch64-darwin", "x86_64-darwin"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_macos_alias() {
+        let result = normalize_platforms(&["macos".to_string()]).unwrap();
+        assert_eq!(result, vec!["aarch64-darwin", "x86_64-darwin"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_linux_alias() {
+        let result = normalize_platforms(&["linux".to_string()]).unwrap();
+        assert_eq!(result, vec!["aarch64-linux", "x86_64-linux"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_full_name() {
+        let result = normalize_platforms(&["x86_64-darwin".to_string()]).unwrap();
+        assert_eq!(result, vec!["x86_64-darwin"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_case_insensitive() {
+        let result = normalize_platforms(&["Darwin".to_string()]).unwrap();
+        assert_eq!(result, vec!["aarch64-darwin", "x86_64-darwin"]);
+
+        let result = normalize_platforms(&["X86_64-LINUX".to_string()]).unwrap();
+        assert_eq!(result, vec!["x86_64-linux"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_dedup() {
+        let result =
+            normalize_platforms(&["darwin".to_string(), "x86_64-darwin".to_string()]).unwrap();
+        assert_eq!(result, vec!["aarch64-darwin", "x86_64-darwin"]);
+    }
+
+    #[test]
+    fn test_normalize_platforms_invalid() {
+        let result = normalize_platforms(&["windows".to_string()]);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Invalid platform"));
+    }
+
+    #[test]
+    fn test_normalize_platforms_mixed() {
+        let result =
+            normalize_platforms(&["darwin".to_string(), "x86_64-linux".to_string()]).unwrap();
+        assert_eq!(
+            result,
+            vec!["aarch64-darwin", "x86_64-darwin", "x86_64-linux"]
+        );
     }
 }

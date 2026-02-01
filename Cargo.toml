@@ -1,6 +1,6 @@
 [package]
 name = "nixy-rs"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 rust-version = "1.80"
 description = "Homebrew-style wrapper for Nix using flake.nix"
