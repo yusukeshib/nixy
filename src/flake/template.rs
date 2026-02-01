@@ -783,4 +783,175 @@ mod tests {
         assert!(flake.contains("x86_64-linux") && flake.contains("aarch64-linux"));
         assert!(flake.contains("neovim"));
     }
+
+    #[test]
+    fn test_generated_flake_has_balanced_brackets() {
+        /// Validates that a string has balanced brackets
+        fn validate_brackets(s: &str) -> std::result::Result<(), String> {
+            let mut curly = 0i32;
+            let mut square = 0i32;
+            let mut paren = 0i32;
+
+            for (i, c) in s.chars().enumerate() {
+                match c {
+                    '{' => curly += 1,
+                    '}' => {
+                        curly -= 1;
+                        if curly < 0 {
+                            return Err(format!("Unmatched '}}' at position {}", i));
+                        }
+                    }
+                    '[' => square += 1,
+                    ']' => {
+                        square -= 1;
+                        if square < 0 {
+                            return Err(format!("Unmatched ']' at position {}", i));
+                        }
+                    }
+                    '(' => paren += 1,
+                    ')' => {
+                        paren -= 1;
+                        if paren < 0 {
+                            return Err(format!("Unmatched ')' at position {}", i));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if curly != 0 {
+                return Err(format!("Unbalanced curly braces: {} unclosed", curly));
+            }
+            if square != 0 {
+                return Err(format!("Unbalanced square brackets: {} unclosed", square));
+            }
+            if paren != 0 {
+                return Err(format!("Unbalanced parentheses: {} unclosed", paren));
+            }
+
+            Ok(())
+        }
+
+        // Test case 1: Empty state
+        let state = PackageState::default();
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake).expect("Empty state should produce balanced brackets");
+
+        // Test case 2: Standard packages only
+        let mut state = PackageState::default();
+        state.add_package("hello");
+        state.add_package("ripgrep");
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake).expect("Standard packages should produce balanced brackets");
+
+        // Test case 3: Resolved packages only (universal)
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "hello".to_string(),
+            version_spec: Some("2.10".to_string()),
+            resolved_version: "2.10".to_string(),
+            attribute_path: "hello".to_string(),
+            commit_hash: "abc123".to_string(),
+            platforms: None,
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake).expect("Resolved packages should produce balanced brackets");
+
+        // Test case 4: Platform-specific resolved package
+        let mut state = PackageState::default();
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "terminal-notifier".to_string(),
+            version_spec: None,
+            resolved_version: "2.0.0".to_string(),
+            attribute_path: "terminal-notifier".to_string(),
+            commit_hash: "abc123def456".to_string(),
+            platforms: Some(vec![
+                "aarch64-darwin".to_string(),
+                "x86_64-darwin".to_string(),
+            ]),
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake)
+            .expect("Platform-specific resolved package should produce balanced brackets");
+
+        // Test case 5: Mixed universal and platform-specific
+        let mut state = PackageState::default();
+        state.add_package("hello");
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "terminal-notifier".to_string(),
+            version_spec: None,
+            resolved_version: "2.0.0".to_string(),
+            attribute_path: "terminal-notifier".to_string(),
+            commit_hash: "abc123def456".to_string(),
+            platforms: Some(vec![
+                "aarch64-darwin".to_string(),
+                "x86_64-darwin".to_string(),
+            ]),
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake)
+            .expect("Mixed universal and platform-specific should produce balanced brackets");
+
+        // Test case 6: Custom package with platform restrictions
+        let mut state = PackageState::default();
+        state.add_custom_package(CustomPackage {
+            name: "neovim".to_string(),
+            input_name: "neovim-nightly".to_string(),
+            input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
+            package_output: "packages".to_string(),
+            source_name: None,
+            platforms: Some(vec![
+                "x86_64-linux".to_string(),
+                "aarch64-linux".to_string(),
+            ]),
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake)
+            .expect("Custom package with platforms should produce balanced brackets");
+
+        // Test case 7: Universal custom package
+        let mut state = PackageState::default();
+        state.add_custom_package(CustomPackage {
+            name: "neovim".to_string(),
+            input_name: "neovim-nightly".to_string(),
+            input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
+            package_output: "packages".to_string(),
+            source_name: None,
+            platforms: None,
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake)
+            .expect("Universal custom package should produce balanced brackets");
+
+        // Test case 8: Complex mixed scenario
+        let mut state = PackageState::default();
+        state.add_package("hello");
+        state.add_package("ripgrep");
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "jq".to_string(),
+            version_spec: Some("1.6".to_string()),
+            resolved_version: "1.6".to_string(),
+            attribute_path: "jq".to_string(),
+            commit_hash: "abc123".to_string(),
+            platforms: None,
+        });
+        state.add_resolved_package(ResolvedNixpkgPackage {
+            name: "terminal-notifier".to_string(),
+            version_spec: None,
+            resolved_version: "2.0.0".to_string(),
+            attribute_path: "terminal-notifier".to_string(),
+            commit_hash: "def456".to_string(),
+            platforms: Some(vec!["aarch64-darwin".to_string()]),
+        });
+        state.add_custom_package(CustomPackage {
+            name: "neovim".to_string(),
+            input_name: "neovim-nightly".to_string(),
+            input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
+            package_output: "packages".to_string(),
+            source_name: None,
+            platforms: Some(vec!["x86_64-linux".to_string()]),
+        });
+        let flake = generate_flake(&state, None);
+        validate_brackets(&flake).expect("Complex mixed scenario should produce balanced brackets");
+    }
 }
