@@ -126,7 +126,9 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
     if global_pkg_file.exists()
         || (global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists())
     {
-        warn("Note: Local package definition in packages/ was not removed (shared across profiles)");
+        warn(
+            "Note: Local package definition in packages/ was not removed (shared across profiles)",
+        );
     }
 
     // Remove package from profile
