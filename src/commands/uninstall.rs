@@ -127,6 +127,7 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
             global_pkg_file.display()
         ));
         fs::remove_file(&global_pkg_file)?;
+        git_rm(&config.config_dir, &format!("packages/{}.nix", package));
         removed_local = true;
     } else if global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists() {
         info(&format!(
@@ -134,6 +135,7 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
             global_flake_dir.display()
         ));
         fs::remove_dir_all(&global_flake_dir)?;
+        git_rm_recursive(&config.config_dir, &format!("packages/{}", package));
         removed_local = true;
     }
 

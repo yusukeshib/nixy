@@ -145,7 +145,12 @@ impl FlakeBuilder {
     ) {
         for flake in flakes {
             let path = if let Some(dir) = packages_dir {
-                format!("path:{}", dir.join(&flake.name).display())
+                // Use URL-encoded path for flake URLs to handle spaces and special characters
+                let abs_path = dir.join(&flake.name);
+                let path_str = abs_path.to_string_lossy();
+                // Escape spaces and special characters in the path for flake URL
+                let escaped_path = path_str.replace(' ', "%20");
+                format!("path:{}", escaped_path)
             } else {
                 format!("path:./packages/{}", flake.name)
             };
@@ -206,10 +211,17 @@ impl FlakeBuilder {
 
             // Update package expression to use absolute path if needed
             let package_expr = if let Some(dir) = packages_dir {
-                // Replace relative path with absolute path
                 let abs_path = dir.join(format!("{}.nix", pkg.name));
-                if pkg.package_expr.contains("./packages/") {
-                    format!("pkgs.callPackage {} {{}}", abs_path.display())
+                let path_str = abs_path.to_string_lossy();
+                // Only replace if the expression is a simple ./packages/<name>.nix reference
+                if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name) {
+                    // Use Nix path syntax with proper escaping for paths with spaces
+                    if path_str.contains(' ') {
+                        // For paths with spaces, use a quoted string path
+                        format!("pkgs.callPackage /. + \"{}\" {{}}", path_str)
+                    } else {
+                        format!("pkgs.callPackage {} {{}}", path_str)
+                    }
                 } else {
                     pkg.package_expr.clone()
                 }

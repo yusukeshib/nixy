@@ -158,7 +158,7 @@ nixy は**純粋に宣言的** - `nixy.json` が真実の源であり、`flake.n
 3. `~/.local/state/nixy/env` にその環境へのシンボリックリンクを作成
 4. シェル設定が `~/.local/state/nixy/env/bin` を `$PATH` に追加
 
-つまり同期は簡単：`nixy.json` + `flake.lock` を別のマシンにコピーして `nixy sync` を実行すれば、全く同じ環境が再現できます。
+つまり同期は簡単：`nixy.json` と、使用しているプロファイルの `flake.lock` (例: `~/.local/state/nixy/profiles/<profile名>/flake.lock`) を別のマシンにコピーして `nixy sync` を実行すれば、全く同じ環境が再現できます。
 
 ## FAQ
 
@@ -177,7 +177,8 @@ nixy は Nix の上に再現性を追加します。`nixy.json` + `flake.lock` �
 **ロールバックするには？**
 `nixy.json` と `flake.lock` を git で管理してください：
 ```bash
-git checkout HEAD~1 -- ~/.config/nixy/nixy.json
+cd ~/.config/nixy
+git checkout HEAD~1 -- nixy.json
 nixy sync
 ```
 

@@ -162,7 +162,7 @@ Unlike `nix profile` which maintains mutable state, nixy:
 3. Creates a symlink at `~/.local/state/nixy/env` pointing to that environment
 4. Your shell config just adds `~/.local/state/nixy/env/bin` to `$PATH`
 
-This means syncing is simple: copy `nixy.json` + `flake.lock` to another machine, run `nixy sync`, and you have the exact same environment.
+This means syncing is simple: copy `nixy.json` and your profile's `flake.lock` (e.g., `~/.local/state/nixy/profiles/<profile>/flake.lock`) to another machine, run `nixy sync`, and you have the exact same environment.
 
 ## FAQ
 
@@ -181,7 +181,8 @@ nixy adds reproducibility on top of Nix - your `nixy.json` + `flake.lock` can be
 **How do I rollback?**
 Version control your `nixy.json` and `flake.lock` with git:
 ```bash
-git checkout HEAD~1 -- ~/.config/nixy/nixy.json
+cd ~/.config/nixy
+git checkout HEAD~1 -- nixy.json
 nixy sync
 ```
 

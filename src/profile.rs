@@ -76,12 +76,20 @@ impl Profile {
 
     /// Check if profile exists in nixy.json
     pub fn exists_in_config(name: &str, config: &Config) -> bool {
-        if nixy_json_exists(config) {
-            if let Ok(nixy_config) = NixyConfig::load(config) {
-                return nixy_config.profile_exists(name);
+        if !nixy_json_exists(config) {
+            return false;
+        }
+
+        match NixyConfig::load(config) {
+            Ok(nixy_config) => nixy_config.profile_exists(name),
+            Err(err) => {
+                eprintln!(
+                    "Warning: failed to load nixy.json while checking for profile '{}': {}",
+                    name, err
+                );
+                false
             }
         }
-        false
     }
 
     /// Create the profile state directory
@@ -106,8 +114,14 @@ impl Profile {
 pub fn get_active_profile(config: &Config) -> String {
     // Try to read from nixy.json first (new format)
     if nixy_json_exists(config) {
-        if let Ok(nixy_config) = NixyConfig::load(config) {
-            return nixy_config.active_profile.clone();
+        match NixyConfig::load(config) {
+            Ok(nixy_config) => {
+                return nixy_config.active_profile.clone();
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to load nixy.json for active profile: {}", e);
+                // Fall through to legacy active file / default profile.
+            }
         }
     }
 
