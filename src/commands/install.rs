@@ -120,13 +120,13 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     }
 
     // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext {
-        flake_dir: flake_dir.clone(),
-        state_path: state_path.clone(),
-        original_state: original_state.clone(),
-        copied_file: None,
-        created_dir: None,
-    });
+    rollback::set_context(RollbackContext::legacy(
+        flake_dir.clone(),
+        state_path.clone(),
+        original_state.clone(),
+        None,
+        None,
+    ));
 
     info(&format!(
         "Installing {}@{}...",
@@ -221,11 +221,21 @@ fn install_with_nixy_config(
         return Err(e);
     }
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext::nixy_config(
+        flake_dir.clone(),
+        config.nixy_json.clone(),
+        original_config.clone(),
+        global_packages_dir,
+    ));
+
     info(&format!(
         "Installing {}@{}...",
         resolved.name, resolved.version
     ));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert config
         original_config.save(config)?;
         let original_profile = original_config.get_active_profile().unwrap();
@@ -233,6 +243,9 @@ fn install_with_nixy_config(
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
@@ -331,13 +344,13 @@ fn install_from_registry(
     }
 
     // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext {
-        flake_dir: flake_dir.clone(),
-        state_path: state_path.clone(),
-        original_state: original_state.clone(),
-        copied_file: None,
-        created_dir: None,
-    });
+    rollback::set_context(RollbackContext::legacy(
+        flake_dir.clone(),
+        state_path.clone(),
+        original_state.clone(),
+        None,
+        None,
+    ));
 
     info(&format!("Installing {} from {}...", pkg, final_input_name));
     if let Err(e) = super::sync::run(config) {
@@ -450,14 +463,27 @@ fn install_from_registry_with_nixy_config(
         return Err(e);
     }
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext::nixy_config(
+        flake_dir.clone(),
+        config.nixy_json.clone(),
+        original_config.clone(),
+        global_packages_dir,
+    ));
+
     info(&format!("Installing {} from {}...", pkg, input_name));
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         original_config.save(config)?;
         let original_profile = original_config.get_active_profile().unwrap();
         let _ = regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
@@ -520,13 +546,13 @@ fn install_from_file(config: &Config, file: &Path) -> Result<()> {
     }
 
     // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext {
-        flake_dir: flake_dir.clone(),
-        state_path: state_path.clone(),
-        original_state: original_state.clone(),
-        copied_file: Some(dest.clone()),
-        created_dir: None,
-    });
+    rollback::set_context(RollbackContext::legacy(
+        flake_dir.clone(),
+        state_path.clone(),
+        original_state.clone(),
+        Some(dest.clone()),
+        None,
+    ));
 
     info(&format!("Installing {}...", pkg_name));
     if let Err(e) = super::sync::run(config) {
@@ -600,13 +626,13 @@ fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
     }
 
     // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext {
-        flake_dir: flake_dir.clone(),
-        state_path: state_path.clone(),
-        original_state: original_state.clone(),
-        copied_file: None,
-        created_dir: Some(pkg_dir.clone()),
-    });
+    rollback::set_context(RollbackContext::legacy(
+        flake_dir.clone(),
+        state_path.clone(),
+        original_state.clone(),
+        None,
+        Some(pkg_dir.clone()),
+    ));
 
     info(&format!("Installing {}...", pkg_name));
     if let Err(e) = super::sync::run(config) {

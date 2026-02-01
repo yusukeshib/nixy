@@ -201,8 +201,16 @@ impl NixyConfig {
 
         // Write to a temporary file first, then atomically rename it into place
         let tmp_path = path.with_extension("json.tmp");
-        fs::write(&tmp_path, &content)?;
-        fs::rename(&tmp_path, path)?;
+        if let Err(e) = fs::write(&tmp_path, &content) {
+            // Clean up temp file on write failure (if it was partially created)
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
+        if let Err(e) = fs::rename(&tmp_path, path) {
+            // Clean up temp file on rename failure
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
         Ok(())
     }
 

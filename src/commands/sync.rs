@@ -19,11 +19,9 @@ pub fn run(config: &Config) -> Result<()> {
     if nixy_json_exists(config) {
         let nixy_config = NixyConfig::load(config)?;
         if let Some(profile) = nixy_config.get_active_profile() {
-            let global_packages_dir = if config.global_packages_dir.exists() {
-                Some(config.global_packages_dir.as_path())
-            } else {
-                None
-            };
+            // Always pass global_packages_dir from config - even if it doesn't exist yet,
+            // it will be created when local packages are installed
+            let global_packages_dir = Some(config.global_packages_dir.as_path());
             regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
         }
     } else if !flake_path.exists() {

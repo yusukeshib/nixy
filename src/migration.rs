@@ -87,8 +87,8 @@ pub fn needs_migration(config: &Config) -> bool {
 /// 1. Reads all existing profile directories from ~/.config/nixy/profiles/
 /// 2. Loads packages.json from each profile
 /// 3. Creates a unified nixy.json with all profile data
-/// 4. Regenerates flake.nix and copies flake.lock to the new state directory
-/// 5. Merges local packages from all profiles to the global packages directory
+/// 4. Merges local packages from all profiles to the global packages directory
+/// 5. Regenerates flake.nix and copies flake.lock to the new state directory
 /// 6. Preserves the active profile setting
 pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
     let mut nixy_config = NixyConfig {
@@ -107,7 +107,9 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
         }
     }
 
-    // Migrate each profile
+    // Collect all profile directories and their configs first
+    let mut profile_dirs: Vec<(String, std::path::PathBuf, ProfileConfig)> = Vec::new();
+
     if config.profiles_dir.exists() {
         if let Ok(entries) = fs::read_dir(&config.profiles_dir) {
             for entry in entries.flatten() {
@@ -115,43 +117,54 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
                 if path.is_dir() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         let profile_config = migrate_profile(&path)?;
-                        nixy_config
-                            .profiles
-                            .insert(name.to_string(), profile_config.clone());
-
-                        // Merge local packages to global directory first (before flake generation)
-                        let legacy_packages_dir = path.join("packages");
-                        if legacy_packages_dir.exists() {
-                            merge_local_packages(
-                                &legacy_packages_dir,
-                                &config.global_packages_dir,
-                            )?;
-                        }
-
-                        // Create state directory and copy only flake.lock (to preserve versions)
-                        let state_profile_dir = config.profiles_state_dir.join(name);
-                        fs::create_dir_all(&state_profile_dir)?;
-
-                        let legacy_lock = path.join("flake.lock");
-                        if legacy_lock.exists() {
-                            fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
-                        }
-
-                        // Regenerate flake.nix with correct paths for new directory structure
-                        let global_packages_dir = if config.global_packages_dir.exists() {
-                            Some(config.global_packages_dir.as_path())
-                        } else {
-                            None
-                        };
-                        regenerate_flake_from_profile(
-                            &state_profile_dir,
-                            &profile_config,
-                            global_packages_dir,
-                        )?;
+                        profile_dirs.push((name.to_string(), path, profile_config));
                     }
                 }
             }
         }
+    }
+
+    // First pass: merge all local packages to global directory
+    // This ensures global_packages_dir exists before generating any flakes
+    for (_, path, _) in &profile_dirs {
+        let legacy_packages_dir = path.join("packages");
+        if legacy_packages_dir.exists() {
+            merge_local_packages(&legacy_packages_dir, &config.global_packages_dir)?;
+        }
+    }
+
+    // Handle very old format local packages (from config dir)
+    if config.legacy_flake.exists() {
+        let legacy_packages_dir = config.config_dir.join("packages");
+        if legacy_packages_dir.exists() {
+            merge_local_packages(&legacy_packages_dir, &config.global_packages_dir)?;
+        }
+    }
+
+    // Now determine global_packages_dir for flake generation
+    let global_packages_dir = if config.global_packages_dir.exists() {
+        Some(config.global_packages_dir.as_path())
+    } else {
+        None
+    };
+
+    // Second pass: migrate profiles and generate flakes
+    for (name, path, profile_config) in profile_dirs {
+        nixy_config
+            .profiles
+            .insert(name.clone(), profile_config.clone());
+
+        // Create state directory and copy only flake.lock (to preserve versions)
+        let state_profile_dir = config.profiles_state_dir.join(&name);
+        fs::create_dir_all(&state_profile_dir)?;
+
+        let legacy_lock = path.join("flake.lock");
+        if legacy_lock.exists() {
+            fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
+        }
+
+        // Regenerate flake.nix with correct paths for new directory structure
+        regenerate_flake_from_profile(&state_profile_dir, &profile_config, global_packages_dir)?;
     }
 
     // Handle very old format (flake.nix directly in config dir)
@@ -161,11 +174,7 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
             .profiles
             .insert(DEFAULT_PROFILE.to_string(), profile_config.clone());
 
-        // Merge local packages from config dir first
-        let legacy_packages_dir = config.config_dir.join("packages");
-        if legacy_packages_dir.exists() {
-            merge_local_packages(&legacy_packages_dir, &config.global_packages_dir)?;
-        }
+        // Note: local packages from config dir were already merged in the first pass above
 
         // Create state directory and copy only flake.lock
         let state_profile_dir = config.profiles_state_dir.join(DEFAULT_PROFILE);
@@ -176,12 +185,7 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
             fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
         }
 
-        // Regenerate flake.nix with correct paths
-        let global_packages_dir = if config.global_packages_dir.exists() {
-            Some(config.global_packages_dir.as_path())
-        } else {
-            None
-        };
+        // Regenerate flake.nix with correct paths (global_packages_dir already computed above)
         regenerate_flake_from_profile(&state_profile_dir, &profile_config, global_packages_dir)?;
     }
 

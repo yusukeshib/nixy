@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 use crate::flake::template::{generate_flake, regenerate_flake, regenerate_flake_from_profile};
 use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
+use crate::rollback::{self, RollbackContext};
 use crate::state::{get_state_path, PackageState};
 
 use super::{info, warn};
@@ -153,8 +154,18 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
     regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
     super::success(&format!("Removed {} from flake.nix", package));
 
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext::nixy_config(
+        flake_dir.clone(),
+        config.nixy_json.clone(),
+        original_config.clone(),
+        global_packages_dir,
+    ));
+
     info("Rebuilding environment...");
     if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
         // Sync failed, revert
         original_config.save(config)?;
         if let Some(original) = original_flake {
@@ -163,6 +174,9 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
         warn("Sync failed. Reverted nixy.json and flake.nix.");
         return Err(e);
     }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }
