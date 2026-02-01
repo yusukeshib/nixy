@@ -16,7 +16,7 @@ So I built nixy—a simple Rust wrapper with profile support. It runs smoothly a
 nixy install ripgrep    # That's it. Nix made simple.
 ```
 
-nixy manages your Nix packages through a declarative `flake.nix` + `flake.lock`, ensuring the same packages and versions on every machine.
+nixy manages your Nix packages through a declarative `nixy.json` configuration file, ensuring the same packages and versions on every machine.
 
 ## Prerequisites
 
@@ -139,15 +139,15 @@ nixy profile work               # Switch to existing profile
 nixy profile old -d             # Delete a profile (with confirmation)
 ```
 
-Each profile has its own `flake.nix` at `~/.config/nixy/profiles/<name>/`.
+All profiles are stored in `~/.config/nixy/nixy.json`, with generated flakes in `~/.local/state/nixy/profiles/<name>/`.
 
 ## How nixy works
 
-nixy is **purely declarative** - `packages.json` is the source of truth, and `flake.nix` is regenerated from it on every operation.
+nixy is **purely declarative** - `nixy.json` is the source of truth, and `flake.nix` is regenerated from it on every operation.
 
 ```
 ┌─────────────────┐      ┌─────────────┐      ┌─────────────────────────────┐
-│ packages.json   │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
+│   nixy.json     │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
 │ (source of truth)│ generate │ (+ flake.lock)│ nix build │      (symlink to /nix/store) │
 └─────────────────┘      └─────────────┘      └─────────────────────────────┘
                                                             │
@@ -157,12 +157,12 @@ nixy is **purely declarative** - `packages.json` is the source of truth, and `fl
 ```
 
 Unlike `nix profile` which maintains mutable state, nixy:
-1. Regenerates `flake.nix` from `packages.json` on every operation
+1. Regenerates `flake.nix` from `nixy.json` on every operation
 2. Runs `nix build` to create a combined environment in `/nix/store`
 3. Creates a symlink at `~/.local/state/nixy/env` pointing to that environment
 4. Your shell config just adds `~/.local/state/nixy/env/bin` to `$PATH`
 
-This means syncing is simple: copy `packages.json` + `flake.lock` to another machine, run `nixy sync`, and you have the exact same environment.
+This means syncing is simple: copy `nixy.json` + `flake.lock` to another machine, run `nixy sync`, and you have the exact same environment.
 
 ## FAQ
 
@@ -173,15 +173,15 @@ Use `nixy search <keyword>`.
 In `/nix/store/`. nixy creates a symlink at `~/.local/state/nixy/env` pointing to your environment.
 
 **Can I edit flake.nix manually?**
-No, it's regenerated from `packages.json` on every operation. Use `--from` or `--file` for custom packages.
+No, it's regenerated from `nixy.json` on every operation. Use `--from` or `--file` for custom packages.
 
 **How does nixy differ from nix profile?**
-nixy adds reproducibility on top of Nix - your `packages.json` + `flake.lock` can be synced and version controlled across machines.
+nixy adds reproducibility on top of Nix - your `nixy.json` + `flake.lock` can be synced and version controlled across machines.
 
 **How do I rollback?**
-Version control your `packages.json` and `flake.lock` with git:
+Version control your `nixy.json` and `flake.lock` with git:
 ```bash
-git checkout HEAD~1 -- packages.json flake.lock
+git checkout HEAD~1 -- ~/.config/nixy/nixy.json
 nixy sync
 ```
 
@@ -190,14 +190,21 @@ nixy sync
 ## Advanced
 
 <details>
-<summary>Profile directory structure</summary>
+<summary>Directory structure</summary>
 
 ```
-~/.config/nixy/profiles/default/
-├── packages.json    # Source of truth
-├── flake.nix        # Generated (do not edit)
-├── flake.lock       # Nix lockfile
-└── packages/        # Custom package definitions
+~/.config/nixy/
+├── nixy.json        # Source of truth (all profiles)
+└── packages/        # Global custom package definitions
+
+~/.local/state/nixy/
+├── env              # Symlink to active profile's build
+└── profiles/
+    ├── default/
+    │   ├── flake.nix    # Generated (do not edit)
+    │   └── flake.lock   # Nix lockfile
+    └── work/
+        └── ...
 ```
 
 </details>
@@ -226,7 +233,7 @@ You can import nixy's package list into your own flake:
 
 ```nix
 {
-  inputs.nixy-packages.url = "path:~/.config/nixy/profiles/default";
+  inputs.nixy-packages.url = "path:~/.local/state/nixy/profiles/default";
 
   outputs = { self, nixpkgs, nixy-packages }: {
     # nixy-packages.packages.<system>.default is a buildEnv with all packages
@@ -243,13 +250,13 @@ nixy and `nix profile` use separate paths and don't conflict.
 
 | Path | Description |
 |------|-------------|
-| `~/.config/nixy/profiles/<name>/packages.json` | Package state |
-| `~/.config/nixy/profiles/<name>/flake.nix` | Generated flake |
-| `~/.config/nixy/profiles/<name>/flake.lock` | Nix lockfile |
-| `~/.config/nixy/active` | Current profile |
+| `~/.config/nixy/nixy.json` | Configuration (all profiles) |
+| `~/.config/nixy/packages/` | Global custom package definitions |
+| `~/.local/state/nixy/profiles/<name>/flake.nix` | Generated flake |
+| `~/.local/state/nixy/profiles/<name>/flake.lock` | Nix lockfile |
 | `~/.local/state/nixy/env` | Symlink to environment |
 
-Environment variables: `NIXY_CONFIG_DIR`, `NIXY_ENV`
+Environment variables: `NIXY_CONFIG_DIR`, `NIXY_STATE_DIR`, `NIXY_ENV`
 
 </details>
 

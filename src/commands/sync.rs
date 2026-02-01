@@ -2,8 +2,9 @@ use std::fs;
 
 use crate::config::Config;
 use crate::error::Result;
-use crate::flake::template::regenerate_flake;
+use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
 use crate::nix::Nix;
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
@@ -15,10 +16,23 @@ pub fn run(config: &Config) -> Result<()> {
 
     // Auto-regenerate flake.nix if missing
     if !flake_path.exists() {
-        let state_path = get_state_path(&flake_dir);
-        let state = PackageState::load(&state_path)?;
-        info("Regenerating flake.nix from packages.json...");
-        regenerate_flake(&flake_dir, &state)?;
+        if nixy_json_exists(config) {
+            let nixy_config = NixyConfig::load(config)?;
+            if let Some(profile) = nixy_config.get_active_profile() {
+                info("Regenerating flake.nix from nixy.json...");
+                let global_packages_dir = if config.global_packages_dir.exists() {
+                    Some(config.global_packages_dir.as_path())
+                } else {
+                    None
+                };
+                regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
+            }
+        } else {
+            let state_path = get_state_path(&flake_dir);
+            let state = PackageState::load(&state_path)?;
+            info("Regenerating flake.nix from packages.json...");
+            regenerate_flake(&flake_dir, &state)?;
+        }
     }
 
     info(&format!(

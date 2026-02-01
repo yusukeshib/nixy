@@ -1,9 +1,25 @@
 //! Profile management for nixy.
 //!
 //! Profiles allow users to maintain separate package environments. Each profile
-//! has its own `flake.nix`, `packages.json`, and optional `packages/` directory.
+//! has its own `flake.nix` and `flake.lock` in the state directory.
 //!
-//! Profile structure:
+//! Profile structure (new format with nixy.json):
+//! ```text
+//! ~/.config/nixy/
+//! ├── nixy.json           # Single source of truth (ALL profiles)
+//! └── packages/           # Global local packages directory
+//!
+//! ~/.local/state/nixy/
+//! ├── env -> ...          # Symlink to current profile's build
+//! └── profiles/
+//!     ├── default/
+//!     │   ├── flake.nix   # Generated from nixy.json
+//!     │   └── flake.lock  # Managed by nix
+//!     └── work/
+//!         └── ...
+//! ```
+//!
+//! Legacy profile structure (for migration):
 //! ```text
 //! ~/.config/nixy/
 //! ├── active              # Contains the name of the active profile
@@ -25,6 +41,7 @@ use regex::Regex;
 
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::{Error, Result};
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 
 /// Regex for validating profile names (alphanumeric, dashes, underscores only)
 static PROFILE_NAME_REGEX: LazyLock<Regex> =
@@ -32,37 +49,54 @@ static PROFILE_NAME_REGEX: LazyLock<Regex> =
 
 /// Profile management
 pub struct Profile {
-    pub dir: PathBuf,
+    /// State directory for this profile (~/.local/state/nixy/profiles/<name>)
+    pub state_dir: PathBuf,
+    /// Path to flake.nix (in state directory)
     pub flake_path: PathBuf,
-    pub packages_dir: PathBuf,
+    /// Legacy directory path (~/.config/nixy/profiles/<name>) - for migration
+    pub legacy_dir: PathBuf,
 }
 
 impl Profile {
     /// Create a Profile instance from a name and config
     pub fn new(name: &str, config: &Config) -> Self {
-        let dir = config.profiles_dir.join(name);
+        let state_dir = config.profiles_state_dir.join(name);
+        let legacy_dir = config.profiles_dir.join(name);
         Self {
-            flake_path: dir.join("flake.nix"),
-            packages_dir: dir.join("packages"),
-            dir,
+            flake_path: state_dir.join("flake.nix"),
+            state_dir,
+            legacy_dir,
         }
     }
 
-    /// Check if profile exists
+    /// Check if profile exists (either in nixy.json or legacy directory)
     pub fn exists(&self) -> bool {
-        self.dir.exists()
+        self.state_dir.exists() || self.legacy_dir.exists()
     }
 
-    /// Create the profile directory
+    /// Check if profile exists in nixy.json
+    pub fn exists_in_config(name: &str, config: &Config) -> bool {
+        if nixy_json_exists(config) {
+            if let Ok(nixy_config) = NixyConfig::load(config) {
+                return nixy_config.profile_exists(name);
+            }
+        }
+        false
+    }
+
+    /// Create the profile state directory
     pub fn create(&self) -> Result<()> {
-        fs::create_dir_all(&self.dir)?;
+        fs::create_dir_all(&self.state_dir)?;
         Ok(())
     }
 
-    /// Delete the profile directory
+    /// Delete the profile state directory (and legacy directory if exists)
     pub fn delete(&self) -> Result<()> {
-        if self.dir.exists() {
-            fs::remove_dir_all(&self.dir)?;
+        if self.state_dir.exists() {
+            fs::remove_dir_all(&self.state_dir)?;
+        }
+        if self.legacy_dir.exists() {
+            fs::remove_dir_all(&self.legacy_dir)?;
         }
         Ok(())
     }
@@ -70,6 +104,14 @@ impl Profile {
 
 /// Get the active profile name
 pub fn get_active_profile(config: &Config) -> String {
+    // Try to read from nixy.json first (new format)
+    if nixy_json_exists(config) {
+        if let Ok(nixy_config) = NixyConfig::load(config) {
+            return nixy_config.active_profile.clone();
+        }
+    }
+
+    // Fall back to legacy active file
     if config.active_file.exists() {
         fs::read_to_string(&config.active_file)
             .map(|s| s.trim().to_string())
@@ -81,8 +123,16 @@ pub fn get_active_profile(config: &Config) -> String {
 
 /// Set the active profile
 pub fn set_active_profile(config: &Config, name: &str) -> Result<()> {
-    fs::create_dir_all(&config.config_dir)?;
-    fs::write(&config.active_file, name)?;
+    // Update nixy.json if it exists (new format)
+    if nixy_json_exists(config) {
+        let mut nixy_config = NixyConfig::load(config)?;
+        nixy_config.set_active_profile(name)?;
+        nixy_config.save(config)?;
+    } else {
+        // Fall back to legacy active file
+        fs::create_dir_all(&config.config_dir)?;
+        fs::write(&config.active_file, name)?;
+    }
     Ok(())
 }
 
@@ -96,6 +146,13 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
 
 /// List all profiles
 pub fn list_profiles(config: &Config) -> Result<Vec<String>> {
+    // Read from nixy.json if it exists (new format)
+    if nixy_json_exists(config) {
+        let nixy_config = NixyConfig::load(config)?;
+        return Ok(nixy_config.list_profiles());
+    }
+
+    // Fall back to legacy profiles directory
     let mut profiles = Vec::new();
 
     if config.profiles_dir.exists() {
@@ -118,22 +175,42 @@ pub fn get_flake_path(config: &Config) -> PathBuf {
     let active = get_active_profile(config);
     let profile = Profile::new(&active, config);
 
-    // Check profile directory first
+    // Check new state directory first
     if profile.flake_path.exists() {
         return profile.flake_path;
     }
 
-    // Legacy fallback: only for default profile
+    // Check legacy profile directory
+    let legacy_flake = profile.legacy_dir.join("flake.nix");
+    if legacy_flake.exists() {
+        return legacy_flake;
+    }
+
+    // Legacy fallback: only for default profile (very old format)
     if active == DEFAULT_PROFILE && config.legacy_flake.exists() {
         return config.legacy_flake.clone();
     }
 
-    // Return expected path even if doesn't exist
+    // Return expected path in state directory even if doesn't exist
     profile.flake_path
 }
 
 /// Get the flake directory for the active profile
+///
+/// In the new format, this returns the state directory for the profile.
+/// This function also ensures the directory exists.
 pub fn get_flake_dir(config: &Config) -> Result<PathBuf> {
+    let active = get_active_profile(config);
+    let profile = Profile::new(&active, config);
+
+    // If using new format (nixy.json exists), return state directory
+    if nixy_json_exists(config) {
+        // Ensure the state directory exists
+        fs::create_dir_all(&profile.state_dir)?;
+        return Ok(profile.state_dir);
+    }
+
+    // Legacy: get flake path and determine directory
     let flake_path = get_flake_path(config);
 
     if flake_path.is_symlink() {
@@ -165,29 +242,38 @@ pub fn get_flake_dir(config: &Config) -> Result<PathBuf> {
     }
 }
 
-/// Check if there's a legacy flake that needs migration
+/// Check if there's a legacy flake that needs migration (very old format)
 pub fn has_legacy_flake(config: &Config) -> bool {
+    // If nixy.json exists, no legacy migration needed
+    if nixy_json_exists(config) {
+        return false;
+    }
+
+    // Check for very old format: flake.nix directly in config dir
     config.legacy_flake.exists() && !config.profiles_dir.join(DEFAULT_PROFILE).exists()
 }
 
-/// Migrate legacy flake to default profile
+/// Migrate legacy flake to default profile (very old format)
+///
+/// Note: This function is kept for backwards compatibility but the main migration
+/// is now handled by migration::run_migration_if_needed()
 pub fn migrate_legacy_flake(config: &Config) -> Result<()> {
     let profile = Profile::new(DEFAULT_PROFILE, config);
     profile.create()?;
 
-    // Copy flake.nix
+    // Copy flake.nix to state directory
     fs::copy(&config.legacy_flake, &profile.flake_path)?;
 
     // Copy flake.lock if exists
     let legacy_lock = config.config_dir.join("flake.lock");
     if legacy_lock.exists() {
-        fs::copy(&legacy_lock, profile.dir.join("flake.lock"))?;
+        fs::copy(&legacy_lock, profile.state_dir.join("flake.lock"))?;
     }
 
-    // Copy packages directory if exists
+    // Copy packages directory to global packages dir if exists
     let legacy_packages = config.config_dir.join("packages");
-    if legacy_packages.exists() {
-        copy_dir_recursive(&legacy_packages, &profile.packages_dir)?;
+    if legacy_packages.exists() && !config.global_packages_dir.exists() {
+        copy_dir_recursive(&legacy_packages, &config.global_packages_dir)?;
     }
 
     Ok(())
@@ -220,9 +306,13 @@ mod tests {
     fn test_config(temp: &TempDir) -> Config {
         Config {
             config_dir: temp.path().join("config"),
+            nixy_json: temp.path().join("config/nixy.json"),
+            global_packages_dir: temp.path().join("config/packages"),
+            state_dir: temp.path().join("state"),
+            profiles_state_dir: temp.path().join("state/profiles"),
             profiles_dir: temp.path().join("config/profiles"),
             active_file: temp.path().join("config/active"),
-            env_link: temp.path().join("env"),
+            env_link: temp.path().join("state/env"),
             legacy_flake: temp.path().join("config/flake.nix"),
         }
     }
@@ -289,7 +379,7 @@ mod tests {
 
         profile.create().unwrap();
         assert!(profile.exists());
-        assert!(profile.dir.exists());
+        assert!(profile.state_dir.exists());
     }
 
     #[test]
@@ -319,13 +409,28 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let config = test_config(&temp);
 
-        // Create some profiles
-        let profile1 = Profile::new("work", &config);
-        let profile2 = Profile::new("personal", &config);
-        let profile3 = Profile::new("default", &config);
-        profile1.create().unwrap();
-        profile2.create().unwrap();
-        profile3.create().unwrap();
+        // Create some profiles in legacy format (legacy profiles_dir)
+        fs::create_dir_all(config.profiles_dir.join("work")).unwrap();
+        fs::create_dir_all(config.profiles_dir.join("personal")).unwrap();
+        fs::create_dir_all(config.profiles_dir.join("default")).unwrap();
+
+        let profiles = list_profiles(&config).unwrap();
+        assert_eq!(profiles.len(), 3);
+        // Should be sorted
+        assert_eq!(profiles, vec!["default", "personal", "work"]);
+    }
+
+    #[test]
+    fn test_list_profiles_multiple_nixy_json() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create nixy.json with multiple profiles
+        let mut nixy_config = NixyConfig::load(&config).unwrap();
+        nixy_config.create_profile("work").unwrap();
+        nixy_config.create_profile("personal").unwrap();
+        // default is created automatically
+        nixy_config.save(&config).unwrap();
 
         let profiles = list_profiles(&config).unwrap();
         assert_eq!(profiles.len(), 3);
@@ -346,9 +451,8 @@ mod tests {
         fs::write(&config.legacy_flake, "{}").unwrap();
         assert!(has_legacy_flake(&config));
 
-        // Create default profile - should no longer be legacy
-        let default_profile = Profile::new(DEFAULT_PROFILE, &config);
-        default_profile.create().unwrap();
+        // Create default profile in legacy profiles_dir - should no longer be legacy
+        fs::create_dir_all(config.profiles_dir.join(DEFAULT_PROFILE)).unwrap();
         assert!(!has_legacy_flake(&config));
     }
 
@@ -357,13 +461,28 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let config = test_config(&temp);
 
-        // Create profile with flake
+        // Create profile with flake in state directory
         let profile = Profile::new(DEFAULT_PROFILE, &config);
         profile.create().unwrap();
         fs::write(&profile.flake_path, "{}").unwrap();
 
         let flake_path = get_flake_path(&config);
         assert_eq!(flake_path, profile.flake_path);
+    }
+
+    #[test]
+    fn test_get_flake_path_legacy_profile() {
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create profile with flake in legacy directory
+        let profile = Profile::new(DEFAULT_PROFILE, &config);
+        fs::create_dir_all(&profile.legacy_dir).unwrap();
+        let legacy_flake = profile.legacy_dir.join("flake.nix");
+        fs::write(&legacy_flake, "{}").unwrap();
+
+        let flake_path = get_flake_path(&config);
+        assert_eq!(flake_path, legacy_flake);
     }
 
     #[test]
@@ -397,11 +516,13 @@ mod tests {
         // Migrate
         migrate_legacy_flake(&config).unwrap();
 
-        // Check profile was created
+        // Check profile was created in state directory
         let profile = Profile::new(DEFAULT_PROFILE, &config);
         assert!(profile.flake_path.exists());
-        assert!(profile.dir.join("flake.lock").exists());
-        assert!(profile.packages_dir.join("test.nix").exists());
+        assert!(profile.state_dir.join("flake.lock").exists());
+
+        // Check packages were copied to global directory
+        assert!(config.global_packages_dir.join("test.nix").exists());
 
         // Check content was copied
         let content = fs::read_to_string(&profile.flake_path).unwrap();

@@ -7,9 +7,10 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::flake::is_flake_file;
 use crate::flake::parser::parse_local_package_attr;
-use crate::flake::template::regenerate_flake;
+use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
 use crate::nix::Nix;
 use crate::nixhub::{parse_package_spec, NixhubClient};
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
 use crate::rollback::{self, RollbackContext};
 use crate::state::{
@@ -54,7 +55,17 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     // Parse package spec (e.g., "nodejs@20" or "ripgrep")
     let pkg_spec = parse_package_spec(&pkg_spec_str);
 
-    // Get flake directory
+    // Use NixyConfig if available (new format), otherwise fall back to legacy
+    if nixy_json_exists(config) {
+        return install_with_nixy_config(
+            config,
+            &pkg_spec.name,
+            pkg_spec.version.as_deref(),
+            platforms,
+        );
+    }
+
+    // Legacy: Get flake directory and use PackageState
     let flake_dir = get_flake_dir(config)?;
     let state_path = get_state_path(&flake_dir);
 
@@ -137,6 +148,95 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     Ok(())
 }
 
+/// Install a package using the new nixy.json format
+fn install_with_nixy_config(
+    config: &Config,
+    name: &str,
+    version: Option<&str>,
+    platforms: Option<Vec<String>>,
+) -> Result<()> {
+    let mut nixy_config = NixyConfig::load(config)?;
+    let active_profile = nixy_config.active_profile.clone();
+
+    // Check if package is already installed (scope the borrow)
+    {
+        let profile = nixy_config
+            .get_active_profile()
+            .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+        if profile.has_package(name) {
+            success(&format!("Package '{}' is already installed", name));
+            return Ok(());
+        }
+    }
+
+    // Resolve package via Nixhub
+    let version_display = version.unwrap_or("latest");
+    info(&format!(
+        "Resolving {}@{} via Nixhub...",
+        name, version_display
+    ));
+
+    let client = NixhubClient::new();
+    let resolved = client.resolve_for_current_system(name, version.unwrap_or("latest"))?;
+
+    info(&format!(
+        "Found {} version {} (commit {})",
+        resolved.name,
+        resolved.version,
+        &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
+    ));
+
+    // Save original config for rollback BEFORE mutating
+    let original_config = nixy_config.clone();
+
+    // Add resolved package to profile
+    {
+        let profile = nixy_config
+            .get_active_profile_mut()
+            .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+        profile.add_resolved_package(ResolvedNixpkgPackage {
+            name: resolved.name.clone(),
+            version_spec: version.map(String::from),
+            resolved_version: resolved.version.clone(),
+            attribute_path: resolved.attribute_path.clone(),
+            commit_hash: resolved.commit_hash.clone(),
+            platforms: platforms.clone(),
+        });
+    }
+    nixy_config.save(config)?;
+
+    // Regenerate flake.nix
+    let flake_dir = get_flake_dir(config)?;
+    let global_packages_dir = if config.global_packages_dir.exists() {
+        Some(config.global_packages_dir.as_path())
+    } else {
+        None
+    };
+    let profile_for_flake = nixy_config.get_active_profile().unwrap();
+    if let Err(e) =
+        regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)
+    {
+        original_config.save(config)?;
+        warn("Failed to regenerate flake.nix. Reverted changes.");
+        return Err(e);
+    }
+
+    info(&format!(
+        "Installing {}@{}...",
+        resolved.name, resolved.version
+    ));
+    if let Err(e) = super::sync::run(config) {
+        // Sync failed, revert config
+        original_config.save(config)?;
+        let original_profile = original_config.get_active_profile().unwrap();
+        let _ = regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
+        warn("Sync failed. Reverted changes.");
+        return Err(e);
+    }
+
+    Ok(())
+}
+
 /// Install from a flake registry or direct URL
 fn install_from_registry(
     config: &Config,
@@ -144,6 +244,12 @@ fn install_from_registry(
     pkg: &str,
     platforms: Option<Vec<String>>,
 ) -> Result<()> {
+    // Use NixyConfig if available (new format)
+    if nixy_json_exists(config) {
+        return install_from_registry_with_nixy_config(config, from_arg, pkg, platforms);
+    }
+
+    // Legacy format
     let flake_dir = get_flake_dir(config)?;
     let state_path = get_state_path(&flake_dir);
 
@@ -246,6 +352,112 @@ fn install_from_registry(
 
     // Clear rollback context on success
     rollback::clear_context();
+
+    Ok(())
+}
+
+/// Install from a flake registry using the new nixy.json format
+fn install_from_registry_with_nixy_config(
+    config: &Config,
+    from_arg: &str,
+    pkg: &str,
+    platforms: Option<Vec<String>>,
+) -> Result<()> {
+    let mut nixy_config = NixyConfig::load(config)?;
+    let active_profile = nixy_config.active_profile.clone();
+
+    // Check if package is already installed (scope the borrow)
+    {
+        let profile = nixy_config
+            .get_active_profile()
+            .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+        if profile.has_package(pkg) {
+            success(&format!("Package '{}' is already installed", pkg));
+            return Ok(());
+        }
+    }
+
+    let flake_url = if from_arg.contains(':') {
+        info(&format!("Using flake URL: {}", from_arg));
+        from_arg.to_string()
+    } else {
+        info(&format!("Looking up '{}' in nix registry...", from_arg));
+        let url = Nix::registry_lookup(from_arg)?
+            .ok_or_else(|| Error::RegistryNotFound(from_arg.to_string()))?;
+        info(&format!("Found: {}", url));
+        url
+    };
+
+    let input_name = if !from_arg.contains(':') {
+        sanitize_input_name(from_arg)
+    } else {
+        derive_input_name_from_url(&flake_url)
+    };
+
+    info(&format!(
+        "Validating package '{}' in {}...",
+        pkg, input_name
+    ));
+    let pkg_output = Nix::validate_flake_package(&flake_url, pkg)?.ok_or_else(|| {
+        let available = Nix::list_flake_packages(&flake_url, None)
+            .unwrap_or_default()
+            .into_iter()
+            .take(10)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if available.is_empty() {
+            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+        } else {
+            Error::Usage(format!(
+                "Package '{}' not found in '{}'. Available packages: {}...",
+                pkg, input_name, available
+            ))
+        }
+    })?;
+
+    // Save original config for rollback BEFORE mutating
+    let original_config = nixy_config.clone();
+
+    // Add custom package to profile
+    {
+        let profile = nixy_config
+            .get_active_profile_mut()
+            .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+        profile.add_custom_package(CustomPackage {
+            name: pkg.to_string(),
+            input_name: input_name.clone(),
+            input_url: flake_url,
+            package_output: pkg_output,
+            source_name: None,
+            platforms,
+        });
+    }
+    nixy_config.save(config)?;
+
+    // Regenerate flake.nix
+    let flake_dir = get_flake_dir(config)?;
+    let global_packages_dir = if config.global_packages_dir.exists() {
+        Some(config.global_packages_dir.as_path())
+    } else {
+        None
+    };
+    let profile_for_flake = nixy_config.get_active_profile().unwrap();
+    if let Err(e) =
+        regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)
+    {
+        original_config.save(config)?;
+        warn("Failed to regenerate flake.nix. Reverted changes.");
+        return Err(e);
+    }
+
+    info(&format!("Installing {} from {}...", pkg, input_name));
+    if let Err(e) = super::sync::run(config) {
+        original_config.save(config)?;
+        let original_profile = original_config.get_active_profile().unwrap();
+        let _ = regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
+        warn("Sync failed. Reverted changes.");
+        return Err(e);
+    }
 
     Ok(())
 }

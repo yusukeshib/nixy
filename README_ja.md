@@ -12,7 +12,7 @@
 nixy install ripgrep    # これだけ。シンプルな Nix 生活。
 ```
 
-nixy は宣言的な `flake.nix` + `flake.lock` で Nix パッケージを管理し、どのマシンでも同じパッケージ、同じバージョンを保証します。
+nixy は宣言的な `nixy.json` 設定ファイルで Nix パッケージを管理し、どのマシンでも同じパッケージ、同じバージョンを保証します。
 
 ## 前提条件
 
@@ -135,15 +135,15 @@ nixy profile work               # 既存のプロファイルに切り替え
 nixy profile old -d             # プロファイルを削除（確認あり）
 ```
 
-各プロファイルは `~/.config/nixy/profiles/<name>/` に独自の `flake.nix` を持ちます。
+全てのプロファイルは `~/.config/nixy/nixy.json` に保存され、生成された flake は `~/.local/state/nixy/profiles/<name>/` に配置されます。
 
 ## nixy の仕組み
 
-nixy は**純粋に宣言的** - `packages.json` が真実の源であり、`flake.nix` は操作のたびにそこから再生成されます。
+nixy は**純粋に宣言的** - `nixy.json` が真実の源であり、`flake.nix` は操作のたびにそこから再生成されます。
 
 ```
 ┌─────────────────┐      ┌─────────────┐      ┌─────────────────────────────┐
-│ packages.json   │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
+│   nixy.json     │ ──── │  flake.nix  │ ──── │ ~/.local/state/nixy/env/bin │
 │  (真実の源)      │ 生成  │ (+ flake.lock)│ nix build │   (/nix/store へのシンボリックリンク)│
 └─────────────────┘      └─────────────┘      └─────────────────────────────┘
                                                             │
@@ -153,12 +153,12 @@ nixy は**純粋に宣言的** - `packages.json` が真実の源であり、`fla
 ```
 
 可変な状態を持つ `nix profile` とは異なり、nixy は：
-1. 操作のたびに `packages.json` から `flake.nix` を再生成
+1. 操作のたびに `nixy.json` から `flake.nix` を再生成
 2. `nix build` を実行して `/nix/store` に統合された環境を作成
 3. `~/.local/state/nixy/env` にその環境へのシンボリックリンクを作成
 4. シェル設定が `~/.local/state/nixy/env/bin` を `$PATH` に追加
 
-つまり同期は簡単：`packages.json` + `flake.lock` を別のマシンにコピーして `nixy sync` を実行すれば、全く同じ環境が再現できます。
+つまり同期は簡単：`nixy.json` + `flake.lock` を別のマシンにコピーして `nixy sync` を実行すれば、全く同じ環境が再現できます。
 
 ## FAQ
 
@@ -169,15 +169,15 @@ nixy は**純粋に宣言的** - `packages.json` が真実の源であり、`fla
 `/nix/store/` にインストールされます。nixy は `~/.local/state/nixy/env` にシンボリックリンクを作成します。
 
 **flake.nix を手動で編集できる？**
-できません。操作のたびに `packages.json` から再生成されます。カスタムパッケージには `--from` や `--file` を使ってください。
+できません。操作のたびに `nixy.json` から再生成されます。カスタムパッケージには `--from` や `--file` を使ってください。
 
 **nix profile との違いは？**
-nixy は Nix の上に再現性を追加します。`packages.json` + `flake.lock` を複数マシン間で同期・バージョン管理できます。
+nixy は Nix の上に再現性を追加します。`nixy.json` + `flake.lock` を複数マシン間で同期・バージョン管理できます。
 
 **ロールバックするには？**
-`packages.json` と `flake.lock` を git で管理してください：
+`nixy.json` と `flake.lock` を git で管理してください：
 ```bash
-git checkout HEAD~1 -- packages.json flake.lock
+git checkout HEAD~1 -- ~/.config/nixy/nixy.json
 nixy sync
 ```
 
@@ -186,14 +186,21 @@ nixy sync
 ## 詳細
 
 <details>
-<summary>プロファイルのディレクトリ構造</summary>
+<summary>ディレクトリ構造</summary>
 
 ```
-~/.config/nixy/profiles/default/
-├── packages.json    # 真実の源
-├── flake.nix        # 生成ファイル（編集しない）
-├── flake.lock       # Nix ロックファイル
-└── packages/        # カスタムパッケージ定義
+~/.config/nixy/
+├── nixy.json        # 真実の源（全プロファイル）
+└── packages/        # グローバルカスタムパッケージ定義
+
+~/.local/state/nixy/
+├── env              # アクティブプロファイルのビルドへのシンボリックリンク
+└── profiles/
+    ├── default/
+    │   ├── flake.nix    # 生成ファイル（編集しない）
+    │   └── flake.lock   # Nix ロックファイル
+    └── work/
+        └── ...
 ```
 
 </details>
@@ -222,7 +229,7 @@ nixy のパッケージリストを自分の flake にインポートできま�
 
 ```nix
 {
-  inputs.nixy-packages.url = "path:~/.config/nixy/profiles/default";
+  inputs.nixy-packages.url = "path:~/.local/state/nixy/profiles/default";
 
   outputs = { self, nixpkgs, nixy-packages }: {
     # nixy-packages.packages.<system>.default は全パッケージを含む buildEnv
@@ -239,13 +246,13 @@ nixy と `nix profile` は別のパスを使うため競合しません。
 
 | パス | 説明 |
 |------|------|
-| `~/.config/nixy/profiles/<name>/packages.json` | パッケージ状態 |
-| `~/.config/nixy/profiles/<name>/flake.nix` | 生成された flake |
-| `~/.config/nixy/profiles/<name>/flake.lock` | Nix ロックファイル |
-| `~/.config/nixy/active` | 現在のプロファイル |
+| `~/.config/nixy/nixy.json` | 設定ファイル（全プロファイル） |
+| `~/.config/nixy/packages/` | グローバルカスタムパッケージ定義 |
+| `~/.local/state/nixy/profiles/<name>/flake.nix` | 生成された flake |
+| `~/.local/state/nixy/profiles/<name>/flake.lock` | Nix ロックファイル |
 | `~/.local/state/nixy/env` | 環境へのシンボリックリンク |
 
-環境変数: `NIXY_CONFIG_DIR`, `NIXY_ENV`
+環境変数: `NIXY_CONFIG_DIR`, `NIXY_STATE_DIR`, `NIXY_ENV`
 
 </details>
 

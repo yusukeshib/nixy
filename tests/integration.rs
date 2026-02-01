@@ -13,6 +13,7 @@ fn nixy_cmd() -> Command {
 struct TestEnv {
     _temp: TempDir,
     config_dir: std::path::PathBuf,
+    state_dir: std::path::PathBuf,
     env_path: std::path::PathBuf,
 }
 
@@ -21,7 +22,8 @@ impl TestEnv {
         let temp = TempDir::new().unwrap();
         Self {
             config_dir: temp.path().join("config"),
-            env_path: temp.path().join("env"),
+            state_dir: temp.path().join("state"),
+            env_path: temp.path().join("state/env"),
             _temp: temp,
         }
     }
@@ -30,6 +32,7 @@ impl TestEnv {
     fn cmd(&self) -> Command {
         let mut cmd = nixy_cmd();
         cmd.env("NIXY_CONFIG_DIR", &self.config_dir);
+        cmd.env("NIXY_STATE_DIR", &self.state_dir);
         cmd.env("NIXY_ENV", &self.env_path);
         cmd
     }
@@ -1446,17 +1449,24 @@ fn test_install_from_detects_direct_url() {
 fn test_install_reverts_flake_on_sync_failure() {
     let env = TestEnv::new();
 
-    // Create a profile with an empty packages.json and flake.nix (new format)
-    let profile_dir = env.config_dir.join("profiles/default");
-    std::fs::create_dir_all(&profile_dir).unwrap();
-
-    // Create empty packages.json (new state-based format)
-    let state_content = r#"{
-  "version": 1,
-  "packages": [],
-  "custom_packages": []
+    // Create the new nixy.json format
+    let nixy_json_content = r#"{
+  "version": 3,
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "packages": [],
+      "resolved_packages": [],
+      "custom_packages": []
+    }
+  }
 }"#;
-    std::fs::write(profile_dir.join("packages.json"), state_content).unwrap();
+    std::fs::create_dir_all(&env.config_dir).unwrap();
+    std::fs::write(env.config_dir.join("nixy.json"), nixy_json_content).unwrap();
+
+    // Create state directory for flake.nix
+    let state_profile_dir = env.state_dir.join("profiles/default");
+    std::fs::create_dir_all(&state_profile_dir).unwrap();
 
     // Create a flake.nix (no markers - new format)
     let flake_content = r#"{
@@ -1485,39 +1495,38 @@ fn test_install_reverts_flake_on_sync_failure() {
     };
 }
 "#;
-    std::fs::write(profile_dir.join("flake.nix"), flake_content).unwrap();
-    std::fs::write(env.config_dir.join("active"), "default").unwrap();
+    std::fs::write(state_profile_dir.join("flake.nix"), flake_content).unwrap();
 
-    // Save original state for comparison
-    let _original_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
+    // Save original config for comparison
+    let original_config = std::fs::read_to_string(env.config_dir.join("nixy.json")).unwrap();
 
-    // Try to install a package - this will modify state and flake.nix, then run sync
+    // Try to install a package - this will modify nixy.json and flake.nix, then run sync
     // Sync may fail in test environment (no nix, missing lock, etc.)
     let output = env.cmd().args(["install", "hello"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // If sync failed and revert happened, verify the state was restored
+    // If sync failed and revert happened, verify the config was restored
     if !output.status.success() && stderr.to_lowercase().contains("reverted") {
-        let current_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
-        // The state should be empty (reverted) - no packages
+        let current_config = std::fs::read_to_string(env.config_dir.join("nixy.json")).unwrap();
+        // The config should be empty (reverted) - no packages
         assert!(
-            !current_state.contains("hello"),
-            "State should be reverted on sync failure"
+            !current_config.contains("hello"),
+            "Config should be reverted on sync failure"
         );
     }
 
     // Also verify the command behavior is consistent:
-    // - If it succeeded, hello should be in the state
-    // - If it failed with revert, the state should be unchanged
+    // - If it succeeded, hello should be in the config
+    // - If it failed with revert, the config should be unchanged
     // - If it failed without revert message, something else went wrong (acceptable in test)
     if output.status.success() {
-        let current_state = std::fs::read_to_string(profile_dir.join("packages.json")).unwrap();
+        let current_config = std::fs::read_to_string(env.config_dir.join("nixy.json")).unwrap();
         assert!(
-            current_state.contains("hello"),
-            "On success, state should contain the installed package"
+            current_config.contains("hello"),
+            "On success, config should contain the installed package"
         );
-        let current_flake = std::fs::read_to_string(profile_dir.join("flake.nix")).unwrap();
+        let current_flake = std::fs::read_to_string(state_profile_dir.join("flake.nix")).unwrap();
         // Check for either legacy format (pkgs.hello) or new Nixhub format (inputs.nixpkgs-*)
         assert!(
             current_flake.contains("hello = pkgs.hello")
@@ -1525,6 +1534,9 @@ fn test_install_reverts_flake_on_sync_failure() {
             "On success, flake should contain the installed package (legacy or Nixhub format)"
         );
     }
+
+    // Also check that we didn't mess up the original_config
+    drop(original_config);
 }
 
 // =============================================================================
