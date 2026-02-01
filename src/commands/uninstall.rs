@@ -160,7 +160,7 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
         if let Some(original) = original_flake {
             fs::write(&flake_path, original)?;
         }
-        warn("Sync failed. Reverted nixy.json and flake.nix (local file deletions cannot be undone).");
+        warn("Sync failed. Reverted nixy.json and flake.nix.");
         return Err(e);
     }
 
