@@ -8,6 +8,7 @@ use crate::nix::Nix;
 use crate::nixhub::NixhubClient;
 use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
 use crate::profile::get_flake_dir;
+use crate::rollback::{self, RollbackContext};
 use crate::state::{get_state_path, PackageState, ResolvedNixpkgPackage};
 
 use super::{info, success, warn};
@@ -149,6 +150,9 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
     let flake_path = flake_dir.join("flake.nix");
     let lock_file = flake_dir.join("flake.lock");
 
+    // Save original config for rollback BEFORE any mutations
+    let original_config = nixy_config.clone();
+
     // Auto-regenerate flake.nix if missing
     if !flake_path.exists() {
         if let Some(profile) = nixy_config.get_active_profile() {
@@ -167,6 +171,9 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
     } else {
         None
     };
+
+    // Track whether we modified the config (need rollback support)
+    let mut config_modified = false;
 
     if !inputs.is_empty() {
         // Get resolved package names (scope the borrow)
@@ -194,6 +201,7 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
                 upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
             }
             nixy_config.save(config)?;
+            config_modified = true;
             let profile_for_flake = nixy_config.get_active_profile().unwrap();
             regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
         }
@@ -275,6 +283,7 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
                 upgrade_resolved_packages_in_profile(profile, &all_refs)?;
             }
             nixy_config.save(config)?;
+            config_modified = true;
             let profile_for_flake = nixy_config.get_active_profile().unwrap();
             regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
         }
@@ -283,13 +292,38 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
         Nix::flake_update_all(&flake_dir)?;
     }
 
+    // Set up rollback context for Ctrl+C handling if we modified the config
+    if config_modified {
+        rollback::set_context(RollbackContext::nixy_config(
+            flake_dir.clone(),
+            config.nixy_json.clone(),
+            original_config.clone(),
+            global_packages_dir,
+        ));
+    }
+
     info("Rebuilding environment...");
 
     if let Some(parent) = config.env_link.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    Nix::build(&flake_dir, "default", &config.env_link)?;
+    if let Err(e) = Nix::build(&flake_dir, "default", &config.env_link) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
+        // Build failed, revert config if we modified it
+        if config_modified {
+            original_config.save(config)?;
+            let original_profile = original_config.get_active_profile().unwrap();
+            let _ =
+                regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
+            warn("Build failed. Reverted nixy.json and flake.nix.");
+        }
+        return Err(e);
+    }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     if !inputs.is_empty() {
         success(&format!("Upgraded: {}", inputs.join(", ")));
