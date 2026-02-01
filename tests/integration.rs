@@ -1509,9 +1509,11 @@ fn test_install_reverts_flake_on_sync_failure() {
     // If sync failed and revert happened, verify the config was restored
     if !output.status.success() && stderr.to_lowercase().contains("reverted") {
         let current_config = std::fs::read_to_string(env.config_dir.join("nixy.json")).unwrap();
-        // The config should be restored to original state
+        // Parse as JSON and compare to handle potential key ordering differences
+        let current_json: serde_json::Value = serde_json::from_str(&current_config).unwrap();
+        let original_json: serde_json::Value = serde_json::from_str(&original_config).unwrap();
         assert_eq!(
-            current_config, original_config,
+            current_json, original_json,
             "Config should be reverted to original on sync failure"
         );
     }

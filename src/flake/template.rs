@@ -216,10 +216,10 @@ impl FlakeBuilder {
                 // Only replace if the expression is a simple ./packages/<name>.nix reference
                 if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name)
                 {
-                    // Use Nix path syntax with proper escaping for paths with spaces
+                    // Use proper Nix path syntax
                     if path_str.contains(' ') {
-                        // For paths with spaces, use a quoted string path
-                        format!("pkgs.callPackage /. + \"{}\" {{}}", path_str)
+                        // For paths with spaces, use a quoted string path (Nix coerces strings to paths)
+                        format!("pkgs.callPackage \"{}\" {{}}", path_str)
                     } else {
                         format!("pkgs.callPackage {} {{}}", path_str)
                     }

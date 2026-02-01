@@ -21,7 +21,7 @@
 //!         └── ...
 //! ```
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 
 use serde::{Deserialize, Serialize};
@@ -133,12 +133,12 @@ pub struct NixyConfig {
     /// Name of the active profile
     pub active_profile: String,
     /// All profile configurations
-    pub profiles: HashMap<String, ProfileConfig>,
+    pub profiles: BTreeMap<String, ProfileConfig>,
 }
 
 impl Default for NixyConfig {
     fn default() -> Self {
-        let mut profiles = HashMap::new();
+        let mut profiles = BTreeMap::new();
         profiles.insert(DEFAULT_PROFILE.to_string(), ProfileConfig::default());
         Self {
             version: NIXY_CONFIG_VERSION,

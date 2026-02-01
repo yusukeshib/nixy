@@ -94,7 +94,7 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
     let mut nixy_config = NixyConfig {
         version: NIXY_CONFIG_VERSION,
         active_profile: DEFAULT_PROFILE.to_string(),
-        profiles: std::collections::HashMap::new(),
+        profiles: std::collections::BTreeMap::new(),
     };
 
     // Read active profile from legacy file
