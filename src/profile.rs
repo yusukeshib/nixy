@@ -119,7 +119,10 @@ pub fn get_active_profile(config: &Config) -> String {
                 return nixy_config.active_profile.clone();
             }
             Err(e) => {
-                eprintln!("Warning: failed to load nixy.json for active profile: {}", e);
+                eprintln!(
+                    "Warning: failed to load nixy.json for active profile: {}",
+                    e
+                );
                 // Fall through to legacy active file / default profile.
             }
         }

@@ -1534,7 +1534,6 @@ fn test_install_reverts_flake_on_sync_failure() {
             "On success, flake should contain the installed package (legacy or Nixhub format)"
         );
     }
-
 }
 
 // =============================================================================

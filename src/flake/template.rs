@@ -214,7 +214,8 @@ impl FlakeBuilder {
                 let abs_path = dir.join(format!("{}.nix", pkg.name));
                 let path_str = abs_path.to_string_lossy();
                 // Only replace if the expression is a simple ./packages/<name>.nix reference
-                if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name) {
+                if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name)
+                {
                     // Use Nix path syntax with proper escaping for paths with spaces
                     if path_str.contains(' ') {
                         // For paths with spaces, use a quoted string path
