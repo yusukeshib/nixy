@@ -310,6 +310,17 @@ fn merge_packages_dir(src: &Path, dst: &Path) -> Result<()> {
             continue;
         }
 
+        // Skip broken symlinks
+        let metadata = match fs::symlink_metadata(&src_path) {
+            Ok(m) => m,
+            Err(_) => continue, // Skip entries we can't stat
+        };
+
+        if metadata.file_type().is_symlink() {
+            // Skip symlinks (could be broken or create cycles)
+            continue;
+        }
+
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
@@ -328,6 +339,17 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+
+        // Skip broken symlinks
+        let metadata = match fs::symlink_metadata(&src_path) {
+            Ok(m) => m,
+            Err(_) => continue, // Skip entries we can't stat
+        };
+
+        if metadata.file_type().is_symlink() {
+            // Skip symlinks (could be broken or create cycles)
+            continue;
+        }
 
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
