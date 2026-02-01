@@ -234,12 +234,16 @@ fn merge_local_packages(src_dir: &Path, dst_dir: &Path) -> Result<()> {
                 continue;
             }
 
-            // Skip broken symlinks (symlink exists but target doesn't)
-            if src_path.is_symlink() && !src_path.exists() {
+            // Skip all symlinks to avoid pulling in files from outside nixy config
+            let metadata = match fs::symlink_metadata(&src_path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if metadata.file_type().is_symlink() {
                 continue;
             }
 
-            if src_path.is_dir() {
+            if metadata.is_dir() {
                 copy_dir_recursive(&src_path, &dst_path)?;
             } else if src_path.exists() {
                 fs::copy(&src_path, &dst_path)?;
@@ -259,14 +263,18 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
-        // Skip broken symlinks
-        if src_path.is_symlink() && !src_path.exists() {
+        // Skip all symlinks to avoid pulling in files from outside nixy config
+        let metadata = match fs::symlink_metadata(&src_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if metadata.file_type().is_symlink() {
             continue;
         }
 
-        if src_path.is_dir() {
+        if metadata.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
-        } else if src_path.exists() {
+        } else {
             fs::copy(&src_path, &dst_path)?;
         }
     }

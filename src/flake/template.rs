@@ -453,16 +453,16 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
 /// # Arguments
 /// * `profile` - The profile configuration (new nixy.json format)
 /// * `global_packages_dir` - Optional global packages directory for local packages
-/// * `flake_dir` - The flake directory (state directory) for relative path references
+/// * `_flake_dir` - Reserved for future use
 pub fn generate_flake_from_profile(
     profile: &ProfileConfig,
     global_packages_dir: Option<&Path>,
-    flake_dir: &Path,
+    _flake_dir: &Path,
 ) -> String {
     // Collect local packages from global packages directory
     let (local_packages, local_flakes) = if let Some(dir) = global_packages_dir {
         if dir.exists() {
-            collect_local_packages_with_paths(dir, flake_dir)
+            collect_local_packages_with_paths(dir)
         } else {
             (Vec::new(), Vec::new())
         }
@@ -500,11 +500,8 @@ pub fn generate_flake_from_profile(
     builder.build()
 }
 
-/// Collect local packages with paths resolved relative to the flake directory
-fn collect_local_packages_with_paths(
-    packages_dir: &Path,
-    _flake_dir: &Path,
-) -> (Vec<LocalPackage>, Vec<LocalFlake>) {
+/// Collect local packages from the packages directory
+fn collect_local_packages_with_paths(packages_dir: &Path) -> (Vec<LocalPackage>, Vec<LocalFlake>) {
     collect_local_packages(packages_dir)
 }
 

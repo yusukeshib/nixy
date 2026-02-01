@@ -60,7 +60,11 @@ fn run_with_nixy_config(config: &Config, args: FileArgs) -> Result<()> {
         .get_active_profile()
         .ok_or_else(|| Error::ProfileNotFound(nixy_config.active_profile.clone()))?;
 
-    let path = if let Some(custom) = profile
+    // Check local packages first (highest priority, same as flake generation)
+    let path = if let Some(local_path) = find_local_package_global(config, &args.package) {
+        // Local package in the global packages directory
+        local_path
+    } else if let Some(custom) = profile
         .custom_packages
         .iter()
         .find(|p| p.name == args.package)
@@ -80,9 +84,6 @@ fn run_with_nixy_config(config: &Config, args: FileArgs) -> Result<()> {
         // Legacy nixpkgs package: use nixos-unstable
         let system = Nix::current_system()?;
         Nix::get_package_source_path("nixos-unstable", &args.package, &system)?
-    } else if let Some(local_path) = find_local_package_global(config, &args.package) {
-        // Local package in the global packages directory
-        local_path
     } else {
         return Err(Error::PackageNotInstalled(args.package));
     };

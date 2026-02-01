@@ -228,15 +228,16 @@ fn delete_interactive(config: &Config, name: &str) -> Result<()> {
 
     info(&format!("Deleting profile '{}'...", name));
 
+    // Delete state directory first to avoid inconsistent state
+    // (if this fails, the config still references the profile, which is fine)
+    profile.delete()?;
+
     // Delete from nixy.json if using new format
     if nixy_json_exists(config) {
         let mut nixy_config = NixyConfig::load(config)?;
         nixy_config.delete_profile(name)?;
         nixy_config.save(config)?;
     }
-
-    // Delete state directory
-    profile.delete()?;
 
     success(&format!("Deleted profile '{}'", name));
 

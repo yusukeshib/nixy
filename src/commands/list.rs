@@ -81,64 +81,68 @@ pub fn run(config: &Config) -> Result<()> {
     // Use NixyConfig if available (new format)
     if nixy_json_exists(config) {
         let nixy_config = NixyConfig::load(config)?;
-        if let Some(profile) = nixy_config.get_active_profile() {
-            // Add legacy nixpkgs packages (no version info)
-            for name in &profile.packages {
-                entries.push(PackageEntry {
-                    name: name.clone(),
-                    source: PackageSource::Nixpkgs,
-                    platforms: None,
-                });
-                seen.insert(name.clone());
-            }
 
-            // Add resolved nixpkgs packages (with version info)
-            for pkg in &profile.resolved_packages {
-                entries.push(PackageEntry {
-                    name: pkg.name.clone(),
-                    source: PackageSource::NixpkgsVersioned {
-                        version: pkg.resolved_version.clone(),
-                    },
-                    platforms: pkg.platforms.clone(),
-                });
-                seen.insert(pkg.name.clone());
-            }
-
-            // Add custom packages
-            for pkg in &profile.custom_packages {
-                entries.push(PackageEntry {
-                    name: pkg.name.clone(),
-                    source: PackageSource::Custom {
-                        url: pkg.input_url.clone(),
-                    },
-                    platforms: pkg.platforms.clone(),
-                });
-                seen.insert(pkg.name.clone());
-            }
-        }
-
-        // Add local packages from global packages directory
+        // Add local packages first (highest priority, same as flake generation)
         if config.global_packages_dir.exists() {
             let (local_packages, local_flakes) =
                 collect_local_packages(&config.global_packages_dir);
             for pkg in local_packages {
+                entries.push(PackageEntry {
+                    name: pkg.name.clone(),
+                    source: PackageSource::Local,
+                    platforms: None,
+                });
+                seen.insert(pkg.name);
+            }
+            for flake in local_flakes {
+                entries.push(PackageEntry {
+                    name: flake.name.clone(),
+                    source: PackageSource::Local,
+                    platforms: None,
+                });
+                seen.insert(flake.name);
+            }
+        }
+
+        // Add profile entries, skipping those already covered by local packages
+        if let Some(profile) = nixy_config.get_active_profile() {
+            // Add legacy nixpkgs packages (no version info)
+            for name in &profile.packages {
+                if !seen.contains(name) {
+                    entries.push(PackageEntry {
+                        name: name.clone(),
+                        source: PackageSource::Nixpkgs,
+                        platforms: None,
+                    });
+                    seen.insert(name.clone());
+                }
+            }
+
+            // Add resolved nixpkgs packages (with version info)
+            for pkg in &profile.resolved_packages {
                 if !seen.contains(&pkg.name) {
                     entries.push(PackageEntry {
                         name: pkg.name.clone(),
-                        source: PackageSource::Local,
-                        platforms: None,
+                        source: PackageSource::NixpkgsVersioned {
+                            version: pkg.resolved_version.clone(),
+                        },
+                        platforms: pkg.platforms.clone(),
                     });
-                    seen.insert(pkg.name);
+                    seen.insert(pkg.name.clone());
                 }
             }
-            for flake in local_flakes {
-                if !seen.contains(&flake.name) {
+
+            // Add custom packages
+            for pkg in &profile.custom_packages {
+                if !seen.contains(&pkg.name) {
                     entries.push(PackageEntry {
-                        name: flake.name.clone(),
-                        source: PackageSource::Local,
-                        platforms: None,
+                        name: pkg.name.clone(),
+                        source: PackageSource::Custom {
+                            url: pkg.input_url.clone(),
+                        },
+                        platforms: pkg.platforms.clone(),
                     });
-                    seen.insert(flake.name);
+                    seen.insert(pkg.name.clone());
                 }
             }
         }
