@@ -6,11 +6,18 @@ use crate::cli::FileArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::nix::Nix;
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
 /// Run the file command to show the source path for a package
 pub fn run(config: &Config, args: FileArgs) -> Result<()> {
+    // Use NixyConfig if available (new format)
+    if nixy_json_exists(config) {
+        return run_with_nixy_config(config, args);
+    }
+
+    // Legacy format
     let flake_dir = get_flake_dir(config)?;
     let state_path = get_state_path(&flake_dir);
     let state = PackageState::load(&state_path)?;
@@ -46,16 +53,70 @@ pub fn run(config: &Config, args: FileArgs) -> Result<()> {
     Ok(())
 }
 
-/// Find a local package by its pname/name in the packages/ directory.
+/// Run file command using the new nixy.json format
+fn run_with_nixy_config(config: &Config, args: FileArgs) -> Result<()> {
+    let nixy_config = NixyConfig::load(config)?;
+    let profile = nixy_config
+        .get_active_profile()
+        .ok_or_else(|| Error::ProfileNotFound(nixy_config.active_profile.clone()))?;
+
+    // Check local packages first (highest priority, same as flake generation)
+    let path = if let Some(local_path) = find_local_package_global(config, &args.package) {
+        // Local package in the global packages directory
+        local_path
+    } else if let Some(custom) = profile
+        .custom_packages
+        .iter()
+        .find(|p| p.name == args.package)
+    {
+        // Custom package: prefetch the flake and return flake.nix path
+        let store_path = Nix::flake_prefetch(&custom.input_url)?;
+        store_path.join("flake.nix")
+    } else if let Some(resolved) = profile
+        .resolved_packages
+        .iter()
+        .find(|p| p.name == args.package)
+    {
+        // Resolved nixpkgs package: get source path via meta.position
+        let system = Nix::current_system()?;
+        Nix::get_package_source_path(&resolved.commit_hash, &resolved.attribute_path, &system)?
+    } else if profile.packages.contains(&args.package) {
+        // Legacy nixpkgs package: use nixos-unstable
+        let system = Nix::current_system()?;
+        Nix::get_package_source_path("nixos-unstable", &args.package, &system)?
+    } else {
+        return Err(Error::PackageNotInstalled(args.package));
+    };
+
+    println!("{}", path.display());
+    Ok(())
+}
+
+/// Find a local package by its pname/name in the packages/ directory (legacy format).
 /// Returns the source file path if found.
 fn find_local_package(flake_dir: &std::path::Path, package_name: &str) -> Option<PathBuf> {
     let packages_dir = flake_dir.join("packages");
+    find_local_package_in_dir(&packages_dir, package_name)
+}
+
+/// Find a local package by its pname/name in the global packages directory (new format).
+/// Returns the source file path if found.
+fn find_local_package_global(config: &Config, package_name: &str) -> Option<PathBuf> {
+    find_local_package_in_dir(&config.global_packages_dir, package_name)
+}
+
+/// Find a local package by its pname/name in the given directory.
+/// Returns the source file path if found.
+fn find_local_package_in_dir(
+    packages_dir: &std::path::Path,
+    package_name: &str,
+) -> Option<PathBuf> {
     if !packages_dir.exists() {
         return None;
     }
 
     // Scan for .nix files and subdirectories with flake.nix
-    if let Ok(entries) = std::fs::read_dir(&packages_dir) {
+    if let Ok(entries) = std::fs::read_dir(packages_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
 

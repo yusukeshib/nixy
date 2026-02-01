@@ -6,13 +6,13 @@ use dialoguer::{Confirm, Select};
 use crate::cli::ProfileArgs;
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::{Error, Result};
-use crate::flake::template::generate_flake;
+use crate::flake::template::regenerate_flake_from_profile;
 use crate::nix::Nix;
+use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
 use crate::profile::{
     get_active_profile, get_flake_dir, has_legacy_flake, list_profiles, migrate_legacy_flake,
     set_active_profile, validate_profile_name, Profile,
 };
-use crate::state::{get_state_path, PackageState};
 
 use super::{error, info, success, warn};
 
@@ -104,23 +104,46 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
 
     let profile = Profile::new(name, config);
 
-    // Auto-migrate legacy flake for default profile
-    if name == DEFAULT_PROFILE && !profile.exists() && has_legacy_flake(config) {
+    // Auto-migrate legacy flake for default profile (only if not using nixy.json yet)
+    if !nixy_json_exists(config)
+        && name == DEFAULT_PROFILE
+        && !profile.exists()
+        && has_legacy_flake(config)
+    {
         info("Migrating legacy flake to default profile...");
         migrate_legacy_flake(config)?;
     }
 
+    // Check if profile exists in nixy.json or as directory
+    let profile_exists = if nixy_json_exists(config) {
+        Profile::exists_in_config(name, config)
+    } else {
+        profile.exists()
+    };
+
     // Create profile if -c flag is set and doesn't exist
-    if !profile.exists() {
+    if !profile_exists {
         if create {
             info(&format!("Creating profile '{}'...", name));
+
+            // Create profile in nixy.json (or create nixy.json if it doesn't exist)
+            let mut nixy_config = NixyConfig::load(config)?;
+            nixy_config.create_profile(name)?;
+            nixy_config.save(config)?;
+
+            // Create state directory and generate flake.nix
             profile.create()?;
-            let state = PackageState::default();
-            let content = generate_flake(&state, Some(&profile.dir));
-            fs::write(&profile.flake_path, content)?;
-            // Create empty packages.json for consistency
-            let state_path = get_state_path(&profile.dir);
-            state.save(&state_path)?;
+            let profile_config = ProfileConfig::default();
+            let global_packages_dir = if config.global_packages_dir.exists() {
+                Some(config.global_packages_dir.as_path())
+            } else {
+                None
+            };
+            regenerate_flake_from_profile(
+                &profile.state_dir,
+                &profile_config,
+                global_packages_dir,
+            )?;
         } else {
             return Err(Error::Usage(format!(
                 "Profile '{}' does not exist. Use -c to create it: nixy profile {} -c",
@@ -165,7 +188,14 @@ fn delete_interactive(config: &Config, name: &str) -> Result<()> {
 
     let profile = Profile::new(name, config);
 
-    if !profile.exists() {
+    // Check if profile exists
+    let profile_exists = if nixy_json_exists(config) {
+        Profile::exists_in_config(name, config)
+    } else {
+        profile.exists()
+    };
+
+    if !profile_exists {
         return Err(Error::ProfileNotFound(name.to_string()));
     }
 
@@ -197,7 +227,18 @@ fn delete_interactive(config: &Config, name: &str) -> Result<()> {
     }
 
     info(&format!("Deleting profile '{}'...", name));
+
+    // Delete state directory first to avoid inconsistent state
+    // (if this fails, the config still references the profile, which is fine)
     profile.delete()?;
+
+    // Delete from nixy.json if using new format
+    if nixy_json_exists(config) {
+        let mut nixy_config = NixyConfig::load(config)?;
+        nixy_config.delete_profile(name)?;
+        nixy_config.save(config)?;
+    }
+
     success(&format!("Deleted profile '{}'", name));
 
     Ok(())

@@ -3,16 +3,25 @@ use std::fs;
 use crate::cli::UpgradeArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::template::regenerate_flake;
+use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
 use crate::nix::Nix;
 use crate::nixhub::NixhubClient;
+use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
 use crate::profile::get_flake_dir;
+use crate::rollback::{self, RollbackContext};
 use crate::state::{get_state_path, PackageState, ResolvedNixpkgPackage};
 
 use super::{info, success, warn};
 
 pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
     let inputs = args.inputs;
+
+    // Use NixyConfig if available (new format)
+    if nixy_json_exists(config) {
+        return upgrade_with_nixy_config(config, inputs);
+    }
+
+    // Legacy format
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
     let state_path = get_state_path(&flake_dir);
@@ -133,6 +142,198 @@ pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
     Ok(())
 }
 
+/// Upgrade packages using the new nixy.json format
+fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> {
+    let mut nixy_config = NixyConfig::load(config)?;
+    let active_profile = nixy_config.active_profile.clone();
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+    let lock_file = flake_dir.join("flake.lock");
+
+    // Save original config for rollback BEFORE any mutations
+    let original_config = nixy_config.clone();
+
+    // Auto-regenerate flake.nix if missing
+    if !flake_path.exists() {
+        if let Some(profile) = nixy_config.get_active_profile() {
+            info("Regenerating flake.nix from nixy.json...");
+            let global_packages_dir = if config.global_packages_dir.exists() {
+                Some(config.global_packages_dir.as_path())
+            } else {
+                None
+            };
+            regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
+        }
+    }
+
+    let global_packages_dir = if config.global_packages_dir.exists() {
+        Some(config.global_packages_dir.as_path())
+    } else {
+        None
+    };
+
+    // Track whether we modified the config (need rollback support)
+    let mut config_modified = false;
+
+    if !inputs.is_empty() {
+        // Get resolved package names (scope the borrow)
+        let resolved_names: Vec<String> = {
+            let profile = nixy_config
+                .get_active_profile()
+                .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+            profile
+                .resolved_packages
+                .iter()
+                .map(|p| p.name.clone())
+                .collect()
+        };
+
+        let (packages_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = inputs
+            .iter()
+            .partition(|input| resolved_names.iter().any(|n| n == *input));
+
+        // Upgrade resolved packages
+        if !packages_to_upgrade.is_empty() {
+            {
+                let profile = nixy_config
+                    .get_active_profile_mut()
+                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+                upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
+            }
+            nixy_config.save(config)?;
+            config_modified = true;
+            let profile_for_flake = nixy_config.get_active_profile().unwrap();
+            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+        }
+
+        // Update flake inputs
+        if !flake_inputs_to_update.is_empty() {
+            if !lock_file.exists() {
+                return Err(Error::NoFlakeLock);
+            }
+
+            let available = Nix::get_flake_inputs(&lock_file)?;
+            let mut invalid = Vec::new();
+            let mut legacy_packages = Vec::new();
+
+            // Scope this borrow for checking packages
+            {
+                let profile = nixy_config
+                    .get_active_profile()
+                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+                for input in &flake_inputs_to_update {
+                    if !available.contains(*input) {
+                        if profile.packages.contains(*input)
+                            || profile.custom_packages.iter().any(|p| &p.name == *input)
+                        {
+                            legacy_packages.push((*input).clone());
+                        } else {
+                            invalid.push((*input).clone());
+                        }
+                    }
+                }
+            }
+
+            if !legacy_packages.is_empty() {
+                warn(
+                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
+                );
+                warn(&format!(
+                    "Legacy packages ({}) are upgraded when you run 'nixy upgrade' without arguments.",
+                    legacy_packages.join(", ")
+                ));
+                return Ok(());
+            }
+
+            if !invalid.is_empty() {
+                return Err(Error::InvalidFlakeInputs(
+                    invalid.join(", "),
+                    available.join(" "),
+                ));
+            }
+
+            let inputs_to_update: Vec<String> =
+                flake_inputs_to_update.into_iter().cloned().collect();
+            info(&format!(
+                "Updating inputs: {}...",
+                inputs_to_update.join(", ")
+            ));
+            Nix::flake_update(&flake_dir, &inputs_to_update)?;
+        }
+    } else {
+        // No arguments: upgrade all resolved packages
+        // Get package names first (scope the borrow)
+        let all_names: Vec<String> = {
+            let profile = nixy_config
+                .get_active_profile()
+                .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+            profile
+                .resolved_packages
+                .iter()
+                .map(|p| p.name.clone())
+                .collect()
+        };
+
+        if !all_names.is_empty() {
+            let all_refs: Vec<&String> = all_names.iter().collect();
+            {
+                let profile = nixy_config
+                    .get_active_profile_mut()
+                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+                upgrade_resolved_packages_in_profile(profile, &all_refs)?;
+            }
+            nixy_config.save(config)?;
+            config_modified = true;
+            let profile_for_flake = nixy_config.get_active_profile().unwrap();
+            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+        }
+
+        info("Updating all flake inputs...");
+        Nix::flake_update_all(&flake_dir)?;
+    }
+
+    // Set up rollback context for Ctrl+C handling if we modified the config
+    if config_modified {
+        rollback::set_context(RollbackContext::nixy_config(
+            flake_dir.clone(),
+            config.nixy_json.clone(),
+            original_config.clone(),
+            global_packages_dir,
+        ));
+    }
+
+    info("Rebuilding environment...");
+
+    if let Some(parent) = config.env_link.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if let Err(e) = Nix::build(&flake_dir, "default", &config.env_link) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
+        // Build failed, revert config if we modified it
+        if config_modified {
+            original_config.save(config)?;
+            let original_profile = original_config.get_active_profile().unwrap();
+            let _ =
+                regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
+            warn("Build failed. Reverted nixy.json and flake.nix.");
+        }
+        return Err(e);
+    }
+
+    // Clear rollback context on success
+    rollback::clear_context();
+
+    if !inputs.is_empty() {
+        success(&format!("Upgraded: {}", inputs.join(", ")));
+    } else {
+        success("All packages upgraded");
+    }
+
+    Ok(())
+}
+
 /// Upgrade resolved packages by re-resolving them via Nixhub
 fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]) -> Result<()> {
     let client = NixhubClient::new();
@@ -157,6 +358,52 @@ fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]
 
                         // Update the package, preserving platform restrictions
                         state.add_resolved_package(ResolvedNixpkgPackage {
+                            name: resolved.name,
+                            version_spec: existing.version_spec.clone(),
+                            resolved_version: resolved.version,
+                            attribute_path: resolved.attribute_path,
+                            commit_hash: resolved.commit_hash,
+                            platforms: existing.platforms.clone(),
+                        });
+                    } else {
+                        info(&format!("  {} is already at the latest version", name));
+                    }
+                }
+                Err(e) => {
+                    warn(&format!("  Failed to resolve {}: {}", name, e));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Upgrade resolved packages in a ProfileConfig
+fn upgrade_resolved_packages_in_profile(
+    profile: &mut ProfileConfig,
+    package_names: &[&String],
+) -> Result<()> {
+    let client = NixhubClient::new();
+
+    for name in package_names {
+        if let Some(existing) = profile.resolved_packages.iter().find(|p| &p.name == *name) {
+            let version = existing.version_spec.as_deref().unwrap_or("latest");
+            info(&format!("Resolving {}@{}...", name, version));
+
+            match client.resolve_for_current_system(name, version) {
+                Ok(resolved) => {
+                    if resolved.version != existing.resolved_version
+                        || resolved.commit_hash != existing.commit_hash
+                    {
+                        info(&format!(
+                            "  {} -> {} (commit {})",
+                            existing.resolved_version,
+                            resolved.version,
+                            &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
+                        ));
+
+                        profile.add_resolved_package(ResolvedNixpkgPackage {
                             name: resolved.name,
                             version_spec: existing.version_spec.clone(),
                             resolved_version: resolved.version,

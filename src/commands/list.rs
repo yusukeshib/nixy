@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::config::Config;
 use crate::error::Result;
 use crate::flake::parser::collect_local_packages;
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
@@ -73,57 +74,19 @@ fn format_platforms(platforms: &Option<Vec<String>>) -> String {
 pub fn run(config: &Config) -> Result<()> {
     info("Installed packages:");
 
-    // Get the flake directory
-    let flake_dir = get_flake_dir(config)?;
-    let state_path = get_state_path(&flake_dir);
-
-    // Load state from packages.json
-    let state = PackageState::load(&state_path)?;
-
     // Collect all packages with their sources
     let mut entries: Vec<PackageEntry> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    // Add legacy nixpkgs packages (no version info)
-    for name in &state.packages {
-        entries.push(PackageEntry {
-            name: name.clone(),
-            source: PackageSource::Nixpkgs,
-            platforms: None,
-        });
-        seen.insert(name.clone());
-    }
+    // Use NixyConfig if available (new format)
+    if nixy_json_exists(config) {
+        let nixy_config = NixyConfig::load(config)?;
 
-    // Add resolved nixpkgs packages (with version info)
-    for pkg in &state.resolved_packages {
-        entries.push(PackageEntry {
-            name: pkg.name.clone(),
-            source: PackageSource::NixpkgsVersioned {
-                version: pkg.resolved_version.clone(),
-            },
-            platforms: pkg.platforms.clone(),
-        });
-        seen.insert(pkg.name.clone());
-    }
-
-    // Add custom packages
-    for pkg in &state.custom_packages {
-        entries.push(PackageEntry {
-            name: pkg.name.clone(),
-            source: PackageSource::Custom {
-                url: pkg.input_url.clone(),
-            },
-            platforms: pkg.platforms.clone(),
-        });
-        seen.insert(pkg.name.clone());
-    }
-
-    // Add local packages from packages/ directory
-    let packages_dir = flake_dir.join("packages");
-    if packages_dir.exists() {
-        let (local_packages, local_flakes) = collect_local_packages(&packages_dir);
-        for pkg in local_packages {
-            if !seen.contains(&pkg.name) {
+        // Add local packages first (highest priority, same as flake generation)
+        if config.global_packages_dir.exists() {
+            let (local_packages, local_flakes) =
+                collect_local_packages(&config.global_packages_dir);
+            for pkg in local_packages {
                 entries.push(PackageEntry {
                     name: pkg.name.clone(),
                     source: PackageSource::Local,
@@ -131,15 +94,123 @@ pub fn run(config: &Config) -> Result<()> {
                 });
                 seen.insert(pkg.name);
             }
-        }
-        for flake in local_flakes {
-            if !seen.contains(&flake.name) {
+            for flake in local_flakes {
                 entries.push(PackageEntry {
                     name: flake.name.clone(),
                     source: PackageSource::Local,
                     platforms: None,
                 });
                 seen.insert(flake.name);
+            }
+        }
+
+        // Add profile entries, skipping those already covered by local packages
+        if let Some(profile) = nixy_config.get_active_profile() {
+            // Add legacy nixpkgs packages (no version info)
+            for name in &profile.packages {
+                if !seen.contains(name) {
+                    entries.push(PackageEntry {
+                        name: name.clone(),
+                        source: PackageSource::Nixpkgs,
+                        platforms: None,
+                    });
+                    seen.insert(name.clone());
+                }
+            }
+
+            // Add resolved nixpkgs packages (with version info)
+            for pkg in &profile.resolved_packages {
+                if !seen.contains(&pkg.name) {
+                    entries.push(PackageEntry {
+                        name: pkg.name.clone(),
+                        source: PackageSource::NixpkgsVersioned {
+                            version: pkg.resolved_version.clone(),
+                        },
+                        platforms: pkg.platforms.clone(),
+                    });
+                    seen.insert(pkg.name.clone());
+                }
+            }
+
+            // Add custom packages
+            for pkg in &profile.custom_packages {
+                if !seen.contains(&pkg.name) {
+                    entries.push(PackageEntry {
+                        name: pkg.name.clone(),
+                        source: PackageSource::Custom {
+                            url: pkg.input_url.clone(),
+                        },
+                        platforms: pkg.platforms.clone(),
+                    });
+                    seen.insert(pkg.name.clone());
+                }
+            }
+        }
+    } else {
+        // Legacy format: Get the flake directory
+        let flake_dir = get_flake_dir(config)?;
+        let state_path = get_state_path(&flake_dir);
+
+        // Load state from packages.json
+        let state = PackageState::load(&state_path)?;
+
+        // Add legacy nixpkgs packages (no version info)
+        for name in &state.packages {
+            entries.push(PackageEntry {
+                name: name.clone(),
+                source: PackageSource::Nixpkgs,
+                platforms: None,
+            });
+            seen.insert(name.clone());
+        }
+
+        // Add resolved nixpkgs packages (with version info)
+        for pkg in &state.resolved_packages {
+            entries.push(PackageEntry {
+                name: pkg.name.clone(),
+                source: PackageSource::NixpkgsVersioned {
+                    version: pkg.resolved_version.clone(),
+                },
+                platforms: pkg.platforms.clone(),
+            });
+            seen.insert(pkg.name.clone());
+        }
+
+        // Add custom packages
+        for pkg in &state.custom_packages {
+            entries.push(PackageEntry {
+                name: pkg.name.clone(),
+                source: PackageSource::Custom {
+                    url: pkg.input_url.clone(),
+                },
+                platforms: pkg.platforms.clone(),
+            });
+            seen.insert(pkg.name.clone());
+        }
+
+        // Add local packages from packages/ directory
+        let packages_dir = flake_dir.join("packages");
+        if packages_dir.exists() {
+            let (local_packages, local_flakes) = collect_local_packages(&packages_dir);
+            for pkg in local_packages {
+                if !seen.contains(&pkg.name) {
+                    entries.push(PackageEntry {
+                        name: pkg.name.clone(),
+                        source: PackageSource::Local,
+                        platforms: None,
+                    });
+                    seen.insert(pkg.name);
+                }
+            }
+            for flake in local_flakes {
+                if !seen.contains(&flake.name) {
+                    entries.push(PackageEntry {
+                        name: flake.name.clone(),
+                        source: PackageSource::Local,
+                        platforms: None,
+                    });
+                    seen.insert(flake.name);
+                }
             }
         }
     }

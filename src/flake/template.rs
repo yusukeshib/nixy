@@ -1,6 +1,7 @@
 //! Flake.nix template generation.
 //!
-//! This module generates `flake.nix` content from the package state. It handles:
+//! This module generates `flake.nix` content from the package state or profile config.
+//! It handles:
 //! - Standard nixpkgs packages
 //! - Custom packages from external flakes
 //! - Local packages (`.nix` files in `packages/` directory)
@@ -16,6 +17,7 @@ use std::path::Path;
 use super::parser::collect_local_packages;
 use super::{LocalFlake, LocalPackage};
 use crate::error::Result;
+use crate::nixy_config::ProfileConfig;
 use crate::state::{CustomPackage, PackageState, ResolvedNixpkgPackage};
 
 /// A package path entry with optional platform restrictions
@@ -135,6 +137,37 @@ impl FlakeBuilder {
         }
     }
 
+    /// Add local flake-type packages with absolute paths (for new nixy.json format)
+    fn add_local_flakes_with_absolute_paths(
+        &mut self,
+        flakes: &[LocalFlake],
+        packages_dir: Option<&Path>,
+    ) {
+        for flake in flakes {
+            let path = if let Some(dir) = packages_dir {
+                // Use a URL-style path for flake URLs, handling spaces in the path
+                let abs_path = dir.join(&flake.name);
+                let path_str = abs_path.to_string_lossy();
+                // Escape spaces in the path for the flake URL
+                let escaped_path = path_str.replace(' ', "%20");
+                format!("path:{}", escaped_path)
+            } else {
+                format!("path:./packages/{}", flake.name)
+            };
+            self.inputs
+                .push_str(&format!("    {}.url = \"{}\";\n", flake.name, path));
+            self.seen_inputs.insert(flake.name.clone());
+            self.local_entries.push_str(&format!(
+                "          {} = inputs.{}.packages.${{system}}.default;\n",
+                flake.name, flake.name
+            ));
+            self.buildenv_paths.push(PathEntry {
+                name: flake.name.clone(),
+                platforms: None,
+            });
+        }
+    }
+
     /// Add local .nix file packages from packages/ directory
     fn add_local_packages(&mut self, packages: &[LocalPackage]) {
         for pkg in packages {
@@ -151,6 +184,54 @@ impl FlakeBuilder {
 
             self.local_entries
                 .push_str(&format!("          {} = {};\n", pkg.name, pkg.package_expr));
+            self.buildenv_paths.push(PathEntry {
+                name: pkg.name.clone(),
+                platforms: None,
+            });
+        }
+    }
+
+    /// Add local .nix file packages with absolute paths (for new nixy.json format)
+    fn add_local_packages_with_absolute_paths(
+        &mut self,
+        packages: &[LocalPackage],
+        packages_dir: Option<&Path>,
+    ) {
+        for pkg in packages {
+            if let (Some(input_name), Some(input_url)) = (&pkg.input_name, &pkg.input_url) {
+                if self.seen_inputs.insert(input_name.clone()) {
+                    self.inputs
+                        .push_str(&format!("    {}.url = \"{}\";\n", input_name, input_url));
+                }
+            }
+
+            if let Some(overlay) = &pkg.overlay {
+                self.overlays.push_str(&format!("          {}\n", overlay));
+            }
+
+            // Update package expression to use absolute path if needed
+            let package_expr = if let Some(dir) = packages_dir {
+                let abs_path = dir.join(format!("{}.nix", pkg.name));
+                let path_str = abs_path.to_string_lossy();
+                // Only replace if the expression is a simple ./packages/<name>.nix reference
+                if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name)
+                {
+                    // Use proper Nix path syntax
+                    if path_str.contains(' ') {
+                        // For paths with spaces, use a quoted string path (Nix coerces strings to paths)
+                        format!("pkgs.callPackage \"{}\" {{}}", path_str)
+                    } else {
+                        format!("pkgs.callPackage {} {{}}", path_str)
+                    }
+                } else {
+                    pkg.package_expr.clone()
+                }
+            } else {
+                pkg.package_expr.clone()
+            };
+
+            self.local_entries
+                .push_str(&format!("          {} = {};\n", pkg.name, package_expr));
             self.buildenv_paths.push(PathEntry {
                 name: pkg.name.clone(),
                 platforms: None,
@@ -320,6 +401,10 @@ impl FlakeBuilder {
 }
 
 /// Generate flake.nix content from package state
+///
+/// # Arguments
+/// * `state` - The package state (legacy format)
+/// * `flake_dir` - Optional flake directory for collecting local packages (legacy)
 pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String {
     // Collect local packages if flake_dir is provided
     let (local_packages, local_flakes) = if let Some(dir) = flake_dir {
@@ -363,11 +448,81 @@ pub fn generate_flake(state: &PackageState, flake_dir: Option<&Path>) -> String 
     builder.build()
 }
 
-/// Regenerate flake.nix from state
+/// Generate flake.nix content from profile config
+///
+/// # Arguments
+/// * `profile` - The profile configuration (new nixy.json format)
+/// * `global_packages_dir` - Optional global packages directory for local packages
+/// * `_flake_dir` - Reserved for future use
+pub fn generate_flake_from_profile(
+    profile: &ProfileConfig,
+    global_packages_dir: Option<&Path>,
+    _flake_dir: &Path,
+) -> String {
+    // Collect local packages from global packages directory
+    let (local_packages, local_flakes) = if let Some(dir) = global_packages_dir {
+        if dir.exists() {
+            collect_local_packages_with_paths(dir)
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    // Filter out local packages from legacy packages list
+    let filtered_legacy_packages: Vec<&String> = profile
+        .packages
+        .iter()
+        .filter(|pkg| {
+            !local_packages.iter().any(|lp| &lp.name == *pkg)
+                && !local_flakes.iter().any(|lf| &lf.name == *pkg)
+        })
+        .collect();
+
+    // Filter out local packages from resolved packages list
+    let filtered_resolved_packages: Vec<ResolvedNixpkgPackage> = profile
+        .resolved_packages
+        .iter()
+        .filter(|pkg| {
+            !local_packages.iter().any(|lp| lp.name == pkg.name)
+                && !local_flakes.iter().any(|lf| lf.name == pkg.name)
+        })
+        .cloned()
+        .collect();
+
+    let mut builder = FlakeBuilder::new();
+    builder.add_standard_packages(&filtered_legacy_packages);
+    builder.add_resolved_packages(&filtered_resolved_packages);
+    builder.add_local_flakes_with_absolute_paths(&local_flakes, global_packages_dir);
+    builder.add_local_packages_with_absolute_paths(&local_packages, global_packages_dir);
+    builder.add_custom_packages(&profile.custom_packages);
+    builder.build()
+}
+
+/// Collect local packages from the packages directory
+fn collect_local_packages_with_paths(packages_dir: &Path) -> (Vec<LocalPackage>, Vec<LocalFlake>) {
+    collect_local_packages(packages_dir)
+}
+
+/// Regenerate flake.nix from state (legacy format)
 pub fn regenerate_flake(flake_dir: &Path, state: &PackageState) -> Result<()> {
     let flake_path = flake_dir.join("flake.nix");
     fs::create_dir_all(flake_dir)?;
     let content = generate_flake(state, Some(flake_dir));
+    fs::write(&flake_path, content)?;
+    Ok(())
+}
+
+/// Regenerate flake.nix from profile config (new nixy.json format)
+pub fn regenerate_flake_from_profile(
+    flake_dir: &Path,
+    profile: &ProfileConfig,
+    global_packages_dir: Option<&Path>,
+) -> Result<()> {
+    let flake_path = flake_dir.join("flake.nix");
+    fs::create_dir_all(flake_dir)?;
+    let content = generate_flake_from_profile(profile, global_packages_dir, flake_dir);
     fs::write(&flake_path, content)?;
     Ok(())
 }

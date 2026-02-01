@@ -4,14 +4,23 @@ use std::process::Command;
 use crate::cli::UninstallArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::template::{generate_flake, regenerate_flake};
+use crate::flake::template::{generate_flake, regenerate_flake, regenerate_flake_from_profile};
+use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
+use crate::rollback::{self, RollbackContext};
 use crate::state::{get_state_path, PackageState};
 
 use super::{info, warn};
 
 pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
     let package = &args.package;
+
+    // Use NixyConfig if available (new format)
+    if nixy_json_exists(config) {
+        return uninstall_with_nixy_config(config, package);
+    }
+
+    // Legacy format
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
     let state_path = get_state_path(&flake_dir);
@@ -74,6 +83,100 @@ pub fn run(config: &Config, args: UninstallArgs) -> Result<()> {
         warn("Sync failed. Reverted state and flake.nix (local file deletions cannot be undone).");
         return Err(e);
     }
+
+    Ok(())
+}
+
+/// Uninstall a package using the new nixy.json format
+fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
+    let mut nixy_config = NixyConfig::load(config)?;
+    let active_profile = nixy_config.active_profile.clone();
+    let flake_dir = get_flake_dir(config)?;
+    let flake_path = flake_dir.join("flake.nix");
+
+    // Auto-regenerate flake.nix if missing
+    if !flake_path.exists() {
+        if let Some(profile) = nixy_config.get_active_profile() {
+            info("Regenerating flake.nix from nixy.json...");
+            let global_packages_dir = if config.global_packages_dir.exists() {
+                Some(config.global_packages_dir.as_path())
+            } else {
+                None
+            };
+            regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
+        }
+    }
+
+    // Save original for rollback
+    let original_config = nixy_config.clone();
+    let original_flake = if flake_path.exists() {
+        Some(fs::read_to_string(&flake_path)?)
+    } else {
+        None
+    };
+
+    info(&format!("Uninstalling {}...", package));
+
+    // Note: We do NOT delete global package definitions from packages/ directory.
+    // The packages/ directory is shared across all profiles in the new format,
+    // so uninstalling from one profile must not delete the global package definition.
+    // Global cleanup, if desired, should be handled manually or by a dedicated command.
+    let global_pkg_file = config.global_packages_dir.join(format!("{}.nix", package));
+    let global_flake_dir = config.global_packages_dir.join(package);
+
+    if global_pkg_file.exists()
+        || (global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists())
+    {
+        warn(
+            "Note: Local package definition in packages/ was not removed (shared across profiles)",
+        );
+    }
+
+    // Remove package from profile
+    let profile = nixy_config
+        .get_active_profile_mut()
+        .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
+    let removed_from_config = profile.remove_package(package);
+
+    if !removed_from_config {
+        return Err(Error::PackageNotFound(package.to_string()));
+    }
+
+    nixy_config.save(config)?;
+
+    // Regenerate flake.nix
+    let global_packages_dir = if config.global_packages_dir.exists() {
+        Some(config.global_packages_dir.as_path())
+    } else {
+        None
+    };
+    let profile_for_flake = nixy_config.get_active_profile().unwrap();
+    regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+    super::success(&format!("Removed {} from flake.nix", package));
+
+    // Set up rollback context for Ctrl+C handling
+    rollback::set_context(RollbackContext::nixy_config(
+        flake_dir.clone(),
+        config.nixy_json.clone(),
+        original_config.clone(),
+        global_packages_dir,
+    ));
+
+    info("Rebuilding environment...");
+    if let Err(e) = super::sync::run(config) {
+        // Clear rollback context since we're handling the error here
+        rollback::clear_context();
+        // Sync failed, revert
+        original_config.save(config)?;
+        if let Some(original) = original_flake {
+            fs::write(&flake_path, original)?;
+        }
+        warn("Sync failed. Reverted nixy.json and flake.nix.");
+        return Err(e);
+    }
+
+    // Clear rollback context on success
+    rollback::clear_context();
 
     Ok(())
 }

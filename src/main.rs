@@ -3,8 +3,10 @@ mod commands;
 mod config;
 mod error;
 mod flake;
+mod migration;
 mod nix;
 mod nixhub;
+mod nixy_config;
 mod profile;
 mod rollback;
 mod state;
@@ -28,6 +30,20 @@ fn main() {
 
     let cli = Cli::parse();
     let config = Config::new();
+
+    // Commands that don't need config state (skip migration)
+    let skip_migration = matches!(
+        &cli.command,
+        Commands::Config { .. } | Commands::Search { .. } | Commands::SelfUpgrade(_)
+    );
+
+    // Auto-migrate from legacy format if needed
+    if !skip_migration {
+        if let Err(e) = migration::run_migration_if_needed(&config) {
+            commands::error(&e.to_string());
+            std::process::exit(1);
+        }
+    }
 
     let result = match cli.command {
         Commands::Install(args) => commands::install::run(&config, args),
