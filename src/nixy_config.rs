@@ -165,7 +165,26 @@ impl NixyConfig {
             nixy_config.version = NIXY_CONFIG_VERSION;
         }
 
+        // Normalize config: ensure default profile exists and active_profile is valid
+        nixy_config.normalize();
+
         Ok(nixy_config)
+    }
+
+    /// Normalize the config to ensure invariants are maintained:
+    /// - Default profile always exists
+    /// - active_profile always points to an existing profile
+    fn normalize(&mut self) {
+        // Ensure default profile exists
+        if !self.profiles.contains_key(DEFAULT_PROFILE) {
+            self.profiles
+                .insert(DEFAULT_PROFILE.to_string(), ProfileConfig::default());
+        }
+
+        // Ensure active_profile points to an existing profile
+        if !self.profiles.contains_key(&self.active_profile) {
+            self.active_profile = DEFAULT_PROFILE.to_string();
+        }
     }
 
     /// Save nixy.json to the config directory atomically
