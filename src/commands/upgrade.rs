@@ -155,13 +155,14 @@ fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]
                             &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
                         ));
 
-                        // Update the package
+                        // Update the package, preserving platform restrictions
                         state.add_resolved_package(ResolvedNixpkgPackage {
                             name: resolved.name,
                             version_spec: existing.version_spec.clone(),
                             resolved_version: resolved.version,
                             attribute_path: resolved.attribute_path,
                             commit_hash: resolved.commit_hash,
+                            platforms: existing.platforms.clone(),
                         });
                     } else {
                         info(&format!("  {} is already at the latest version", name));

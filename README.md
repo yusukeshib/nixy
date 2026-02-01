@@ -75,6 +75,7 @@ nixy upgrade nodejs         # Upgrade specific package
 | `nixy install <pkg>[@version]` | Install a package with optional version (alias: `add`) |
 | `nixy install --from <flake> <pkg>` | Install from a flake URL |
 | `nixy install --file <path>` | Install from a nix file |
+| `nixy install <pkg> --platform <platform>` | Install only for specific platform(s) |
 | `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
 | `nixy list` | List installed packages with versions (alias: `ls`) |
 | `nixy search <query>` | Search for packages with version info |
@@ -101,6 +102,26 @@ nixy install nodejs@20.11.0   # Exact version
 When you run `nixy upgrade nodejs`, it respects your version constraint:
 - `nodejs` (no version) → upgrades to absolute latest
 - `nodejs@20` → upgrades to latest 20.x.x
+
+### Platform-Specific Installation
+
+Install packages only for specific platforms:
+
+```bash
+nixy install terminal-notifier --platform darwin   # macOS only
+nixy install linux-tool --platform linux           # Linux only
+nixy install specific --platform aarch64-darwin    # Apple Silicon only
+```
+
+Valid platform names:
+- `darwin` or `macos` → both `x86_64-darwin` and `aarch64-darwin`
+- `linux` → both `x86_64-linux` and `aarch64-linux`
+- Full names: `x86_64-darwin`, `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
+
+Platform-specific packages are shown with their restriction in `nixy list`:
+```
+terminal-notifier@2.0.0  (nixpkgs) [darwin]
+```
 
 ## Profiles
 

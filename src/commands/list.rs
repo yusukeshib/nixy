@@ -12,6 +12,8 @@ use super::info;
 struct PackageEntry {
     name: String,
     source: PackageSource,
+    /// Platform restrictions (None means all platforms)
+    platforms: Option<Vec<String>>,
 }
 
 /// Source of a package
@@ -48,6 +50,26 @@ fn format_package_name(entry: &PackageEntry) -> String {
     }
 }
 
+/// Format platform restrictions for display
+fn format_platforms(platforms: &Option<Vec<String>>) -> String {
+    match platforms {
+        None => String::new(),
+        Some(p) if p.is_empty() => String::new(),
+        Some(p) => {
+            // Simplify platform display: if all darwin or all linux, show the alias
+            let all_darwin = p.iter().all(|s| s.ends_with("-darwin"));
+            let all_linux = p.iter().all(|s| s.ends_with("-linux"));
+            if all_darwin && p.len() == 2 {
+                " [darwin]".to_string()
+            } else if all_linux && p.len() == 2 {
+                " [linux]".to_string()
+            } else {
+                format!(" [{}]", p.join(", "))
+            }
+        }
+    }
+}
+
 pub fn run(config: &Config) -> Result<()> {
     info("Installed packages:");
 
@@ -67,6 +89,7 @@ pub fn run(config: &Config) -> Result<()> {
         entries.push(PackageEntry {
             name: name.clone(),
             source: PackageSource::Nixpkgs,
+            platforms: None,
         });
         seen.insert(name.clone());
     }
@@ -78,6 +101,7 @@ pub fn run(config: &Config) -> Result<()> {
             source: PackageSource::NixpkgsVersioned {
                 version: pkg.resolved_version.clone(),
             },
+            platforms: pkg.platforms.clone(),
         });
         seen.insert(pkg.name.clone());
     }
@@ -89,6 +113,7 @@ pub fn run(config: &Config) -> Result<()> {
             source: PackageSource::Custom {
                 url: pkg.input_url.clone(),
             },
+            platforms: pkg.platforms.clone(),
         });
         seen.insert(pkg.name.clone());
     }
@@ -102,6 +127,7 @@ pub fn run(config: &Config) -> Result<()> {
                 entries.push(PackageEntry {
                     name: pkg.name.clone(),
                     source: PackageSource::Local,
+                    platforms: None,
                 });
                 seen.insert(pkg.name);
             }
@@ -111,6 +137,7 @@ pub fn run(config: &Config) -> Result<()> {
                 entries.push(PackageEntry {
                     name: flake.name.clone(),
                     source: PackageSource::Local,
+                    platforms: None,
                 });
                 seen.insert(flake.name);
             }
@@ -132,10 +159,12 @@ pub fn run(config: &Config) -> Result<()> {
 
         for entry in entries {
             let formatted_name = format_package_name(&entry);
+            let platform_str = format_platforms(&entry.platforms);
             println!(
-                "  {:<width$}  ({})",
+                "  {:<width$}  ({}){}",
                 formatted_name,
                 entry.source.display(),
+                platform_str,
                 width = max_name_len
             );
         }

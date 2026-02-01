@@ -67,6 +67,11 @@ pub struct InstallArgs {
     /// Install from local nix file
     #[arg(long, short)]
     pub file: Option<PathBuf>,
+
+    /// Only install on specific platform(s). Valid values: darwin, macos, linux,
+    /// x86_64-darwin, aarch64-darwin, x86_64-linux, aarch64-linux
+    #[arg(long, short = 'p')]
+    pub platform: Vec<String>,
 }
 
 #[derive(Args)]

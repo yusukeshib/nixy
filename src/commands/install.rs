@@ -12,13 +12,27 @@ use crate::nix::Nix;
 use crate::nixhub::{parse_package_spec, NixhubClient};
 use crate::profile::get_flake_dir;
 use crate::rollback::{self, RollbackContext};
-use crate::state::{get_state_path, CustomPackage, PackageState, ResolvedNixpkgPackage};
+use crate::state::{
+    get_state_path, normalize_platforms, CustomPackage, PackageState, ResolvedNixpkgPackage,
+};
 
 use super::{info, success, warn};
 
 pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
+    // Validate and normalize platform names early
+    let platforms = if args.platform.is_empty() {
+        None
+    } else {
+        Some(normalize_platforms(&args.platform).map_err(Error::Usage)?)
+    };
+
     // Handle --file option
     if let Some(file) = args.file {
+        if platforms.is_some() {
+            return Err(Error::Usage(
+                "--platform is not supported with --file".to_string(),
+            ));
+        }
         return install_from_file(config, &file);
     }
 
@@ -27,7 +41,7 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         let pkg = args
             .package
             .ok_or_else(|| Error::Usage("Package name is required with --from".to_string()))?;
-        return install_from_registry(config, &from, &pkg);
+        return install_from_registry(config, &from, &pkg, platforms);
     }
 
     // Standard nixpkgs install (via Nixhub)
@@ -83,6 +97,7 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         resolved_version: resolved.version.clone(),
         attribute_path: resolved.attribute_path.clone(),
         commit_hash: resolved.commit_hash.clone(),
+        platforms: platforms.clone(),
     });
     state.save(&state_path)?;
 
@@ -123,7 +138,12 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
 }
 
 /// Install from a flake registry or direct URL
-fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<()> {
+fn install_from_registry(
+    config: &Config,
+    from_arg: &str,
+    pkg: &str,
+    platforms: Option<Vec<String>>,
+) -> Result<()> {
     let flake_dir = get_flake_dir(config)?;
     let state_path = get_state_path(&flake_dir);
 
@@ -193,6 +213,7 @@ fn install_from_registry(config: &Config, from_arg: &str, pkg: &str) -> Result<(
         input_url: final_url,
         package_output: pkg_output,
         source_name: None,
+        platforms,
     });
     state.save(&state_path)?;
 

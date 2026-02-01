@@ -870,6 +870,86 @@ fn test_profile_switch_with_existing() {
 }
 
 // =============================================================================
+// Install --platform tests
+// =============================================================================
+
+#[test]
+fn test_install_platform_flag_help() {
+    let output = nixy_cmd().args(["install", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--platform") || stdout.contains("-p"),
+        "Help should show --platform flag: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_install_invalid_platform() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    let output = env
+        .cmd()
+        .args(["install", "hello", "--platform", "windows"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Invalid platform"),
+        "Should report invalid platform: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_install_platform_not_supported_with_file() {
+    let env = TestEnv::new();
+    let temp = TempDir::new().unwrap();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    // Create a .nix file
+    let pkg_file = temp.path().join("my-pkg.nix");
+    std::fs::write(
+        &pkg_file,
+        r#"{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "my-package";
+  version = "1.0.0";
+  src = ./.;
+}"#,
+    )
+    .unwrap();
+
+    let output = env
+        .cmd()
+        .args([
+            "install",
+            "--file",
+            pkg_file.to_str().unwrap(),
+            "--platform",
+            "darwin",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--platform is not supported with --file"),
+        "Should report --platform not supported with --file: {}",
+        stderr
+    );
+}
+
+// =============================================================================
 // Install --file tests (additional)
 // =============================================================================
 
