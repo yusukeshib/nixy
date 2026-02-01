@@ -116,27 +116,17 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
 
     info(&format!("Uninstalling {}...", package));
 
-    // Check for local packages in global packages directory
+    // Note: We do NOT delete global package definitions from packages/ directory.
+    // The packages/ directory is shared across all profiles in the new format,
+    // so uninstalling from one profile must not delete the global package definition.
+    // Global cleanup, if desired, should be handled manually or by a dedicated command.
     let global_pkg_file = config.global_packages_dir.join(format!("{}.nix", package));
     let global_flake_dir = config.global_packages_dir.join(package);
 
-    let mut removed_local = false;
-    if global_pkg_file.exists() {
-        info(&format!(
-            "Removing local package definition: {}",
-            global_pkg_file.display()
-        ));
-        fs::remove_file(&global_pkg_file)?;
-        git_rm(&config.config_dir, &format!("packages/{}.nix", package));
-        removed_local = true;
-    } else if global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists() {
-        info(&format!(
-            "Removing local flake: {}",
-            global_flake_dir.display()
-        ));
-        fs::remove_dir_all(&global_flake_dir)?;
-        git_rm_recursive(&config.config_dir, &format!("packages/{}", package));
-        removed_local = true;
+    if global_pkg_file.exists()
+        || (global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists())
+    {
+        warn("Note: Local package definition in packages/ was not removed (shared across profiles)");
     }
 
     // Remove package from profile
@@ -145,7 +135,7 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
         .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
     let removed_from_config = profile.remove_package(package);
 
-    if !removed_local && !removed_from_config {
+    if !removed_from_config {
         return Err(Error::PackageNotFound(package.to_string()));
     }
 

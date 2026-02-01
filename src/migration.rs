@@ -274,29 +274,38 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Run the migration process.
+/// Run the migration process or initialize nixy.json for fresh installs.
 ///
 /// This is called from main.rs before any command is executed.
 /// It checks if migration is needed and performs it automatically.
+/// For fresh installs (no legacy data, no nixy.json), it creates a default nixy.json.
 pub fn run_migration_if_needed(config: &Config) -> Result<()> {
-    if !needs_migration(config) {
+    // If nixy.json exists, nothing to do
+    if config.nixy_json.exists() {
         return Ok(());
     }
 
-    crate::commands::info("Migrating to new nixy.json configuration format...");
+    // Check if there's legacy data to migrate
+    if needs_migration(config) {
+        crate::commands::info("Migrating to new nixy.json configuration format...");
 
-    let nixy_config = migrate_to_nixy_json(config)?;
-    nixy_config.save(config)?;
+        let nixy_config = migrate_to_nixy_json(config)?;
+        nixy_config.save(config)?;
 
-    crate::commands::success("Migration complete! Your configuration has been updated.");
-    crate::commands::info(&format!(
-        "Configuration is now stored in: {}",
-        config.nixy_json.display()
-    ));
-    crate::commands::info(&format!(
-        "Generated files are now in: {}",
-        config.profiles_state_dir.display()
-    ));
+        crate::commands::success("Migration complete! Your configuration has been updated.");
+        crate::commands::info(&format!(
+            "Configuration is now stored in: {}",
+            config.nixy_json.display()
+        ));
+        crate::commands::info(&format!(
+            "Generated files are now in: {}",
+            config.profiles_state_dir.display()
+        ));
+    } else {
+        // Fresh install: create default nixy.json
+        let nixy_config = NixyConfig::default();
+        nixy_config.save(config)?;
+    }
 
     Ok(())
 }
