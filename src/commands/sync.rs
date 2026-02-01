@@ -14,25 +14,24 @@ pub fn run(config: &Config) -> Result<()> {
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
 
-    // Auto-regenerate flake.nix if missing
-    if !flake_path.exists() {
-        if nixy_json_exists(config) {
-            let nixy_config = NixyConfig::load(config)?;
-            if let Some(profile) = nixy_config.get_active_profile() {
-                info("Regenerating flake.nix from nixy.json...");
-                let global_packages_dir = if config.global_packages_dir.exists() {
-                    Some(config.global_packages_dir.as_path())
-                } else {
-                    None
-                };
-                regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
-            }
-        } else {
-            let state_path = get_state_path(&flake_dir);
-            let state = PackageState::load(&state_path)?;
-            info("Regenerating flake.nix from packages.json...");
-            regenerate_flake(&flake_dir, &state)?;
+    // When using nixy.json, always regenerate flake.nix to ensure it reflects
+    // the current state (nixy.json is the source of truth)
+    if nixy_json_exists(config) {
+        let nixy_config = NixyConfig::load(config)?;
+        if let Some(profile) = nixy_config.get_active_profile() {
+            let global_packages_dir = if config.global_packages_dir.exists() {
+                Some(config.global_packages_dir.as_path())
+            } else {
+                None
+            };
+            regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
         }
+    } else if !flake_path.exists() {
+        // Legacy mode: regenerate only if flake.nix is missing
+        let state_path = get_state_path(&flake_dir);
+        let state = PackageState::load(&state_path)?;
+        info("Regenerating flake.nix from packages.json...");
+        regenerate_flake(&flake_dir, &state)?;
     }
 
     info(&format!(

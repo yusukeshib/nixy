@@ -125,19 +125,6 @@ impl ProfileConfig {
     }
 }
 
-#[cfg(test)]
-impl ProfileConfig {
-    /// Get all package names (legacy + resolved + custom) - test helper
-    pub fn all_package_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.packages.clone();
-        names.extend(self.resolved_packages.iter().map(|p| p.name.clone()));
-        names.extend(self.custom_packages.iter().map(|p| p.name.clone()));
-        names.sort();
-        names.dedup();
-        names
-    }
-}
-
 /// The main nixy.json configuration file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NixyConfig {

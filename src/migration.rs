@@ -40,6 +40,7 @@ use std::path::Path;
 
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::Result;
+use crate::flake::template::regenerate_flake_from_profile;
 use crate::nixy_config::{NixyConfig, ProfileConfig, NIXY_CONFIG_VERSION};
 use crate::state::PackageState;
 
@@ -116,23 +117,9 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
                         let profile_config = migrate_profile(&path)?;
                         nixy_config
                             .profiles
-                            .insert(name.to_string(), profile_config);
+                            .insert(name.to_string(), profile_config.clone());
 
-                        // Copy flake.nix and flake.lock to state directory
-                        let state_profile_dir = config.profiles_state_dir.join(name);
-                        fs::create_dir_all(&state_profile_dir)?;
-
-                        let legacy_flake = path.join("flake.nix");
-                        if legacy_flake.exists() {
-                            fs::copy(&legacy_flake, state_profile_dir.join("flake.nix"))?;
-                        }
-
-                        let legacy_lock = path.join("flake.lock");
-                        if legacy_lock.exists() {
-                            fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
-                        }
-
-                        // Merge local packages to global directory
+                        // Merge local packages to global directory first (before flake generation)
                         let legacy_packages_dir = path.join("packages");
                         if legacy_packages_dir.exists() {
                             merge_local_packages(
@@ -140,6 +127,27 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
                                 &config.global_packages_dir,
                             )?;
                         }
+
+                        // Create state directory and copy only flake.lock (to preserve versions)
+                        let state_profile_dir = config.profiles_state_dir.join(name);
+                        fs::create_dir_all(&state_profile_dir)?;
+
+                        let legacy_lock = path.join("flake.lock");
+                        if legacy_lock.exists() {
+                            fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
+                        }
+
+                        // Regenerate flake.nix with correct paths for new directory structure
+                        let global_packages_dir = if config.global_packages_dir.exists() {
+                            Some(config.global_packages_dir.as_path())
+                        } else {
+                            None
+                        };
+                        regenerate_flake_from_profile(
+                            &state_profile_dir,
+                            &profile_config,
+                            global_packages_dir,
+                        )?;
                     }
                 }
             }
@@ -148,25 +156,33 @@ pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {
 
     // Handle very old format (flake.nix directly in config dir)
     if config.legacy_flake.exists() && !nixy_config.profiles.contains_key(DEFAULT_PROFILE) {
+        let profile_config = ProfileConfig::default();
         nixy_config
             .profiles
-            .insert(DEFAULT_PROFILE.to_string(), ProfileConfig::default());
+            .insert(DEFAULT_PROFILE.to_string(), profile_config.clone());
 
-        // Copy legacy flake to state directory
+        // Merge local packages from config dir first
+        let legacy_packages_dir = config.config_dir.join("packages");
+        if legacy_packages_dir.exists() {
+            merge_local_packages(&legacy_packages_dir, &config.global_packages_dir)?;
+        }
+
+        // Create state directory and copy only flake.lock
         let state_profile_dir = config.profiles_state_dir.join(DEFAULT_PROFILE);
         fs::create_dir_all(&state_profile_dir)?;
-        fs::copy(&config.legacy_flake, state_profile_dir.join("flake.nix"))?;
 
         let legacy_lock = config.config_dir.join("flake.lock");
         if legacy_lock.exists() {
             fs::copy(&legacy_lock, state_profile_dir.join("flake.lock"))?;
         }
 
-        // Merge local packages from config dir
-        let legacy_packages_dir = config.config_dir.join("packages");
-        if legacy_packages_dir.exists() {
-            merge_local_packages(&legacy_packages_dir, &config.global_packages_dir)?;
-        }
+        // Regenerate flake.nix with correct paths
+        let global_packages_dir = if config.global_packages_dir.exists() {
+            Some(config.global_packages_dir.as_path())
+        } else {
+            None
+        };
+        regenerate_flake_from_profile(&state_profile_dir, &profile_config, global_packages_dir)?;
     }
 
     // Ensure default profile exists
@@ -218,9 +234,14 @@ fn merge_local_packages(src_dir: &Path, dst_dir: &Path) -> Result<()> {
                 continue;
             }
 
+            // Skip broken symlinks (symlink exists but target doesn't)
+            if src_path.is_symlink() && !src_path.exists() {
+                continue;
+            }
+
             if src_path.is_dir() {
                 copy_dir_recursive(&src_path, &dst_path)?;
-            } else {
+            } else if src_path.exists() {
                 fs::copy(&src_path, &dst_path)?;
             }
         }
@@ -238,9 +259,14 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
+        // Skip broken symlinks
+        if src_path.is_symlink() && !src_path.exists() {
+            continue;
+        }
+
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
+        } else if src_path.exists() {
             fs::copy(&src_path, &dst_path)?;
         }
     }
@@ -513,5 +539,41 @@ mod tests {
         // Should copy flake to state directory
         let state_profile_dir = config.profiles_state_dir.join("default");
         assert!(state_profile_dir.join("flake.nix").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_migrate_skips_broken_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create legacy profile with local packages containing a broken symlink
+        let profile_dir = config.profiles_dir.join("default");
+        let packages_dir = profile_dir.join("packages");
+        fs::create_dir_all(&packages_dir).unwrap();
+
+        // Create a valid file
+        fs::write(packages_dir.join("valid.nix"), "{ }").unwrap();
+
+        // Create a broken symlink pointing to non-existent file
+        symlink(
+            "/nonexistent/path/broken.nix",
+            packages_dir.join("broken.nix"),
+        )
+        .unwrap();
+
+        // Migration should succeed despite the broken symlink
+        let nixy_config = migrate_to_nixy_json(&config).unwrap();
+
+        // Should have migrated the profile
+        assert!(nixy_config.profiles.contains_key("default"));
+
+        // Valid file should be copied
+        assert!(config.global_packages_dir.join("valid.nix").exists());
+
+        // Broken symlink should be skipped (not cause an error)
+        assert!(!config.global_packages_dir.join("broken.nix").exists());
     }
 }
