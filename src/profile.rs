@@ -69,7 +69,7 @@ impl Profile {
         }
     }
 
-    /// Check if profile exists (either in nixy.json or legacy directory)
+    /// Check if profile exists on disk (state or legacy directory)
     pub fn exists(&self) -> bool {
         self.state_dir.exists() || self.legacy_dir.exists()
     }
