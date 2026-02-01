@@ -87,7 +87,7 @@ pub fn needs_migration(config: &Config) -> bool {
 /// 1. Reads all existing profile directories from ~/.config/nixy/profiles/
 /// 2. Loads packages.json from each profile
 /// 3. Creates a unified nixy.json with all profile data
-/// 4. Copies flake.nix and flake.lock to the new state directory
+/// 4. Regenerates flake.nix and copies flake.lock to the new state directory
 /// 5. Merges local packages from all profiles to the global packages directory
 /// 6. Preserves the active profile setting
 pub fn migrate_to_nixy_json(config: &Config) -> Result<NixyConfig> {

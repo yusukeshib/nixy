@@ -145,10 +145,10 @@ impl FlakeBuilder {
     ) {
         for flake in flakes {
             let path = if let Some(dir) = packages_dir {
-                // Use URL-encoded path for flake URLs to handle spaces and special characters
+                // Use a URL-style path for flake URLs, handling spaces in the path
                 let abs_path = dir.join(&flake.name);
                 let path_str = abs_path.to_string_lossy();
-                // Escape spaces and special characters in the path for flake URL
+                // Escape spaces in the path for the flake URL
                 let escaped_path = path_str.replace(' ', "%20");
                 format!("path:{}", escaped_path)
             } else {

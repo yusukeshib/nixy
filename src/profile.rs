@@ -287,10 +287,34 @@ pub fn migrate_legacy_flake(config: &Config) -> Result<()> {
         fs::copy(&legacy_lock, profile.state_dir.join("flake.lock"))?;
     }
 
-    // Copy packages directory to global packages dir if exists
+    // Merge packages directory to global packages dir if exists
     let legacy_packages = config.config_dir.join("packages");
-    if legacy_packages.exists() && !config.global_packages_dir.exists() {
-        copy_dir_recursive(&legacy_packages, &config.global_packages_dir)?;
+    if legacy_packages.exists() {
+        merge_packages_dir(&legacy_packages, &config.global_packages_dir)?;
+    }
+
+    Ok(())
+}
+
+/// Merge source packages directory into destination, copying files that don't already exist
+fn merge_packages_dir(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        // Skip if destination already exists (don't overwrite)
+        if dst_path.exists() {
+            continue;
+        }
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
     }
 
     Ok(())
