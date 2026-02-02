@@ -147,7 +147,11 @@ impl FlakeBuilder {
             let path = if let Some(dir) = packages_dir {
                 // Use a URL-style path for flake URLs, handling spaces in the path
                 let abs_path = dir.join(&flake.name);
-                let path_str = abs_path.to_string_lossy();
+                // Try to resolve symlinks to actual paths for Nix compatibility. This can
+                // fail not only for broken symlinks but also due to permission issues or
+                // missing intermediate directories, in which case we fall back to abs_path.
+                let resolved_path = abs_path.canonicalize().unwrap_or(abs_path);
+                let path_str = resolved_path.to_string_lossy();
                 // Escape spaces in the path for the flake URL
                 let escaped_path = path_str.replace(' ', "%20");
                 format!("path:{}", escaped_path)
@@ -212,7 +216,12 @@ impl FlakeBuilder {
             // Update package expression to use absolute path if needed
             let package_expr = if let Some(dir) = packages_dir {
                 let abs_path = dir.join(format!("{}.nix", pkg.name));
-                let path_str = abs_path.to_string_lossy();
+                // Try to resolve symlinks to actual paths for Nix compatibility.
+                // canonicalize() can also fail for reasons other than broken symlinks
+                // (for example, missing intermediate directories or permission issues),
+                // in which case we intentionally fall back to the original abs_path.
+                let resolved_path = abs_path.canonicalize().unwrap_or(abs_path);
+                let path_str = resolved_path.to_string_lossy();
                 // Only replace if the expression is a simple ./packages/<name>.nix reference
                 if pkg.package_expr == format!("pkgs.callPackage ./packages/{}.nix {{}}", pkg.name)
                 {
@@ -1108,5 +1117,124 @@ mod tests {
         });
         let flake = generate_flake(&state, None);
         validate_brackets(&flake).expect("Complex mixed scenario should produce balanced brackets");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_flake_symlink_resolution() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        // Create temp dirs: target dir with flake.nix, packages dir with symlink
+        let temp = tempdir().unwrap();
+        let target_dir = temp.path().join("real-package");
+        let packages_dir = temp.path().join("packages");
+
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::create_dir_all(&packages_dir).unwrap();
+        fs::write(target_dir.join("flake.nix"), "{ }").unwrap();
+
+        // Create symlink: packages/my-package -> real-package
+        symlink(&target_dir, packages_dir.join("my-package")).unwrap();
+
+        // Create a local flake entry
+        let local_flakes = vec![LocalFlake {
+            name: "my-package".to_string(),
+        }];
+
+        // Build using the method that resolves absolute paths
+        let mut builder = FlakeBuilder::new();
+        builder.add_local_flakes_with_absolute_paths(&local_flakes, Some(&packages_dir));
+
+        // The generated input should use the resolved (real) path, not the symlink
+        let resolved_target = target_dir.canonicalize().unwrap();
+        let expected_path = format!("path:{}", resolved_target.to_string_lossy());
+        assert!(
+            builder.inputs.contains(&expected_path),
+            "Expected path '{}' in inputs, got: {}",
+            expected_path,
+            builder.inputs
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_package_nix_file_symlink_resolution() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        // Create temp dirs: target dir with .nix file, packages dir with symlink
+        let temp = tempdir().unwrap();
+        let target_file = temp.path().join("real-package.nix");
+        let packages_dir = temp.path().join("packages");
+
+        fs::create_dir_all(&packages_dir).unwrap();
+        fs::write(&target_file, "{ pkgs }: pkgs.hello").unwrap();
+
+        // Create symlink: packages/my-package.nix -> real-package.nix
+        symlink(&target_file, packages_dir.join("my-package.nix")).unwrap();
+
+        // Create a local package entry
+        let local_packages = vec![LocalPackage {
+            name: "my-package".to_string(),
+            package_expr: "pkgs.callPackage ./packages/my-package.nix {}".to_string(),
+            input_name: None,
+            input_url: None,
+            overlay: None,
+        }];
+
+        // Build using the method that resolves absolute paths
+        let mut builder = FlakeBuilder::new();
+        builder.add_local_packages_with_absolute_paths(&local_packages, Some(&packages_dir));
+
+        // The generated entry should use the resolved (real) path, not the symlink
+        let resolved_target = target_file.canonicalize().unwrap();
+        let expected_expr = format!(
+            "pkgs.callPackage {} {{}}",
+            resolved_target.to_string_lossy()
+        );
+        assert!(
+            builder.local_entries.contains(&expected_expr),
+            "Expected expression '{}' in local_entries, got: {}",
+            expected_expr,
+            builder.local_entries
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_fallback_on_broken_link() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        // Create temp dir with broken symlink
+        let temp = tempdir().unwrap();
+        let packages_dir = temp.path().join("packages");
+        fs::create_dir_all(&packages_dir).unwrap();
+
+        // Create broken symlink (target doesn't exist)
+        let nonexistent = temp.path().join("nonexistent");
+        symlink(&nonexistent, packages_dir.join("broken-package")).unwrap();
+
+        // Create a local flake entry for the broken symlink
+        let local_flakes = vec![LocalFlake {
+            name: "broken-package".to_string(),
+        }];
+
+        // Build using the method that resolves absolute paths
+        let mut builder = FlakeBuilder::new();
+        builder.add_local_flakes_with_absolute_paths(&local_flakes, Some(&packages_dir));
+
+        // Should fall back to the original path (symlink path) when canonicalize fails
+        let expected_path = format!(
+            "path:{}",
+            packages_dir.join("broken-package").to_string_lossy()
+        );
+        assert!(
+            builder.inputs.contains(&expected_path),
+            "Expected fallback path '{}' in inputs, got: {}",
+            expected_path,
+            builder.inputs
+        );
     }
 }
