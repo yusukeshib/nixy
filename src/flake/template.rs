@@ -147,10 +147,24 @@ impl FlakeBuilder {
             let path = if let Some(dir) = packages_dir {
                 // Use a URL-style path for flake URLs, handling spaces in the path
                 let abs_path = dir.join(&flake.name);
-                // Try to resolve symlinks to actual paths for Nix compatibility. This can
-                // fail not only for broken symlinks but also due to permission issues or
-                // missing intermediate directories, in which case we fall back to abs_path.
-                let resolved_path = abs_path.canonicalize().unwrap_or(abs_path);
+
+                // Check if flake.nix inside the directory is a symlink.
+                // When Nix copies the flake to the store, it can't follow absolute symlinks,
+                // so we need to resolve to the directory containing the actual flake.nix.
+                let flake_nix_path = abs_path.join("flake.nix");
+                let resolved_path = if flake_nix_path.is_symlink() {
+                    // If flake.nix is a symlink, use its target's parent directory
+                    flake_nix_path
+                        .canonicalize()
+                        .ok()
+                        .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+                        .unwrap_or_else(|| abs_path.canonicalize().unwrap_or(abs_path))
+                } else {
+                    // Fall back to canonicalizing the directory itself.
+                    // This handles the case where the package directory is a symlink.
+                    abs_path.canonicalize().unwrap_or(abs_path)
+                };
+
                 let path_str = resolved_path.to_string_lossy();
                 // Escape spaces in the path for the flake URL
                 let escaped_path = path_str.replace(' ', "%20");
@@ -1148,6 +1162,47 @@ mod tests {
 
         // The generated input should use the resolved (real) path, not the symlink
         let resolved_target = target_dir.canonicalize().unwrap();
+        let expected_path = format!("path:{}", resolved_target.to_string_lossy());
+        assert!(
+            builder.inputs.contains(&expected_path),
+            "Expected path '{}' in inputs, got: {}",
+            expected_path,
+            builder.inputs
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_flake_with_symlinked_flake_nix() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        // Create temp dirs: target flake with flake.nix, packages dir with symlinked flake.nix
+        let temp = tempdir().unwrap();
+        let target_flake_dir = temp.path().join("real-flake");
+        let packages_dir = temp.path().join("packages");
+        let symlink_dir = packages_dir.join("my-flake");
+
+        fs::create_dir_all(&target_flake_dir).unwrap();
+        fs::create_dir_all(&symlink_dir).unwrap();
+        fs::write(target_flake_dir.join("flake.nix"), "{ }").unwrap();
+
+        // Create symlink: packages/my-flake/flake.nix -> real-flake/flake.nix
+        symlink(
+            target_flake_dir.join("flake.nix"),
+            symlink_dir.join("flake.nix"),
+        )
+        .unwrap();
+
+        let local_flakes = vec![LocalFlake {
+            name: "my-flake".to_string(),
+        }];
+
+        let mut builder = FlakeBuilder::new();
+        builder.add_local_flakes_with_absolute_paths(&local_flakes, Some(&packages_dir));
+
+        // Should use the target directory (where the actual flake.nix lives), not the symlink's directory
+        let resolved_target = target_flake_dir.canonicalize().unwrap();
         let expected_path = format!("path:{}", resolved_target.to_string_lossy());
         assert!(
             builder.inputs.contains(&expected_path),
