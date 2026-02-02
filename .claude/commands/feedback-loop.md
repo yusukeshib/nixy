@@ -1,6 +1,6 @@
 # PR Feedback Loop
 
-Monitor a Pull Request for new feedback and automatically address it.
+Monitor a Pull Request for feedback and automatically address it using sub-agents.
 
 ## Usage
 
@@ -12,57 +12,118 @@ Run `/feedback-loop <pr-number>` or just `/feedback-loop` (uses current branch's
 
 ## Instructions
 
+### Phase 1: Setup and Status Check
+
 1. **Determine the PR number**
    - If `$ARGUMENTS` is provided, use it as the PR number
    - Otherwise, get the PR for the current branch: `gh pr view --json number -q .number`
+   - Store in variable: `PR=<number>`
 
-2. **Start monitoring** - Run this command in background to watch for new comments:
+2. **Get repository info**
    ```bash
-   PR=<number>
    REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   LAST_COMMENTS=$(gh api repos/$REPO/pulls/$PR/comments --jq 'length')
-   LAST_REVIEWS=$(gh api repos/$REPO/pulls/$PR/reviews --jq 'length')
-   echo "Watching PR #$PR (current comments: $LAST_COMMENTS)"
-
-   while true; do
-     sleep 30
-     COMMENTS=$(gh api repos/$REPO/pulls/$PR/comments --jq 'length')
-     REVIEWS=$(gh api repos/$REPO/pulls/$PR/reviews --jq 'length')
-     echo "$(date +%H:%M:%S) - Comments: $COMMENTS, Reviews: $REVIEWS"
-
-     if [ "$COMMENTS" -gt "$LAST_COMMENTS" ] || [ "$REVIEWS" -gt "$LAST_REVIEWS" ]; then
-       echo "NEW FEEDBACK"
-       gh api repos/$REPO/pulls/$PR/comments --jq '.[-'$((COMMENTS-LAST_COMMENTS))':] | .[] | "File: \(.path):\(.line)\n\(.body)\n---"'
-       LAST_COMMENTS=$COMMENTS
-       LAST_REVIEWS=$REVIEWS
-     fi
-   done
+   OWNER=$(gh repo view --json owner -q .owner.login)
+   REPO_NAME=$(gh repo view --json name -q .name)
    ```
 
-3. **When new feedback is detected**:
-   - Read and understand each comment
-   - Fix the code issues in the relevant files
-   - Run tests: `cargo test`
-   - Commit and push changes with a descriptive message
-   - Resolve review threads via GraphQL:
-     ```bash
-     # Get unresolved thread IDs
-     OWNER=$(gh repo view --json owner -q .owner.login)
-     REPO=$(gh repo view --json name -q .name)
-     gh api graphql -f query='query { repository(owner: "'$OWNER'", name: "'$REPO'") { pullRequest(number: '$PR') { reviewThreads(first: 50) { nodes { id isResolved } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id'
+3. **Check current PR status**
+   ```bash
+   ./scripts/pr-feedback-loop.sh $PR status
+   ```
 
-     # Resolve each thread
-     gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { isResolved } } }'
-     ```
-   - **Request re-review from Copilot**:
-     > **Note**: There is no official API to trigger Copilot re-review. The user must manually
-     > click the "Re-request review" button next to Copilot's name in the Reviewers menu on GitHub.
-     > The API call below may work in some cases but is not guaranteed:
-     ```bash
-     gh api repos/$OWNER/$REPO/pulls/$PR/requested_reviewers -X POST -f 'reviewers[]=Copilot'
-     ```
-     If re-review doesn't trigger automatically, ask the user to click the re-request button.
+### Phase 2: Get Unresolved Feedback
 
-4. **Continue monitoring** until the review passes with no new change requests
+4. **Fetch all unresolved review threads**
+   ```bash
+   ./scripts/pr-feedback-loop.sh $PR threads
+   ```
 
-5. **Completion**: When Copilot re-reviews and has no new feedback, inform the user that all feedback has been addressed.
+5. **If there are unresolved threads**, extract each thread's details using:
+   ```bash
+   gh api graphql -f query='query { repository(owner: "'$OWNER'", name: "'$REPO_NAME'") { pullRequest(number: '$PR') { reviewThreads(first: 100) { nodes { id isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'
+   ```
+
+### Phase 3: Fix Each Feedback Item (Sub-Agents)
+
+6. **For EACH unresolved feedback thread**, spawn a sub-agent using the Task tool:
+
+   Use `subagent_type: "general-purpose"` with a prompt like:
+   ```
+   Fix the following PR review feedback:
+
+   File: <path>
+   Line: <line>
+   Feedback: <body>
+
+   Instructions:
+   1. Read the file mentioned in the feedback
+   2. Understand the issue being raised
+   3. Make the necessary code changes to address the feedback
+   4. Run `cargo fmt` to format the code
+   5. Run `cargo clippy -- -D warnings` to check for issues
+   6. Run `cargo test` to verify nothing is broken
+   7. Report what changes you made
+
+   Do NOT commit - just make the changes and report back.
+   ```
+
+   **IMPORTANT**: Launch sub-agents in parallel when feedback items are independent (different files). Launch sequentially if they affect the same code.
+
+### Phase 4: Commit and Push
+
+7. **After all sub-agents complete**, verify and commit:
+   ```bash
+   git status
+   git diff
+   cargo test
+   ```
+
+8. **Stage and commit changes**:
+   ```bash
+   git add -A
+   git commit -m "Address PR review feedback
+
+   Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+   ```
+
+9. **Push changes**:
+   ```bash
+   git push
+   ```
+
+### Phase 5: Resolve Threads and Request Re-review
+
+10. **Resolve all addressed threads**:
+    ```bash
+    ./scripts/pr-feedback-loop.sh $PR resolve-all
+    ```
+
+11. **Request Copilot re-review** (IMPORTANT: verify it's actually requested):
+    ```bash
+    ./scripts/pr-feedback-loop.sh $PR request
+    ```
+
+12. **Verify review was requested** by checking pending reviewers:
+    ```bash
+    gh api repos/$REPO/pulls/$PR/requested_reviewers --jq '.users[].login'
+    ```
+    If "Copilot" is NOT in the list, inform the user they need to manually click "Re-request review" on GitHub.
+
+### Phase 6: Wait for New Review
+
+13. **Only if review was successfully requested**, wait for the new review:
+    ```bash
+    ./scripts/pr-feedback-loop.sh $PR wait
+    ```
+
+14. **After receiving new review**:
+    - If no new feedback: Inform user "All feedback addressed! PR is ready to merge."
+    - If new feedback exists: Go back to Phase 2 and repeat
+
+## Key Points
+
+- **Use sub-agents (Task tool)** for fixing each feedback item to prevent context explosion
+- **Run sub-agents in parallel** when fixing independent files
+- **Always verify review is requested** before waiting
+- **Don't commit from sub-agents** - let the main agent handle commits to avoid conflicts
+- The script `./scripts/pr-feedback-loop.sh` handles most GitHub API interactions

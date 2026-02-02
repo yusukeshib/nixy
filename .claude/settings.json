@@ -8,12 +8,21 @@
       "Bash(gh repo view:*)",
       "Bash(gh extension:*)",
       "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo build:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
       "Bash(tail:*)",
       "Bash(cat:*)",
-      "Bash(sleep:*)"
+      "Bash(sleep:*)",
+      "Bash(./scripts/pr-feedback-loop.sh:*)"
     ]
   }
 }

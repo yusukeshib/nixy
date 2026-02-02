@@ -148,20 +148,7 @@ When user asks to monitor and resolve PR feedback automatically:
 gh extension install ChrisCarini/gh-copilot-review
 ```
 
-Add to `.claude/settings.json` to avoid permission prompts:
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(./scripts/pr-feedback-loop.sh:*)",
-      "Bash(cargo test:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)"
-    ]
-  }
-}
-```
+The `.claude/settings.json` already has permissions configured to avoid prompts for common operations.
 
 **Script commands:**
 ```bash
@@ -169,18 +156,25 @@ Add to `.claude/settings.json` to avoid permission prompts:
 ./scripts/pr-feedback-loop.sh <PR> status       # Show current status
 ./scripts/pr-feedback-loop.sh <PR> threads      # Show unresolved threads
 ./scripts/pr-feedback-loop.sh <PR> resolve-all  # Resolve all threads
-./scripts/pr-feedback-loop.sh <PR> request      # Request Copilot review
+./scripts/pr-feedback-loop.sh <PR> request      # Request Copilot review (with verification)
 ./scripts/pr-feedback-loop.sh <PR> wait         # Wait for new review
 ```
 
-**Workflow:**
+**Workflow (use sub-agents to prevent context explosion):**
 1. Check status: `./scripts/pr-feedback-loop.sh <PR> status`
-2. If there are unresolved threads: `./scripts/pr-feedback-loop.sh <PR> threads`
-3. For each unresolved thread:
-   - Read the feedback
-   - Fix the code issues
-   - Run tests (`cargo test`)
-   - Commit and push changes
-4. Resolve all threads: `./scripts/pr-feedback-loop.sh <PR> resolve-all`
-5. Request re-review and wait: `./scripts/pr-feedback-loop.sh <PR> request` then `./scripts/pr-feedback-loop.sh <PR> wait`
-6. Repeat until no unresolved threads remain
+2. Get unresolved threads: `./scripts/pr-feedback-loop.sh <PR> threads`
+3. **For each unresolved thread, spawn a sub-agent** using the Task tool:
+   - The sub-agent reads the feedback, fixes the code, runs tests
+   - Sub-agents for independent files can run in parallel
+   - Sub-agents do NOT commit - they just make changes
+4. After all sub-agents complete: run `cargo test`, commit, and push
+5. Resolve all threads: `./scripts/pr-feedback-loop.sh <PR> resolve-all`
+6. Request re-review: `./scripts/pr-feedback-loop.sh <PR> request`
+   - **Verify** Copilot is assigned before proceeding
+7. Wait for review: `./scripts/pr-feedback-loop.sh <PR> wait`
+8. Repeat until no unresolved threads remain
+
+**Key points:**
+- Use sub-agents to fix each feedback item (prevents context explosion)
+- Always verify Copilot review is requested before waiting
+- Run sub-agents in parallel for independent files

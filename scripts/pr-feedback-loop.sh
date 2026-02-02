@@ -104,15 +104,26 @@ do_request() {
     echo "=== Request Copilot Review ==="
     if is_copilot_assigned; then
         echo "✓ Copilot is already assigned as reviewer"
+        return 0
+    fi
+
+    echo "→ Requesting Copilot review..."
+    if ! gh copilot-review "$PR"; then
+        echo "✗ Failed to request Copilot review."
+        echo "  Make sure the extension is installed:"
+        echo "  gh extension install ChrisCarini/gh-copilot-review"
+        return 1
+    fi
+
+    # Verify the request was successful by checking pending reviewers
+    sleep 2  # Give GitHub a moment to update
+    if is_copilot_assigned; then
+        echo "✓ Copilot review requested and verified"
+        return 0
     else
-        echo "→ Requesting Copilot review..."
-        if ! gh copilot-review "$PR"; then
-            echo "✗ Failed to request Copilot review."
-            echo "  Make sure the extension is installed:"
-            echo "  gh extension install ChrisCarini/gh-copilot-review"
-            exit 1
-        fi
-        echo "✓ Copilot review requested"
+        echo "⚠ Copilot review requested but not yet assigned"
+        echo "  Please manually request Copilot review on GitHub if needed"
+        return 1
     fi
 }
 
@@ -151,11 +162,8 @@ do_loop() {
     echo "Repo: $REPO"
     echo ""
 
-    # Step 1: Request review if needed
-    echo "Step 1: Check/Request Copilot review"
-    do_request
-
-    echo ""
+    # Step 1: Check current status
+    echo "Step 1: Check current PR status"
     do_status
 
     # Check for existing unresolved threads
@@ -168,9 +176,27 @@ do_loop() {
         exit 0
     fi
 
-    # Step 2: Wait for review
+    # Step 2: Request review if needed
     echo ""
-    echo "Step 2: Wait for Copilot review"
+    echo "Step 2: Request Copilot review"
+    if ! do_request; then
+        echo ""
+        echo "⚠ Could not verify Copilot review request."
+        echo "Please manually request Copilot review on GitHub, then run:"
+        echo "  $0 $PR wait"
+        exit 1
+    fi
+
+    # Step 3: Wait for review (only if Copilot is assigned)
+    echo ""
+    echo "Step 3: Wait for Copilot review"
+    if ! is_copilot_assigned; then
+        echo "⚠ Copilot is not assigned as reviewer. Skipping wait."
+        echo "Please manually request Copilot review on GitHub, then run:"
+        echo "  $0 $PR wait"
+        exit 1
+    fi
+
     if do_wait; then
         UNRESOLVED=$(get_unresolved_count)
         if [ "$UNRESOLVED" -eq "0" ]; then
