@@ -199,9 +199,7 @@ impl NixyConfig {
             if target.is_absolute() {
                 target
             } else {
-                path.parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
+                path.parent().map(|p| p.join(&target)).unwrap_or(target)
             }
         } else {
             path.clone()
