@@ -191,8 +191,24 @@ impl NixyConfig {
     pub fn save(&self, config: &Config) -> Result<()> {
         let path = &config.nixy_json;
 
+        // Resolve symlink if nixy.json is a symlink
+        // This preserves symlinks by writing to the target instead of replacing the symlink
+        let resolved_path = if path.is_symlink() {
+            let target = fs::read_link(path)?;
+            // Handle relative symlinks by resolving against the symlink's parent
+            if target.is_absolute() {
+                target
+            } else {
+                path.parent()
+                    .map(|p| p.join(&target))
+                    .unwrap_or(target)
+            }
+        } else {
+            path.clone()
+        };
+
         // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = resolved_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
@@ -200,13 +216,13 @@ impl NixyConfig {
             serde_json::to_string_pretty(self).map_err(|e| Error::StateFile(e.to_string()))?;
 
         // Write to a temporary file first, then atomically rename it into place
-        let tmp_path = path.with_extension("json.tmp");
+        let tmp_path = resolved_path.with_extension("json.tmp");
         if let Err(e) = fs::write(&tmp_path, &content) {
             // Clean up temp file on write failure (if it was partially created)
             let _ = fs::remove_file(&tmp_path);
             return Err(e.into());
         }
-        if let Err(e) = fs::rename(&tmp_path, path) {
+        if let Err(e) = fs::rename(&tmp_path, &resolved_path) {
             // Clean up temp file on rename failure
             let _ = fs::remove_file(&tmp_path);
             return Err(e.into());
@@ -476,5 +492,67 @@ mod tests {
         let state: crate::state::PackageState = (&profile).into();
         assert!(state.packages.contains(&"hello".to_string()));
         assert!(state.resolved_packages.iter().any(|p| p.name == "nodejs"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_save_preserves_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create the actual file in a different location
+        let actual_dir = temp.path().join("actual");
+        fs::create_dir_all(&actual_dir).unwrap();
+        let actual_path = actual_dir.join("nixy.json");
+
+        // Create parent dir for symlink
+        fs::create_dir_all(config.nixy_json.parent().unwrap()).unwrap();
+
+        // Create symlink pointing to actual file location
+        symlink(&actual_path, &config.nixy_json).unwrap();
+
+        // Save config
+        let nixy_config = NixyConfig::default();
+        nixy_config.save(&config).unwrap();
+
+        // Verify symlink is preserved
+        assert!(config.nixy_json.is_symlink());
+        // Verify actual file was written
+        assert!(actual_path.exists());
+        // Verify content is correct
+        let content = fs::read_to_string(&actual_path).unwrap();
+        assert!(content.contains("\"active_profile\""));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_save_preserves_relative_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let config = test_config(&temp);
+
+        // Create the actual file in a sibling directory
+        let actual_dir = temp.path().join("dotfiles");
+        fs::create_dir_all(&actual_dir).unwrap();
+        let actual_path = actual_dir.join("nixy.json");
+
+        // Create parent dir for symlink
+        fs::create_dir_all(config.nixy_json.parent().unwrap()).unwrap();
+
+        // Create relative symlink (e.g., ../dotfiles/nixy.json)
+        let relative_target = std::path::Path::new("../dotfiles/nixy.json");
+        symlink(relative_target, &config.nixy_json).unwrap();
+
+        // Save config
+        let nixy_config = NixyConfig::default();
+        nixy_config.save(&config).unwrap();
+
+        // Verify symlink is preserved
+        assert!(config.nixy_json.is_symlink());
+        // Verify actual file was written
+        assert!(actual_path.exists());
     }
 }
