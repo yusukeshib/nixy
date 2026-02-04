@@ -13,7 +13,7 @@
 
         nixy = pkgs.rustPlatform.buildRustPackage {
           pname = "nixy";
-          version = "0.2.5";
+          version = "0.2.6";
 
           src = ./.;
 
