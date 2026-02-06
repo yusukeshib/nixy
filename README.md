@@ -73,7 +73,8 @@ nixy upgrade nodejs         # Upgrade specific package
 | Command | Description |
 |---------|-------------|
 | `nixy install <pkg>[@version]` | Install a package with optional version (alias: `add`) |
-| `nixy install --from <flake> <pkg>` | Install from a flake URL |
+| `nixy install <flake-ref>` | Install from a flake reference (e.g., `github:user/repo`) |
+| `nixy install --from <flake> <pkg>` | Install a specific package from a flake URL |
 | `nixy install --file <path>` | Install from a nix file |
 | `nixy install <pkg> --platform <platform>` | Install only for specific platform(s) |
 | `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
@@ -213,8 +214,15 @@ nixy sync
 <details>
 <summary>Custom package definitions</summary>
 
-**From external flake:**
+**From GitHub flake (default package):**
 ```bash
+nixy install github:nix-community/neovim-nightly-overlay
+```
+
+**From GitHub flake (specific package):**
+```bash
+nixy install github:nix-community/neovim-nightly-overlay#neovim
+# or equivalently:
 nixy install --from github:nix-community/neovim-nightly-overlay neovim
 ```
 

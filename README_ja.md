@@ -69,7 +69,8 @@ nixy upgrade nodejs         # 特定のパッケージをアップグレード
 | コマンド | 説明 |
 |---------|------|
 | `nixy install <pkg>[@version]` | バージョン指定でインストール（エイリアス: `add`） |
-| `nixy install --from <flake> <pkg>` | flake URL からインストール |
+| `nixy install <flake-ref>` | flake リファレンスからインストール（例: `github:user/repo`） |
+| `nixy install --from <flake> <pkg>` | flake URL から特定のパッケージをインストール |
 | `nixy install --file <path>` | nix ファイルからインストール |
 | `nixy install <pkg> --platform <platform>` | 特定のプラットフォームのみにインストール |
 | `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
@@ -209,8 +210,15 @@ nixy sync
 <details>
 <summary>カスタムパッケージ定義</summary>
 
-**外部 flake から：**
+**GitHub flake から（デフォルトパッケージ）：**
 ```bash
+nixy install github:nix-community/neovim-nightly-overlay
+```
+
+**GitHub flake から（特定のパッケージ）：**
+```bash
+nixy install github:nix-community/neovim-nightly-overlay#neovim
+# または同等:
 nixy install --from github:nix-community/neovim-nightly-overlay neovim
 ```
 
