@@ -29,19 +29,20 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
     })?;
 
     // Check if this looks like a flake reference (github:user/repo, path:./foo, etc.)
-    // If so, route through install_from_registry instead of Nixhub
+    // If so, route through install_from_flake_url instead of Nixhub
     if pkg_spec_str.contains(':') {
-        let (flake_url, pkg) = if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
-            (url.to_string(), pkg_name.to_string())
-        } else {
-            // No fragment: derive the flake output/package name from the URL
-            // (e.g., the repository name). The flake is expected to export a
-            // package with this name, and nixy also uses it as the human-readable
-            // package name, avoiding collisions with any internal "default" attr.
-            let name = derive_package_name_from_url(&pkg_spec_str);
-            (pkg_spec_str.clone(), name)
-        };
-        return install_from_flake_url(config, &flake_url, &pkg, platforms);
+        let (flake_url, pkg, source_name) =
+            if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
+                (url.to_string(), pkg_name.to_string(), pkg_name.to_string())
+            } else {
+                // No fragment: validate the flake's "default" package output,
+                // but use the URL-derived name (e.g., the repository name) as
+                // the human-readable package name in nixy's config to avoid
+                // collisions when multiple flakes all export "default".
+                let name = derive_package_name_from_url(&pkg_spec_str);
+                (pkg_spec_str.clone(), name, "default".to_string())
+            };
+        return install_from_flake_url(config, &flake_url, &pkg, &source_name, platforms);
     }
 
     // Parse package spec (e.g., "nodejs@20" or "ripgrep")
@@ -241,15 +242,26 @@ fn install_with_nixy_config(
 }
 
 /// Install from a flake URL (e.g., github:user/repo)
+///
+/// `pkg` is the human-readable package name used in nixy's config.
+/// `source_name` is the flake output attribute to validate and install
+/// (e.g., "default" when no fragment is given, or the explicit fragment).
 fn install_from_flake_url(
     config: &Config,
     flake_url: &str,
     pkg: &str,
+    source_name: &str,
     platforms: Option<Vec<String>>,
 ) -> Result<()> {
     // Use NixyConfig if available (new format)
     if nixy_json_exists(config) {
-        return install_from_flake_url_with_nixy_config(config, flake_url, pkg, platforms);
+        return install_from_flake_url_with_nixy_config(
+            config,
+            flake_url,
+            pkg,
+            source_name,
+            platforms,
+        );
     }
 
     // Legacy format
@@ -268,12 +280,12 @@ fn install_from_flake_url(
     info(&format!("Using flake URL: {}", flake_url));
     let input_name = derive_input_name_from_url(flake_url);
 
-    // Validate the package exists
+    // Validate the package exists using the source attribute name
     info(&format!(
         "Validating package '{}' in {}...",
-        pkg, input_name
+        source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(flake_url, pkg)?.ok_or_else(|| {
+    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
         let available = Nix::list_flake_packages(flake_url, None)
             .unwrap_or_default()
             .into_iter()
@@ -281,11 +293,11 @@ fn install_from_flake_url(
             .collect::<Vec<_>>()
             .join(" ");
         if available.is_empty() {
-            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
         } else {
             Error::Usage(format!(
                 "Package '{}' not found in '{}'. Available packages: {}...",
-                pkg, input_name, available
+                source_name, input_name, available
             ))
         }
     })?;
@@ -294,12 +306,17 @@ fn install_from_flake_url(
     let original_state = state.clone();
 
     // Add custom package to state
+    let stored_source_name = if source_name != pkg {
+        Some(source_name.to_string())
+    } else {
+        None
+    };
     state.add_custom_package(CustomPackage {
         name: pkg.to_string(),
         input_name: input_name.clone(),
         input_url: flake_url.to_string(),
         package_output: pkg_output,
-        source_name: None,
+        source_name: stored_source_name,
         platforms,
     });
     state.save(&state_path)?;
@@ -340,6 +357,7 @@ fn install_from_flake_url_with_nixy_config(
     config: &Config,
     flake_url: &str,
     pkg: &str,
+    source_name: &str,
     platforms: Option<Vec<String>>,
 ) -> Result<()> {
     let mut nixy_config = NixyConfig::load(config)?;
@@ -359,11 +377,12 @@ fn install_from_flake_url_with_nixy_config(
     info(&format!("Using flake URL: {}", flake_url));
     let input_name = derive_input_name_from_url(flake_url);
 
+    // Validate the package exists using the source attribute name
     info(&format!(
         "Validating package '{}' in {}...",
-        pkg, input_name
+        source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(flake_url, pkg)?.ok_or_else(|| {
+    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
         let available = Nix::list_flake_packages(flake_url, None)
             .unwrap_or_default()
             .into_iter()
@@ -371,11 +390,11 @@ fn install_from_flake_url_with_nixy_config(
             .collect::<Vec<_>>()
             .join(" ");
         if available.is_empty() {
-            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
         } else {
             Error::Usage(format!(
                 "Package '{}' not found in '{}'. Available packages: {}...",
-                pkg, input_name, available
+                source_name, input_name, available
             ))
         }
     })?;
@@ -384,6 +403,11 @@ fn install_from_flake_url_with_nixy_config(
     let original_config = nixy_config.clone();
 
     // Add custom package to profile
+    let stored_source_name = if source_name != pkg {
+        Some(source_name.to_string())
+    } else {
+        None
+    };
     {
         let profile = nixy_config
             .get_active_profile_mut()
@@ -393,7 +417,7 @@ fn install_from_flake_url_with_nixy_config(
             input_name: input_name.clone(),
             input_url: flake_url.to_string(),
             package_output: pkg_output,
-            source_name: None,
+            source_name: stored_source_name,
             platforms,
         });
     }
@@ -532,25 +556,30 @@ mod tests {
 
     #[test]
     fn test_flake_reference_split() {
-        // With fragment: should extract package name
+        // With fragment: should extract package name and use it as source_name
         let spec = "github:user/repo#some-pkg";
-        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
-            (u.to_string(), p.to_string())
+        let (url, pkg, source_name) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string(), p.to_string())
         } else {
-            (spec.to_string(), derive_package_name_from_url(spec))
+            let name = derive_package_name_from_url(spec);
+            (spec.to_string(), name, "default".to_string())
         };
         assert_eq!(url, "github:user/repo");
         assert_eq!(pkg, "some-pkg");
+        assert_eq!(source_name, "some-pkg");
 
-        // Without fragment: should derive package name from URL
+        // Without fragment: should derive package name from URL,
+        // but use "default" as the source attribute for validation
         let spec = "github:user/repo";
-        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
-            (u.to_string(), p.to_string())
+        let (url, pkg, source_name) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string(), p.to_string())
         } else {
-            (spec.to_string(), derive_package_name_from_url(spec))
+            let name = derive_package_name_from_url(spec);
+            (spec.to_string(), name, "default".to_string())
         };
         assert_eq!(url, "github:user/repo");
         assert_eq!(pkg, "repo");
+        assert_eq!(source_name, "default");
     }
 
     #[test]

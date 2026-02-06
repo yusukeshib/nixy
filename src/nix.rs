@@ -146,7 +146,6 @@ impl Nix {
         Ok(())
     }
 
-
     /// Validate that a package exists in nixpkgs
     #[allow(dead_code)]
     pub fn validate_package(pkg: &str) -> Result<bool> {

@@ -509,6 +509,68 @@ fn test_help_shows_profile_command() {
 // Install subcommand help tests
 // =============================================================================
 
+#[test]
+fn test_install_help_does_not_list_file_flag() {
+    let output = nixy_cmd().args(["install", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("--file"),
+        "install --help should not list --file flag: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_install_help_does_not_list_from_flag() {
+    let output = nixy_cmd().args(["install", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("--from"),
+        "install --help should not list --from flag: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_install_file_flag_returns_error() {
+    let env = TestEnv::new();
+
+    let output = env
+        .cmd()
+        .args(["install", "--file", "foo.nix"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument") || stderr.contains("unknown"),
+        "install --file should be rejected by clap: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_install_from_flag_returns_error() {
+    let env = TestEnv::new();
+
+    let output = env
+        .cmd()
+        .args(["install", "--from", "nixpkgs", "hello"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument") || stderr.contains("unknown"),
+        "install --from should be rejected by clap: {}",
+        stderr
+    );
+}
+
 // =============================================================================
 // Profile subcommand tests
 // =============================================================================
@@ -1116,14 +1178,14 @@ fn test_uninstall_package_not_installed() {
 // =============================================================================
 
 #[test]
-fn test_install_flake_reference_routes_to_registry() {
+fn test_install_flake_reference_routes_to_flake_url() {
     let env = TestEnv::new();
 
     // Create a profile first
     let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // `nixy install github:user/repo` should NOT go through Nixhub
-    // It should be treated as a flake reference and routed to install_from_registry
+    // It should be treated as a flake reference and installed via flake URL
     let output = env
         .cmd()
         .args(["install", "github:yusukeshib/wb"])
