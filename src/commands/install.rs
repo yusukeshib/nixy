@@ -1,12 +1,6 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-
 use crate::cli::InstallArgs;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::is_flake_file;
-use crate::flake::parser::parse_local_package_attr;
 use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
 use crate::nix::Nix;
 use crate::nixhub::{parse_package_spec, NixhubClient};
@@ -27,45 +21,28 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         Some(normalize_platforms(&args.platform).map_err(Error::Usage)?)
     };
 
-    // Handle --file option
-    if let Some(file) = args.file {
-        if platforms.is_some() {
-            return Err(Error::Usage(
-                "--platform is not supported with --file".to_string(),
-            ));
-        }
-        return install_from_file(config, &file);
-    }
-
-    // Handle --from option
-    if let Some(from) = args.from {
-        let pkg = args
-            .package
-            .ok_or_else(|| Error::Usage("Package name is required with --from".to_string()))?;
-        return install_from_registry(config, &from, &pkg, platforms);
-    }
-
     // Standard nixpkgs install (via Nixhub)
     let pkg_spec_str = args.package.ok_or_else(|| {
         Error::Usage(
-            "Usage: nixy install <package>[@version] or nixy install --file <path> or nixy install --from <registry> <package>".to_string(),
+            "Usage: nixy install <package>[@version] or nixy install <flake-ref>".to_string(),
         )
     })?;
 
     // Check if this looks like a flake reference (github:user/repo, path:./foo, etc.)
-    // If so, route through install_from_registry instead of Nixhub
+    // If so, route through install_from_flake_url instead of Nixhub
     if pkg_spec_str.contains(':') {
-        let (flake_url, pkg) = if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
-            (url.to_string(), pkg_name.to_string())
-        } else {
-            // No fragment: derive the flake output/package name from the URL
-            // (e.g., the repository name). The flake is expected to export a
-            // package with this name, and nixy also uses it as the human-readable
-            // package name, avoiding collisions with any internal "default" attr.
-            let name = derive_package_name_from_url(&pkg_spec_str);
-            (pkg_spec_str.clone(), name)
-        };
-        return install_from_registry(config, &flake_url, &pkg, platforms);
+        let (flake_url, pkg, source_name) =
+            if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
+                (url.to_string(), pkg_name.to_string(), pkg_name.to_string())
+            } else {
+                // No fragment: validate the flake's "default" package output,
+                // but use the URL-derived name (e.g., the repository name) as
+                // the human-readable package name in nixy's config to avoid
+                // collisions when multiple flakes all export "default".
+                let name = derive_package_name_from_url(&pkg_spec_str);
+                (pkg_spec_str.clone(), name, "default".to_string())
+            };
+        return install_from_flake_url(config, &flake_url, &pkg, &source_name, platforms);
     }
 
     // Parse package spec (e.g., "nodejs@20" or "ripgrep")
@@ -140,8 +117,6 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         flake_dir.clone(),
         state_path.clone(),
         original_state.clone(),
-        None,
-        None,
     ));
 
     info(&format!(
@@ -266,16 +241,27 @@ fn install_with_nixy_config(
     Ok(())
 }
 
-/// Install from a flake registry or direct URL
-fn install_from_registry(
+/// Install from a flake URL (e.g., github:user/repo)
+///
+/// `pkg` is the human-readable package name used in nixy's config.
+/// `source_name` is the flake output attribute to validate and install
+/// (e.g., "default" when no fragment is given, or the explicit fragment).
+fn install_from_flake_url(
     config: &Config,
-    from_arg: &str,
+    flake_url: &str,
     pkg: &str,
+    source_name: &str,
     platforms: Option<Vec<String>>,
 ) -> Result<()> {
     // Use NixyConfig if available (new format)
     if nixy_json_exists(config) {
-        return install_from_registry_with_nixy_config(config, from_arg, pkg, platforms);
+        return install_from_flake_url_with_nixy_config(
+            config,
+            flake_url,
+            pkg,
+            source_name,
+            platforms,
+        );
     }
 
     // Legacy format
@@ -291,46 +277,27 @@ fn install_from_registry(
         return Ok(());
     }
 
-    let flake_url = if from_arg.contains(':') {
-        // Direct flake URL
-        info(&format!("Using flake URL: {}", from_arg));
-        from_arg.to_string()
-    } else {
-        // Registry lookup
-        info(&format!("Looking up '{}' in nix registry...", from_arg));
-        let url = Nix::registry_lookup(from_arg)?
-            .ok_or_else(|| Error::RegistryNotFound(from_arg.to_string()))?;
-        info(&format!("Found: {}", url));
-        url
-    };
+    info(&format!("Using flake URL: {}", flake_url));
+    let input_name = derive_input_name_from_url(flake_url);
 
-    // Derive input name
-    let input_name = if !from_arg.contains(':') {
-        // Use registry alias
-        sanitize_input_name(from_arg)
-    } else {
-        // Derive from URL (owner-repo)
-        derive_input_name_from_url(&flake_url)
-    };
-
-    // Validate the package exists
+    // Validate the package exists using the source attribute name
     info(&format!(
         "Validating package '{}' in {}...",
-        pkg, input_name
+        source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(&flake_url, pkg)?.ok_or_else(|| {
-        let available = Nix::list_flake_packages(&flake_url, None)
+    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
+        let available = Nix::list_flake_packages(flake_url, None)
             .unwrap_or_default()
             .into_iter()
             .take(10)
             .collect::<Vec<_>>()
             .join(" ");
         if available.is_empty() {
-            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
         } else {
             Error::Usage(format!(
                 "Package '{}' not found in '{}'. Available packages: {}...",
-                pkg, input_name, available
+                source_name, input_name, available
             ))
         }
     })?;
@@ -338,16 +305,18 @@ fn install_from_registry(
     // Save original state for rollback
     let original_state = state.clone();
 
-    // Determine final input name and URL for this package
-    let (final_input_name, final_url) = (input_name.clone(), flake_url.clone());
-
     // Add custom package to state
+    let stored_source_name = if source_name != pkg {
+        Some(source_name.to_string())
+    } else {
+        None
+    };
     state.add_custom_package(CustomPackage {
         name: pkg.to_string(),
-        input_name: final_input_name.clone(),
-        input_url: final_url,
+        input_name: input_name.clone(),
+        input_url: flake_url.to_string(),
         package_output: pkg_output,
-        source_name: None,
+        source_name: stored_source_name,
         platforms,
     });
     state.save(&state_path)?;
@@ -364,11 +333,9 @@ fn install_from_registry(
         flake_dir.clone(),
         state_path.clone(),
         original_state.clone(),
-        None,
-        None,
     ));
 
-    info(&format!("Installing {} from {}...", pkg, final_input_name));
+    info(&format!("Installing {} from {}...", pkg, input_name));
     if let Err(e) = super::sync::run(config) {
         // Clear rollback context since we're handling the error here
         rollback::clear_context();
@@ -385,11 +352,12 @@ fn install_from_registry(
     Ok(())
 }
 
-/// Install from a flake registry using the new nixy.json format
-fn install_from_registry_with_nixy_config(
+/// Install from a flake URL using the new nixy.json format
+fn install_from_flake_url_with_nixy_config(
     config: &Config,
-    from_arg: &str,
+    flake_url: &str,
     pkg: &str,
+    source_name: &str,
     platforms: Option<Vec<String>>,
 ) -> Result<()> {
     let mut nixy_config = NixyConfig::load(config)?;
@@ -406,40 +374,27 @@ fn install_from_registry_with_nixy_config(
         }
     }
 
-    let flake_url = if from_arg.contains(':') {
-        info(&format!("Using flake URL: {}", from_arg));
-        from_arg.to_string()
-    } else {
-        info(&format!("Looking up '{}' in nix registry...", from_arg));
-        let url = Nix::registry_lookup(from_arg)?
-            .ok_or_else(|| Error::RegistryNotFound(from_arg.to_string()))?;
-        info(&format!("Found: {}", url));
-        url
-    };
+    info(&format!("Using flake URL: {}", flake_url));
+    let input_name = derive_input_name_from_url(flake_url);
 
-    let input_name = if !from_arg.contains(':') {
-        sanitize_input_name(from_arg)
-    } else {
-        derive_input_name_from_url(&flake_url)
-    };
-
+    // Validate the package exists using the source attribute name
     info(&format!(
         "Validating package '{}' in {}...",
-        pkg, input_name
+        source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(&flake_url, pkg)?.ok_or_else(|| {
-        let available = Nix::list_flake_packages(&flake_url, None)
+    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
+        let available = Nix::list_flake_packages(flake_url, None)
             .unwrap_or_default()
             .into_iter()
             .take(10)
             .collect::<Vec<_>>()
             .join(" ");
         if available.is_empty() {
-            Error::FlakePackageNotFound(pkg.to_string(), input_name.clone())
+            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
         } else {
             Error::Usage(format!(
                 "Package '{}' not found in '{}'. Available packages: {}...",
-                pkg, input_name, available
+                source_name, input_name, available
             ))
         }
     })?;
@@ -448,6 +403,11 @@ fn install_from_registry_with_nixy_config(
     let original_config = nixy_config.clone();
 
     // Add custom package to profile
+    let stored_source_name = if source_name != pkg {
+        Some(source_name.to_string())
+    } else {
+        None
+    };
     {
         let profile = nixy_config
             .get_active_profile_mut()
@@ -455,9 +415,9 @@ fn install_from_registry_with_nixy_config(
         profile.add_custom_package(CustomPackage {
             name: pkg.to_string(),
             input_name: input_name.clone(),
-            input_url: flake_url,
+            input_url: flake_url.to_string(),
             package_output: pkg_output,
-            source_name: None,
+            source_name: stored_source_name,
             platforms,
         });
     }
@@ -494,170 +454,6 @@ fn install_from_registry_with_nixy_config(
         original_config.save(config)?;
         let original_profile = original_config.get_active_profile().unwrap();
         let _ = regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
-        warn("Sync failed. Reverted changes.");
-        return Err(e);
-    }
-
-    // Clear rollback context on success
-    rollback::clear_context();
-
-    Ok(())
-}
-
-/// Install from a local nix file
-fn install_from_file(config: &Config, file: &Path) -> Result<()> {
-    if !file.exists() {
-        return Err(Error::FileNotFound(file.display().to_string()));
-    }
-
-    // Check if this is a flake file
-    if is_flake_file(file) {
-        return install_from_flake_file(config, file);
-    }
-
-    // Extract package name
-    let content = fs::read_to_string(file)?;
-    let pkg_name = parse_local_package_attr(&content, "pname")
-        .or_else(|| parse_local_package_attr(&content, "name"))
-        .ok_or_else(|| Error::NoPackageName(file.display().to_string()))?;
-
-    let flake_dir = get_flake_dir(config)?;
-    let state_path = get_state_path(&flake_dir);
-
-    // Load state
-    let state = PackageState::load(&state_path)?;
-
-    // Check if package is already installed
-    if state.has_package(&pkg_name) {
-        success(&format!("Package '{}' is already installed", pkg_name));
-        return Ok(());
-    }
-
-    info(&format!(
-        "Installing local package: {} from {}",
-        pkg_name,
-        file.display()
-    ));
-
-    // Save original state for rollback
-    let original_state = state.clone();
-
-    // Create packages directory
-    let pkg_dir = flake_dir.join("packages");
-    fs::create_dir_all(&pkg_dir)?;
-
-    // Copy file to packages directory
-    let dest = pkg_dir.join(format!("{}.nix", pkg_name));
-    fs::copy(file, &dest)?;
-    success(&format!("Copied package definition to {}", dest.display()));
-
-    // Add to git if in a git repo
-    git_add(&flake_dir, &format!("packages/{}.nix", pkg_name));
-
-    // Regenerate flake.nix (local packages are auto-discovered)
-    // Clean up copied file if regeneration fails
-    if let Err(e) = regenerate_flake(&flake_dir, &state) {
-        let _ = fs::remove_file(&dest);
-        return Err(e);
-    }
-
-    // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext::legacy(
-        flake_dir.clone(),
-        state_path.clone(),
-        original_state.clone(),
-        Some(dest.clone()),
-        None,
-    ));
-
-    info(&format!("Installing {}...", pkg_name));
-    if let Err(e) = super::sync::run(config) {
-        // Clear rollback context since we're handling the error here
-        rollback::clear_context();
-        // Sync failed, revert changes
-        original_state.save(&state_path)?;
-        let _ = fs::remove_file(&dest);
-        regenerate_flake(&flake_dir, &original_state)?;
-        warn("Sync failed. Reverted changes.");
-        return Err(e);
-    }
-
-    // Clear rollback context on success
-    rollback::clear_context();
-
-    Ok(())
-}
-
-/// Install from a local flake file
-fn install_from_flake_file(config: &Config, file: &Path) -> Result<()> {
-    // Extract package name from filename
-    let pkg_name = file
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(sanitize_input_name)
-        .ok_or_else(|| Error::InvalidFilename(file.display().to_string()))?;
-
-    if pkg_name.is_empty() {
-        return Err(Error::InvalidFilename(file.display().to_string()));
-    }
-
-    let flake_dir = get_flake_dir(config)?;
-    let state_path = get_state_path(&flake_dir);
-
-    // Load state
-    let state = PackageState::load(&state_path)?;
-
-    // Check if package is already installed
-    if state.has_package(&pkg_name) {
-        success(&format!("Package '{}' is already installed", pkg_name));
-        return Ok(());
-    }
-
-    info(&format!(
-        "Installing local flake: {} from {}",
-        pkg_name,
-        file.display()
-    ));
-
-    // Save original state for rollback
-    let original_state = state.clone();
-
-    // Create package directory
-    let pkg_dir = flake_dir.join("packages").join(&pkg_name);
-    fs::create_dir_all(&pkg_dir)?;
-
-    // Copy file as flake.nix
-    let dest = pkg_dir.join("flake.nix");
-    fs::copy(file, &dest)?;
-    success(&format!("Copied flake to {}", dest.display()));
-
-    // Add to git if in a git repo
-    git_add(&flake_dir, &format!("packages/{}/flake.nix", pkg_name));
-
-    // Regenerate flake.nix (local flakes are auto-discovered)
-    // Clean up created directory if regeneration fails
-    if let Err(e) = regenerate_flake(&flake_dir, &state) {
-        let _ = fs::remove_dir_all(&pkg_dir);
-        return Err(e);
-    }
-
-    // Set up rollback context for Ctrl+C handling
-    rollback::set_context(RollbackContext::legacy(
-        flake_dir.clone(),
-        state_path.clone(),
-        original_state.clone(),
-        None,
-        Some(pkg_dir.clone()),
-    ));
-
-    info(&format!("Installing {}...", pkg_name));
-    if let Err(e) = super::sync::run(config) {
-        // Clear rollback context since we're handling the error here
-        rollback::clear_context();
-        // Sync failed, revert changes
-        original_state.save(&state_path)?;
-        let _ = fs::remove_dir_all(&pkg_dir);
-        regenerate_flake(&flake_dir, &original_state)?;
         warn("Sync failed. Reverted changes.");
         return Err(e);
     }
@@ -715,26 +511,10 @@ fn derive_input_name_from_url(url: &str) -> String {
     }
 }
 
-/// Add a file to git if in a git repo
-fn git_add(dir: &Path, file: &str) {
-    // Check if in a git repo
-    let is_git_repo = dir.join(".git").exists()
-        || Command::new("git")
-            .args(["-C", &dir.to_string_lossy(), "rev-parse", "--git-dir"])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-    if is_git_repo {
-        let _ = Command::new("git")
-            .args(["-C", &dir.to_string_lossy(), "add", file])
-            .output();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
 
     #[test]
@@ -776,25 +556,30 @@ mod tests {
 
     #[test]
     fn test_flake_reference_split() {
-        // With fragment: should extract package name
+        // With fragment: should extract package name and use it as source_name
         let spec = "github:user/repo#some-pkg";
-        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
-            (u.to_string(), p.to_string())
+        let (url, pkg, source_name) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string(), p.to_string())
         } else {
-            (spec.to_string(), derive_package_name_from_url(spec))
+            let name = derive_package_name_from_url(spec);
+            (spec.to_string(), name, "default".to_string())
         };
         assert_eq!(url, "github:user/repo");
         assert_eq!(pkg, "some-pkg");
+        assert_eq!(source_name, "some-pkg");
 
-        // Without fragment: should derive package name from URL
+        // Without fragment: should derive package name from URL,
+        // but use "default" as the source attribute for validation
         let spec = "github:user/repo";
-        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
-            (u.to_string(), p.to_string())
+        let (url, pkg, source_name) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string(), p.to_string())
         } else {
-            (spec.to_string(), derive_package_name_from_url(spec))
+            let name = derive_package_name_from_url(spec);
+            (spec.to_string(), name, "default".to_string())
         };
         assert_eq!(url, "github:user/repo");
         assert_eq!(pkg, "repo");
+        assert_eq!(source_name, "default");
     }
 
     #[test]

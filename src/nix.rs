@@ -146,31 +146,6 @@ impl Nix {
         Ok(())
     }
 
-    /// Look up a flake URL from the nix registry
-    pub fn registry_lookup(name: &str) -> Result<Option<String>> {
-        let output = Command::new("nix")
-            .args(NIX_FLAGS)
-            .args(["registry", "list"])
-            .output()
-            .map_err(|e| Error::NixCommand(e.to_string()))?;
-
-        if !output.status.success() {
-            return Ok(None);
-        }
-
-        let target = format!("flake:{}", name);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 && parts[1] == target {
-                return Ok(Some(parts[2].to_string()));
-            }
-        }
-
-        Ok(None)
-    }
-
     /// Validate that a package exists in nixpkgs
     #[allow(dead_code)]
     pub fn validate_package(pkg: &str) -> Result<bool> {

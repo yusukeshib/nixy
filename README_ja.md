@@ -70,8 +70,6 @@ nixy upgrade nodejs         # 特定のパッケージをアップグレード
 |---------|------|
 | `nixy install <pkg>[@version]` | バージョン指定でインストール（エイリアス: `add`） |
 | `nixy install <flake-ref>` | flake リファレンスからインストール（例: `github:user/repo`） |
-| `nixy install --from <flake> <pkg>` | flake URL から特定のパッケージをインストール |
-| `nixy install --file <path>` | nix ファイルからインストール |
 | `nixy install <pkg> --platform <platform>` | 特定のプラットフォームのみにインストール |
 | `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
 | `nixy list` | バージョン付きでパッケージを表示（エイリアス: `ls`） |
@@ -170,7 +168,7 @@ nixy は**純粋に宣言的** - `nixy.json` が真実の源であり、`flake.n
 `/nix/store/` にインストールされます。nixy は `~/.local/state/nixy/env` にシンボリックリンクを作成します。
 
 **flake.nix を手動で編集できる？**
-できません。操作のたびに `nixy.json` から再生成されます。カスタムパッケージには `--from` や `--file` を使ってください。
+できません。操作のたびに `nixy.json` から再生成されます。カスタムパッケージには flake リファレンスを使ってください（例: `nixy install github:user/repo`）。
 
 **nix profile との違いは？**
 nixy は Nix の上に再現性を追加します。`nixy.json` + `flake.lock` を複数マシン間で同期・バージョン管理できます。
@@ -218,13 +216,11 @@ nixy install github:nix-community/neovim-nightly-overlay
 **GitHub flake から（特定のパッケージ）：**
 ```bash
 nixy install github:nix-community/neovim-nightly-overlay#neovim
-# または同等:
-nixy install --from github:nix-community/neovim-nightly-overlay neovim
 ```
 
-**nix ファイルから：**
+**ローカル flake から：**
 ```bash
-nixy install --file my-package.nix
+nixy install path:./my-flake
 ```
 
 `packages/` ディレクトリ内のファイルは自動検出されます。
