@@ -52,6 +52,21 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         )
     })?;
 
+    // Check if this looks like a flake reference (github:user/repo, path:./foo, etc.)
+    // If so, route through install_from_registry instead of Nixhub
+    if pkg_spec_str.contains(':') {
+        let (flake_url, pkg) = if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
+            (url.to_string(), pkg_name.to_string())
+        } else {
+            // No fragment: use "default" as the flake output, but derive a
+            // human-readable package name from the URL (e.g., repo name) so it
+            // doesn't collide with the buildEnv "default" attribute.
+            let name = derive_package_name_from_url(&pkg_spec_str);
+            (pkg_spec_str.clone(), name)
+        };
+        return install_from_registry(config, &flake_url, &pkg, platforms);
+    }
+
     // Parse package spec (e.g., "nodejs@20" or "ripgrep")
     let pkg_spec = parse_package_spec(&pkg_spec_str);
 
@@ -667,6 +682,25 @@ fn sanitize_input_name(s: &str) -> String {
     sanitized.trim_matches('-').to_string()
 }
 
+/// Derive a package name from a flake URL (uses the last path component, e.g., repo name)
+/// For "github:user/repo" → "repo", for "path:./foo/bar" → "bar"
+fn derive_package_name_from_url(url: &str) -> String {
+    // Strip the scheme (everything before and including ':')
+    let path = url.split_once(':').map(|(_, p)| p).unwrap_or(url);
+    // Take the last path component
+    let name = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("default")
+        .trim_end_matches(".git");
+    if name.is_empty() {
+        "default".to_string()
+    } else {
+        sanitize_input_name(name)
+    }
+}
+
 /// Derive an input name from a flake URL
 fn derive_input_name_from_url(url: &str) -> String {
     // Try to extract owner-repo from URL
@@ -721,6 +755,54 @@ mod tests {
             derive_input_name_from_url("github:user/repo.git"),
             "github-user-repo"
         );
+    }
+
+    #[test]
+    fn test_flake_reference_detection() {
+        // Strings containing ':' should be detected as flake references
+        assert!("github:user/repo".contains(':'));
+        assert!("gitlab:user/repo".contains(':'));
+        assert!("path:/some/path".contains(':'));
+        assert!("git+https://example.com/repo".contains(':'));
+
+        // Plain package names should NOT be detected
+        assert!(!"hello".contains(':'));
+        assert!(!"nodejs".contains(':'));
+        assert!(!"ripgrep".contains(':'));
+        // Version specs with @ should NOT be detected
+        assert!(!"nodejs@20".contains(':'));
+    }
+
+    #[test]
+    fn test_flake_reference_split() {
+        // With fragment: should extract package name
+        let spec = "github:user/repo#some-pkg";
+        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string())
+        } else {
+            (spec.to_string(), derive_package_name_from_url(spec))
+        };
+        assert_eq!(url, "github:user/repo");
+        assert_eq!(pkg, "some-pkg");
+
+        // Without fragment: should derive package name from URL
+        let spec = "github:user/repo";
+        let (url, pkg) = if let Some((u, p)) = spec.split_once('#') {
+            (u.to_string(), p.to_string())
+        } else {
+            (spec.to_string(), derive_package_name_from_url(spec))
+        };
+        assert_eq!(url, "github:user/repo");
+        assert_eq!(pkg, "repo");
+    }
+
+    #[test]
+    fn test_derive_package_name_from_url() {
+        assert_eq!(derive_package_name_from_url("github:user/repo"), "repo");
+        assert_eq!(derive_package_name_from_url("github:user/repo.git"), "repo");
+        assert_eq!(derive_package_name_from_url("gitlab:org/project"), "project");
+        assert_eq!(derive_package_name_from_url("path:./foo/bar"), "bar");
+        assert_eq!(derive_package_name_from_url("path:./single"), "single");
     }
 
     #[test]

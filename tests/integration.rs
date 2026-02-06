@@ -1442,6 +1442,102 @@ fn test_install_from_detects_direct_url() {
 }
 
 // =============================================================================
+// Flake reference routing tests
+// =============================================================================
+
+#[test]
+fn test_install_flake_reference_routes_to_registry() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    // `nixy install github:user/repo` should NOT go through Nixhub
+    // It should be treated as a flake reference and routed to install_from_registry
+    let output = env
+        .cmd()
+        .args(["install", "github:yusukeshib/wb"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The key assertion: it should NOT try to resolve via Nixhub
+    assert!(
+        !stderr.contains("Nixhub") && !stdout.contains("Nixhub"),
+        "Flake reference should not be routed to Nixhub: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+
+    // It should recognize this as a flake URL (either succeeding or failing with a
+    // nix/flake-related error, not a Nixhub error)
+    if !output.status.success() {
+        let combined = format!("{}{}", stdout, stderr).to_lowercase();
+        assert!(
+            combined.contains("flake")
+                || combined.contains("validating")
+                || combined.contains("nix")
+                || combined.contains("using flake url"),
+            "Error should be flake-related, not Nixhub-related: stdout={}, stderr={}",
+            stdout,
+            stderr
+        );
+    }
+}
+
+#[test]
+fn test_install_flake_reference_with_fragment() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    // `nixy install github:user/repo#pkg` should extract the fragment as the package name
+    let output = env
+        .cmd()
+        .args(["install", "github:NixOS/nixpkgs#hello"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should NOT go through Nixhub
+    assert!(
+        !stderr.contains("Nixhub") && !stdout.contains("Nixhub"),
+        "Flake reference with fragment should not be routed to Nixhub: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_install_plain_package_still_uses_nixhub() {
+    let env = TestEnv::new();
+
+    // Create a profile first
+    let _ = env.cmd().args(["profile", "default", "-c"]).output();
+
+    // `nixy install hello` should still go through Nixhub (the standard path)
+    let output = env
+        .cmd()
+        .args(["install", "hello"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should mention Nixhub since it's a plain package name
+    assert!(
+        stdout.contains("Nixhub") || stdout.contains("already installed"),
+        "Plain package name should be resolved via Nixhub: stdout={}",
+        stdout
+    );
+}
+
+// =============================================================================
 // Install revert on sync failure tests
 // =============================================================================
 
