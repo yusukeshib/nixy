@@ -74,8 +74,6 @@ nixy upgrade nodejs         # Upgrade specific package
 |---------|-------------|
 | `nixy install <pkg>[@version]` | Install a package with optional version (alias: `add`) |
 | `nixy install <flake-ref>` | Install from a flake reference (e.g., `github:user/repo`) |
-| `nixy install --from <flake> <pkg>` | Install a specific package from a flake URL |
-| `nixy install --file <path>` | Install from a nix file |
 | `nixy install <pkg> --platform <platform>` | Install only for specific platform(s) |
 | `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
 | `nixy list` | List installed packages with versions (alias: `ls`) |
@@ -174,7 +172,7 @@ Use `nixy search <keyword>`.
 In `/nix/store/`. nixy creates a symlink at `~/.local/state/nixy/env` pointing to your environment.
 
 **Can I edit flake.nix manually?**
-No, it's regenerated from `nixy.json` on every operation. Use `--from` or `--file` for custom packages.
+No, it's regenerated from `nixy.json` on every operation. Use flake references for custom packages (e.g., `nixy install github:user/repo`).
 
 **How does nixy differ from nix profile?**
 nixy adds reproducibility on top of Nix - your `nixy.json` + `flake.lock` can be synced and version controlled across machines.
@@ -222,13 +220,11 @@ nixy install github:nix-community/neovim-nightly-overlay
 **From GitHub flake (specific package):**
 ```bash
 nixy install github:nix-community/neovim-nightly-overlay#neovim
-# or equivalently:
-nixy install --from github:nix-community/neovim-nightly-overlay neovim
 ```
 
-**From nix file:**
+**From a local flake:**
 ```bash
-nixy install --file my-package.nix
+nixy install path:./my-flake
 ```
 
 Files in `packages/` directory are auto-discovered.

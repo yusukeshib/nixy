@@ -33,18 +33,6 @@ pub enum Error {
     #[error("Nix is not installed")]
     NixNotInstalled,
 
-    #[error("File not found: {0}")]
-    FileNotFound(String),
-
-    #[error("Could not find 'name' or 'pname' attribute in {0}")]
-    NoPackageName(String),
-
-    #[error("Could not determine package name from filename: {0}")]
-    InvalidFilename(String),
-
-    #[error("Registry entry '{0}' not found. Use 'nix registry list' to see available entries.")]
-    RegistryNotFound(String),
-
     #[error("Package '{0}' not found in '{1}'")]
     FlakePackageNotFound(String, String),
 

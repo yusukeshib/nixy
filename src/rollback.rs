@@ -51,30 +51,17 @@ pub enum OriginalState {
 pub struct RollbackContext {
     pub flake_dir: PathBuf,
     pub original_state: OriginalState,
-    /// Optional path to a file that was copied (for --file installs)
-    pub copied_file: Option<PathBuf>,
-    /// Optional path to a directory that was created (for local flake installs)
-    pub created_dir: Option<PathBuf>,
 }
 
-/// Legacy RollbackContext fields for backwards compatibility
 impl RollbackContext {
     /// Create a new legacy rollback context
-    pub fn legacy(
-        flake_dir: PathBuf,
-        state_path: PathBuf,
-        original_state: PackageState,
-        copied_file: Option<PathBuf>,
-        created_dir: Option<PathBuf>,
-    ) -> Self {
+    pub fn legacy(flake_dir: PathBuf, state_path: PathBuf, original_state: PackageState) -> Self {
         Self {
             flake_dir,
             original_state: OriginalState::Legacy {
                 state_path,
                 state: original_state,
             },
-            copied_file,
-            created_dir,
         }
     }
 
@@ -92,8 +79,6 @@ impl RollbackContext {
                 config,
                 global_packages_dir: global_packages_dir.map(|p| p.to_path_buf()),
             },
-            copied_file: None,
-            created_dir: None,
         }
     }
 }
@@ -154,16 +139,6 @@ fn take_context() -> Option<RollbackContext> {
 
 /// Perform the actual rollback
 fn perform_rollback(ctx: &RollbackContext) {
-    // Remove copied file if any
-    if let Some(ref path) = ctx.copied_file {
-        let _ = std::fs::remove_file(path);
-    }
-
-    // Remove created directory if any
-    if let Some(ref path) = ctx.created_dir {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     // Restore original state based on format
     match &ctx.original_state {
         OriginalState::Legacy { state_path, state } => {
