@@ -800,7 +800,10 @@ mod tests {
     fn test_derive_package_name_from_url() {
         assert_eq!(derive_package_name_from_url("github:user/repo"), "repo");
         assert_eq!(derive_package_name_from_url("github:user/repo.git"), "repo");
-        assert_eq!(derive_package_name_from_url("gitlab:org/project"), "project");
+        assert_eq!(
+            derive_package_name_from_url("gitlab:org/project"),
+            "project"
+        );
         assert_eq!(derive_package_name_from_url("path:./foo/bar"), "bar");
         assert_eq!(derive_package_name_from_url("path:./single"), "single");
     }

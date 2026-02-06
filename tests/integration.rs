@@ -1521,11 +1521,7 @@ fn test_install_plain_package_still_uses_nixhub() {
     let _ = env.cmd().args(["profile", "default", "-c"]).output();
 
     // `nixy install hello` should still go through Nixhub (the standard path)
-    let output = env
-        .cmd()
-        .args(["install", "hello"])
-        .output()
-        .unwrap();
+    let output = env.cmd().args(["install", "hello"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
