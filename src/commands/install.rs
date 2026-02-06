@@ -58,9 +58,10 @@ pub fn run(config: &Config, args: InstallArgs) -> Result<()> {
         let (flake_url, pkg) = if let Some((url, pkg_name)) = pkg_spec_str.split_once('#') {
             (url.to_string(), pkg_name.to_string())
         } else {
-            // No fragment: use "default" as the flake output, but derive a
-            // human-readable package name from the URL (e.g., repo name) so it
-            // doesn't collide with the buildEnv "default" attribute.
+            // No fragment: derive the flake output/package name from the URL
+            // (e.g., the repository name). The flake is expected to export a
+            // package with this name, and nixy also uses it as the human-readable
+            // package name, avoiding collisions with any internal "default" attr.
             let name = derive_package_name_from_url(&pkg_spec_str);
             (pkg_spec_str.clone(), name)
         };
