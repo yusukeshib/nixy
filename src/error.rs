@@ -33,9 +33,6 @@ pub enum Error {
     #[error("Nix is not installed")]
     NixNotInstalled,
 
-    #[error("Package '{0}' not found in '{1}'")]
-    FlakePackageNotFound(String, String),
-
     #[error("Unknown input(s): {0}. Available inputs: {1}")]
     InvalidFlakeInputs(String, String),
 

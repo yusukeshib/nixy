@@ -174,7 +174,7 @@ impl Nix {
         let attr = format!("{}#packages.{}.{}.type", flake_url, system, pkg);
         let output = Command::new("nix")
             .args(NIX_FLAGS)
-            .args(["eval", &attr])
+            .args(["eval", "--no-write-lock-file", &attr])
             .output()
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
@@ -187,7 +187,7 @@ impl Nix {
         let attr = format!("{}#legacyPackages.{}.{}.type", flake_url, system, pkg);
         let output = Command::new("nix")
             .args(NIX_FLAGS)
-            .args(["eval", &attr])
+            .args(["eval", "--no-write-lock-file", &attr])
             .output()
             .map_err(|e| Error::NixCommand(e.to_string()))?;
 
@@ -217,6 +217,7 @@ impl Nix {
                 .args(NIX_FLAGS)
                 .args([
                     "eval",
+                    "--no-write-lock-file",
                     &attr,
                     "--apply",
                     r#"pkgs: builtins.concatStringsSep "\n" (builtins.attrNames pkgs)"#,

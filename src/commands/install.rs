@@ -241,6 +241,64 @@ fn install_with_nixy_config(
     Ok(())
 }
 
+/// Try to validate a flake package, with smart fallback.
+///
+/// First tries `source_name` (usually "default" when no fragment is given).
+/// If that fails and `source_name == "default"` and `pkg != "default"`,
+/// tries `pkg` as a fallback (e.g., the repo name like "realm").
+///
+/// Returns `(effective_source_name, pkg_output)` on success.
+fn validate_and_resolve_flake_package(
+    flake_url: &str,
+    pkg: &str,
+    source_name: &str,
+    input_name: &str,
+) -> Result<(String, String)> {
+    // Try the requested source_name first
+    if let Some(pkg_output) = Nix::validate_flake_package(flake_url, source_name)? {
+        return Ok((source_name.to_string(), pkg_output));
+    }
+
+    // Fallback: if source_name is "default" and pkg is different, try pkg as the attribute
+    let tried_fallback = source_name == "default" && pkg != "default";
+    if tried_fallback {
+        info(&format!(
+            "Package 'default' not found, trying '{}'...",
+            pkg
+        ));
+        if let Some(pkg_output) = Nix::validate_flake_package(flake_url, pkg)? {
+            return Ok((pkg.to_string(), pkg_output));
+        }
+    }
+
+    // Both failed — build a helpful error message
+    let display_name = if tried_fallback {
+        format!("'{}' or '{}'", source_name, pkg)
+    } else {
+        format!("'{}'", source_name)
+    };
+
+    let available = Nix::list_flake_packages(flake_url, None)
+        .unwrap_or_default()
+        .into_iter()
+        .take(10)
+        .collect::<Vec<_>>();
+
+    if available.is_empty() {
+        Err(Error::Usage(format!(
+            "Package {} not found in '{}'",
+            display_name, input_name
+        )))
+    } else {
+        let available_str = available.join(", ");
+        Err(Error::Usage(format!(
+            "Package {} not found in '{}'. Available packages: {}\n\
+             Tip: use {}#<package> to specify the package explicitly",
+            display_name, input_name, available_str, flake_url
+        )))
+    }
+}
+
 /// Install from a flake URL (e.g., github:user/repo)
 ///
 /// `pkg` is the human-readable package name used in nixy's config.
@@ -280,34 +338,20 @@ fn install_from_flake_url(
     info(&format!("Using flake URL: {}", flake_url));
     let input_name = derive_input_name_from_url(flake_url);
 
-    // Validate the package exists using the source attribute name
+    // Validate the package exists (with smart fallback for no-fragment URLs)
     info(&format!(
         "Validating package '{}' in {}...",
         source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
-        let available = Nix::list_flake_packages(flake_url, None)
-            .unwrap_or_default()
-            .into_iter()
-            .take(10)
-            .collect::<Vec<_>>()
-            .join(" ");
-        if available.is_empty() {
-            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
-        } else {
-            Error::Usage(format!(
-                "Package '{}' not found in '{}'. Available packages: {}...",
-                source_name, input_name, available
-            ))
-        }
-    })?;
+    let (effective_source_name, pkg_output) =
+        validate_and_resolve_flake_package(flake_url, pkg, source_name, &input_name)?;
 
     // Save original state for rollback
     let original_state = state.clone();
 
     // Add custom package to state
-    let stored_source_name = if source_name != pkg {
-        Some(source_name.to_string())
+    let stored_source_name = if effective_source_name != pkg {
+        Some(effective_source_name.to_string())
     } else {
         None
     };
@@ -382,29 +426,15 @@ fn install_from_flake_url_with_nixy_config(
         "Validating package '{}' in {}...",
         source_name, input_name
     ));
-    let pkg_output = Nix::validate_flake_package(flake_url, source_name)?.ok_or_else(|| {
-        let available = Nix::list_flake_packages(flake_url, None)
-            .unwrap_or_default()
-            .into_iter()
-            .take(10)
-            .collect::<Vec<_>>()
-            .join(" ");
-        if available.is_empty() {
-            Error::FlakePackageNotFound(source_name.to_string(), input_name.clone())
-        } else {
-            Error::Usage(format!(
-                "Package '{}' not found in '{}'. Available packages: {}...",
-                source_name, input_name, available
-            ))
-        }
-    })?;
+    let (effective_source_name, pkg_output) =
+        validate_and_resolve_flake_package(flake_url, pkg, source_name, &input_name)?;
 
     // Save original config for rollback BEFORE mutating
     let original_config = nixy_config.clone();
 
     // Add custom package to profile
-    let stored_source_name = if source_name != pkg {
-        Some(source_name.to_string())
+    let stored_source_name = if effective_source_name != pkg {
+        Some(effective_source_name.to_string())
     } else {
         None
     };
