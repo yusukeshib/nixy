@@ -262,10 +262,7 @@ fn validate_and_resolve_flake_package(
     // Fallback: if source_name is "default" and pkg is different, try pkg as the attribute
     let tried_fallback = source_name == "default" && pkg != "default";
     if tried_fallback {
-        info(&format!(
-            "Package 'default' not found, trying '{}'...",
-            pkg
-        ));
+        info(&format!("Package 'default' not found, trying '{}'...", pkg));
         if let Some(pkg_output) = Nix::validate_flake_package(flake_url, pkg)? {
             return Ok((pkg.to_string(), pkg_output));
         }
