@@ -347,7 +347,7 @@ impl FlakeBuilder {
           default = pkgs.buildEnv {{
             name = "nixy-env";
             {paths_section}
-            extraOutputsToInstall = [ "man" "doc" "info" ];
+            extraOutputsToInstall = [ "man" "doc" "info" "dev" ];
           }};
         }});
     }};
@@ -647,7 +647,7 @@ mod tests {
     fn test_buildenv_has_extra_outputs() {
         let state = PackageState::default();
         let flake = generate_flake(&state, None);
-        assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" ]"));
+        assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" \"dev\" ]"));
     }
 
     #[test]
@@ -743,7 +743,7 @@ mod tests {
         // Empty flake should have buildEnv structure with empty paths
         assert!(flake.contains("default = pkgs.buildEnv"));
         assert!(flake.contains("paths = ["));
-        assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" ]"));
+        assert!(flake.contains("extraOutputsToInstall = [ \"man\" \"doc\" \"info\" \"dev\" ]"));
     }
 
     #[test]
