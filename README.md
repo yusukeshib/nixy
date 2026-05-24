@@ -177,6 +177,9 @@ No, it's regenerated from `nixy.json` on every operation. Use flake references f
 **How does nixy differ from nix profile?**
 nixy adds reproducibility on top of Nix - your `nixy.json` + `flake.lock` can be synced and version controlled across machines.
 
+**Does nixy honor flake-declared binary caches (e.g. Cachix)?**
+Yes. nixy passes `--accept-flake-config` to every `nix` invocation, so a custom flake's `nixConfig.extra-substituters` / `extra-trusted-public-keys` are honored automatically. This lets `nixy install <flake-ref>` pull prebuilt artifacts from project-provided caches instead of rebuilding locally.
+
 **How do I rollback?**
 Version control your `nixy.json` and `flake.lock` with git:
 ```bash

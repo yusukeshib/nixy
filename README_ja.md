@@ -173,6 +173,9 @@ nixy は**純粋に宣言的** - `nixy.json` が真実の源であり、`flake.n
 **nix profile との違いは？**
 nixy は Nix の上に再現性を追加します。`nixy.json` + `flake.lock` を複数マシン間で同期・バージョン管理できます。
 
+**flake が宣言したバイナリキャッシュ（Cachix など）は使われる？**
+はい。nixy はすべての `nix` 呼び出しに `--accept-flake-config` を渡すので、カスタム flake の `nixConfig.extra-substituters` / `extra-trusted-public-keys` は自動で適用されます。これにより `nixy install <flake-ref>` でプロジェクト提供のキャッシュから事前ビルド済み成果物を取得でき、ローカルでの再ビルドを避けられます。
+
 **ロールバックするには？**
 `nixy.json` と `flake.lock` を git で管理してください：
 ```bash
