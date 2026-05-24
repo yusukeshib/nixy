@@ -100,12 +100,21 @@ impl Default for Config {
 /// Default profile name
 pub const DEFAULT_PROFILE: &str = "default";
 
-/// Nix experimental features flags
+/// Flags passed to every `nix` invocation.
+///
+/// - `--extra-experimental-features nix-command flakes`: nixy relies on flakes.
+/// - `--accept-flake-config`: honor `nixConfig` (e.g. extra substituters /
+///   trusted public keys) declared inside custom flake inputs. Users opt into
+///   third-party flakes explicitly via `nixy install <flake-ref>`, so trusting
+///   their `nixConfig` is consistent with that opt-in and lets prebuilt
+///   binaries from project-provided binary caches (e.g. Cachix) be substituted
+///   instead of rebuilt locally.
 pub const NIX_FLAGS: &[&str] = &[
     "--extra-experimental-features",
     "nix-command",
     "--extra-experimental-features",
     "flakes",
+    "--accept-flake-config",
 ];
 
 #[cfg(test)]
@@ -113,6 +122,17 @@ mod tests {
     use super::*;
     use std::env;
     use std::sync::{Mutex, MutexGuard};
+
+    #[test]
+    fn nix_flags_enable_flakes_and_accept_flake_config() {
+        assert!(NIX_FLAGS.contains(&"flakes"));
+        assert!(NIX_FLAGS.contains(&"nix-command"));
+        assert!(
+            NIX_FLAGS.contains(&"--accept-flake-config"),
+            "NIX_FLAGS must include --accept-flake-config so that nixConfig \
+             declared in custom flake inputs (e.g. extra substituters) is honored"
+        );
+    }
 
     // Mutex to serialize tests that modify environment variables
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
