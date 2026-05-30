@@ -52,6 +52,10 @@ pub enum Commands {
 
     /// Show path to package source file in Nix store
     File(FileArgs),
+
+    /// Print dynamic completion candidates (used by shell completions)
+    #[command(hide = true)]
+    Completions(CompletionsArgs),
 }
 
 #[derive(Args)]
@@ -109,4 +113,10 @@ pub struct UpgradeArgs {
 pub struct FileArgs {
     /// Package name
     pub package: String,
+}
+
+#[derive(Args)]
+pub struct CompletionsArgs {
+    /// What to complete (e.g. installed, profiles)
+    pub kind: String,
 }

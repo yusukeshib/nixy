@@ -1,12 +1,21 @@
 use crate::error::{Error, Result};
 
+/// POSIX PATH export shared by bash/zsh/sh.
+const POSIX_PATH: &str = r#"# nixy shell configuration
+export PATH="$HOME/.local/state/nixy/env/bin:$PATH""#;
+
 pub fn run(shell: &str) -> Result<()> {
     match shell {
-        "bash" | "zsh" | "sh" => {
-            println!(
-                r#"# nixy shell configuration
-export PATH="$HOME/.local/state/nixy/env/bin:$PATH""#
-            );
+        "zsh" => {
+            println!("{}", POSIX_PATH);
+            print!("{}", include_str!("../completions/nixy.zsh"));
+        }
+        "bash" => {
+            println!("{}", POSIX_PATH);
+            print!("{}", include_str!("../completions/nixy.bash"));
+        }
+        "sh" => {
+            println!("{}", POSIX_PATH);
         }
         "fish" => {
             println!(
