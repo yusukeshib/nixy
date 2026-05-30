@@ -55,6 +55,18 @@ For fish (`~/.config/fish/config.fish`):
 nixy config fish | source
 ```
 
+For bash (`~/.bashrc`):
+
+```bash
+eval "$(nixy config bash)"
+```
+
+For zsh and bash this also installs tab completion: subcommands, flags, and
+dynamic completion of installed package names (`nixy uninstall <Tab>`,
+`nixy update <Tab>`, `nixy file <Tab>`) and profile names
+(`nixy profile <Tab>`). Make sure `compinit` has run in your `.zshrc` before
+the `eval` line.
+
 ### 3. Start using
 
 ```bash

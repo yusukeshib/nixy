@@ -22,20 +22,29 @@ fn main() {
     // Initialize signal handler for Ctrl+C rollback
     rollback::init_signal_handler();
 
+    let cli = Cli::parse();
+
+    // Meta commands don't touch the Nix store or config state. Skip the nix
+    // dependency check so they stay fast (e.g. shell completions run the binary
+    // on every <Tab>) and usable even when nix isn't installed.
+    let is_meta = matches!(
+        &cli.command,
+        Commands::Config { .. } | Commands::Completions(_)
+    );
+
     // Check dependencies
-    if let Err(e) = Nix::check_installed() {
-        commands::error(&e.to_string());
-        std::process::exit(1);
+    if !is_meta {
+        if let Err(e) = Nix::check_installed() {
+            commands::error(&e.to_string());
+            std::process::exit(1);
+        }
     }
 
-    let cli = Cli::parse();
     let config = Config::new();
 
     // Commands that don't need config state (skip migration)
-    let skip_migration = matches!(
-        &cli.command,
-        Commands::Config { .. } | Commands::Search { .. } | Commands::Upgrade(_)
-    );
+    let skip_migration =
+        is_meta || matches!(&cli.command, Commands::Search { .. } | Commands::Upgrade(_));
 
     // Auto-migrate from legacy format if needed
     if !skip_migration {
@@ -56,6 +65,7 @@ fn main() {
         Commands::Profile(args) => commands::profile::run(&config, args),
         Commands::Upgrade(args) => commands::upgrade::run(args.force),
         Commands::File(args) => commands::file::run(&config, args),
+        Commands::Completions(args) => commands::completions::run(&config, &args.kind),
     };
 
     if let Err(e) = result {

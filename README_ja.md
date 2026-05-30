@@ -51,6 +51,17 @@ fish の場合（`~/.config/fish/config.fish`）：
 nixy config fish | source
 ```
 
+bash の場合（`~/.bashrc`）：
+
+```bash
+eval "$(nixy config bash)"
+```
+
+zsh と bash では、これによりタブ補完も有効になります。サブコマンドやフラグに加え、
+インストール済みパッケージ名（`nixy uninstall <Tab>`、`nixy update <Tab>`、
+`nixy file <Tab>`）やプロファイル名（`nixy profile <Tab>`）が動的に補完されます。
+`.zshrc` 内で `eval` 行より前に `compinit` を実行しておいてください。
+
 ### 3. 使い始める
 
 ```bash

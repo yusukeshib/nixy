@@ -81,6 +81,12 @@ fn test_config_bash() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("export PATH"));
     assert!(stdout.contains(".local/state/nixy/env/bin"));
+    // Embeds the bash completion script
+    assert!(
+        stdout.contains("complete -F _nixy nixy"),
+        "bash config should include completion: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -89,6 +95,12 @@ fn test_config_zsh() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("export PATH"));
+    // Embeds the zsh completion script with dynamic helpers
+    assert!(
+        stdout.contains("compdef _nixy nixy") && stdout.contains("__nixy_installed"),
+        "zsh config should include completion: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -112,6 +124,114 @@ fn test_config_invalid_shell() {
 fn test_config_no_shell() {
     let output = nixy_cmd().arg("config").output().unwrap();
     assert!(!output.status.success());
+}
+
+// =============================================================================
+// Completions helper tests (used by shell completion scripts)
+// =============================================================================
+
+fn write_nixy_json(env: &TestEnv, body: &str) {
+    std::fs::create_dir_all(&env.config_dir).unwrap();
+    std::fs::write(env.config_dir.join("nixy.json"), body).unwrap();
+}
+
+#[test]
+fn test_completions_installed_lists_all_package_kinds() {
+    let env = TestEnv::new();
+    write_nixy_json(
+        &env,
+        r#"{
+  "version": 3,
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "packages": ["hello"],
+      "resolved_packages": [
+        {
+          "name": "ripgrep",
+          "version_spec": null,
+          "resolved_version": "14.0.0",
+          "attribute_path": "ripgrep",
+          "commit_hash": "abc1234"
+        }
+      ],
+      "custom_packages": [
+        {
+          "name": "pi-nix",
+          "input_name": "github-lukasl-dev-pi-nix",
+          "input_url": "github:lukasl-dev/pi.nix",
+          "package_output": "packages",
+          "source_name": null
+        }
+      ]
+    }
+  }
+}"#,
+    );
+
+    let output = env
+        .cmd()
+        .args(["completions", "installed"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let names: Vec<&str> = stdout.lines().collect();
+
+    assert!(names.contains(&"hello"), "legacy package: {}", stdout);
+    assert!(names.contains(&"ripgrep"), "resolved package: {}", stdout);
+    assert!(names.contains(&"pi-nix"), "custom package: {}", stdout);
+    // Output is sorted and deduplicated
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "names should be sorted: {}", stdout);
+}
+
+#[test]
+fn test_completions_profiles_lists_profile_names() {
+    let env = TestEnv::new();
+    write_nixy_json(
+        &env,
+        r#"{
+  "version": 3,
+  "active_profile": "default",
+  "profiles": {
+    "default": { "packages": [], "resolved_packages": [], "custom_packages": [] },
+    "work": { "packages": [], "resolved_packages": [], "custom_packages": [] }
+  }
+}"#,
+    );
+
+    let output = env
+        .cmd()
+        .args(["completions", "profiles"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let names: Vec<&str> = stdout.lines().collect();
+    assert!(names.contains(&"default"));
+    assert!(names.contains(&"work"));
+}
+
+#[test]
+fn test_completions_unknown_kind_is_empty_and_succeeds() {
+    let env = TestEnv::new();
+    let output = env.cmd().args(["completions", "bogus"]).output().unwrap();
+    assert!(output.status.success(), "unknown kind should not fail");
+    assert!(output.stdout.is_empty(), "unknown kind prints nothing");
+}
+
+#[test]
+fn test_completions_installed_empty_config_succeeds() {
+    let env = TestEnv::new();
+    // No nixy.json and no flake: must still succeed with empty output.
+    let output = env
+        .cmd()
+        .args(["completions", "installed"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
 }
 
 // =============================================================================
