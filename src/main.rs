@@ -34,7 +34,7 @@ fn main() {
     // Commands that don't need config state (skip migration)
     let skip_migration = matches!(
         &cli.command,
-        Commands::Config { .. } | Commands::Search { .. } | Commands::SelfUpgrade(_)
+        Commands::Config { .. } | Commands::Search { .. } | Commands::Upgrade(_)
     );
 
     // Auto-migrate from legacy format if needed
@@ -50,11 +50,11 @@ fn main() {
         Commands::Uninstall(args) => commands::uninstall::run(&config, args),
         Commands::List => commands::list::run(&config),
         Commands::Search { query } => commands::search::run(&query),
-        Commands::Upgrade(args) => commands::upgrade::run(&config, args),
+        Commands::Update(args) => commands::update::run(&config, args),
         Commands::Sync(_) => commands::sync::run(&config),
         Commands::Config { shell } => commands::config::run(&shell),
         Commands::Profile(args) => commands::profile::run(&config, args),
-        Commands::SelfUpgrade(args) => commands::self_upgrade::run(args.force),
+        Commands::Upgrade(args) => commands::upgrade::run(args.force),
         Commands::File(args) => commands::file::run(&config, args),
     };
 

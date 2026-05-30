@@ -356,14 +356,14 @@ fn test_install_already_installed() {
 }
 
 // =============================================================================
-// Upgrade command tests
+// Update command tests
 // =============================================================================
 
 #[test]
-fn test_upgrade_no_flake() {
-    // upgrade now auto-regenerates flake.nix from packages.json
+fn test_update_no_flake() {
+    // update --all now auto-regenerates flake.nix from packages.json
     let env = TestEnv::new();
-    let output = env.cmd().arg("upgrade").output().unwrap();
+    let output = env.cmd().args(["update", "--all"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -384,8 +384,25 @@ fn test_upgrade_no_flake() {
     // Command should succeed (nix flake update works on empty flake)
     assert!(
         output.status.success(),
-        "Upgrade should succeed with empty flake: stdout={}, stderr={}",
+        "Update should succeed with empty flake: stdout={}, stderr={}",
         stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_update_requires_target_or_all() {
+    // Bare `nixy update` without packages or --all should error
+    let env = TestEnv::new();
+    let output = env.cmd().arg("update").output().unwrap();
+    assert!(
+        !output.status.success(),
+        "Bare update should fail without --all or package"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--all"),
+        "Should hint about --all: {}",
         stderr
     );
 }
@@ -479,6 +496,14 @@ fn test_help_shows_upgrade_command() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("upgrade"));
+}
+
+#[test]
+fn test_help_shows_update_command() {
+    let output = nixy_cmd().arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("update"));
 }
 
 #[test]
@@ -626,24 +651,24 @@ fn test_empty_command_shows_help() {
 }
 
 // =============================================================================
-// Upgrade command tests (additional)
+// Update command tests (additional)
 // =============================================================================
 
 #[test]
-fn test_upgrade_help() {
-    let output = nixy_cmd().args(["upgrade", "--help"]).output().unwrap();
+fn test_update_help() {
+    let output = nixy_cmd().args(["update", "--help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Check for upgrade-specific content, not generic "Usage"
+    // Check for update-specific content, not generic "Usage"
     assert!(
-        stdout.contains("nixpkgs") || stdout.contains("input") || stdout.contains("flake"),
-        "Upgrade help should mention nixpkgs, input, or flake: {}",
+        stdout.contains("package") || stdout.contains("input") || stdout.contains("all"),
+        "Update help should mention package, input, or all: {}",
         stdout
     );
 }
 
 #[test]
-fn test_upgrade_requires_lock_file_for_specific_input() {
+fn test_update_requires_lock_file_for_specific_input() {
     let env = TestEnv::new();
 
     // Create profile directory with flake.nix but no flake.lock
@@ -661,7 +686,7 @@ fn test_upgrade_requires_lock_file_for_specific_input() {
     // Set active profile
     std::fs::write(env.config_dir.join("active"), "default").unwrap();
 
-    let output = env.cmd().args(["upgrade", "nixpkgs"]).output().unwrap();
+    let output = env.cmd().args(["update", "nixpkgs"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -675,7 +700,7 @@ fn test_upgrade_requires_lock_file_for_specific_input() {
 }
 
 #[test]
-fn test_upgrade_handles_corrupted_lock_file() {
+fn test_update_handles_corrupted_lock_file() {
     let env = TestEnv::new();
 
     // Create profile directory with flake.nix and corrupted flake.lock
@@ -694,7 +719,7 @@ fn test_upgrade_handles_corrupted_lock_file() {
     // Set active profile
     std::fs::write(env.config_dir.join("active"), "default").unwrap();
 
-    let output = env.cmd().args(["upgrade", "nixpkgs"]).output().unwrap();
+    let output = env.cmd().args(["update", "nixpkgs"]).output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_lower = stderr.to_lowercase();
@@ -907,23 +932,20 @@ fn test_install_invalid_platform() {
 }
 
 // =============================================================================
-// Self-upgrade command tests
+// Upgrade (self) command tests
 // =============================================================================
 
 #[test]
-fn test_self_upgrade_help_and_flags() {
-    // Single comprehensive test for self-upgrade help output
-    let output = nixy_cmd()
-        .args(["self-upgrade", "--help"])
-        .output()
-        .unwrap();
+fn test_upgrade_help_and_flags() {
+    // Single comprehensive test for upgrade help output
+    let output = nixy_cmd().args(["upgrade", "--help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Verify specific self-upgrade content
+    // Verify specific upgrade content
     assert!(
-        stdout.contains("self-upgrade") || stdout.contains("Self"),
-        "Help should mention self-upgrade: {}",
+        stdout.contains("nixy") || stdout.contains("latest"),
+        "Help should mention upgrading nixy: {}",
         stdout
     );
 
