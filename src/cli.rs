@@ -32,8 +32,8 @@ pub enum Commands {
         query: String,
     },
 
-    /// Upgrade all inputs or specific ones
-    Upgrade(UpgradeArgs),
+    /// Update packages and flake inputs
+    Update(UpdateArgs),
 
     /// Build environment from flake.nix and create symlink
     Sync(SyncArgs),
@@ -48,7 +48,7 @@ pub enum Commands {
     Profile(ProfileArgs),
 
     /// Upgrade nixy to the latest version
-    SelfUpgrade(SelfUpgradeArgs),
+    Upgrade(UpgradeArgs),
 
     /// Show path to package source file in Nix store
     File(FileArgs),
@@ -66,9 +66,13 @@ pub struct InstallArgs {
 }
 
 #[derive(Args)]
-pub struct UpgradeArgs {
-    /// Specific inputs to upgrade (if empty, upgrades all)
+pub struct UpdateArgs {
+    /// Specific packages or inputs to update
     pub inputs: Vec<String>,
+
+    /// Update all packages and inputs
+    #[arg(long, conflicts_with = "inputs")]
+    pub all: bool,
 }
 
 #[derive(Args)]
@@ -95,7 +99,7 @@ pub struct ProfileArgs {
 }
 
 #[derive(Args)]
-pub struct SelfUpgradeArgs {
+pub struct UpgradeArgs {
     /// Force reinstall even if already at latest version
     #[arg(long, short)]
     pub force: bool,

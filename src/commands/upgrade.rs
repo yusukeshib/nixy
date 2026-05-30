@@ -1,426 +1,181 @@
-use std::fs;
-
-use crate::cli::UpgradeArgs;
-use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
-use crate::nix::Nix;
-use crate::nixhub::NixhubClient;
-use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
-use crate::profile::get_flake_dir;
-use crate::rollback::{self, RollbackContext};
-use crate::state::{get_state_path, PackageState, ResolvedNixpkgPackage};
 
-use super::{info, success, warn};
+use super::{info, success};
 
-pub fn run(config: &Config, args: UpgradeArgs) -> Result<()> {
-    let inputs = args.inputs;
+use self_update::backends::github::ReleaseList;
+use self_update::self_replace;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 
-    // Use NixyConfig if available (new format)
-    if nixy_json_exists(config) {
-        return upgrade_with_nixy_config(config, inputs);
+/// RAII guard to ensure temporary update file is cleaned up.
+struct TempFileGuard {
+    path: PathBuf,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        TempFileGuard { path }
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+pub fn run(force: bool) -> Result<()> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    info(&format!("Current version: {}", current_version));
+
+    // Fetch releases from GitHub API
+    info("Checking for updates...");
+    let releases = ReleaseList::configure()
+        .repo_owner("yusukeshib")
+        .repo_name("nixy")
+        .build()
+        .map_err(|e| Error::SelfUpdate(e.to_string()))?
+        .fetch()
+        .map_err(|e| Error::SelfUpdate(e.to_string()))?;
+
+    // Get latest release and compare versions
+    let latest = releases
+        .first()
+        .ok_or_else(|| Error::SelfUpdate("No releases found".to_string()))?;
+    let latest_version = latest.version.trim_start_matches('v');
+
+    info(&format!("Latest version: {}", latest_version));
+
+    if !force && current_version == latest_version {
+        success("Already at latest version");
+        return Ok(());
     }
 
-    // Legacy format
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
-    let state_path = get_state_path(&flake_dir);
-    let lock_file = flake_dir.join("flake.lock");
+    // Determine platform-specific asset name
+    let asset_name = get_asset_name()?;
+    info(&format!("Looking for asset: {}", asset_name));
 
-    // Load state
-    let mut state = PackageState::load(&state_path)?;
-
-    // Auto-regenerate flake.nix if missing
-    if !flake_path.exists() {
-        info("Regenerating flake.nix from packages.json...");
-        regenerate_flake(&flake_dir, &state)?;
-    }
-
-    if !inputs.is_empty() {
-        // Check if inputs are package names or flake input names
-        let resolved_names: Vec<&str> = state
-            .resolved_packages
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect();
-
-        let (packages_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = inputs
-            .iter()
-            .partition(|input| resolved_names.contains(&input.as_str()));
-
-        // Upgrade resolved packages
-        if !packages_to_upgrade.is_empty() {
-            upgrade_resolved_packages(&mut state, &packages_to_upgrade)?;
-            state.save(&state_path)?;
-            regenerate_flake(&flake_dir, &state)?;
-        }
-
-        // Update flake inputs (for legacy packages or explicit input names)
-        if !flake_inputs_to_update.is_empty() {
-            if !lock_file.exists() {
-                return Err(Error::NoFlakeLock);
-            }
-
-            let available = Nix::get_flake_inputs(&lock_file)?;
-            let mut invalid = Vec::new();
-            let mut legacy_packages = Vec::new();
-
-            for input in &flake_inputs_to_update {
-                if !available.contains(*input) {
-                    // Check if this is a legacy or custom package name
-                    if state.packages.contains(*input)
-                        || state.custom_packages.iter().any(|p| &p.name == *input)
-                    {
-                        legacy_packages.push((*input).clone());
-                    } else {
-                        invalid.push((*input).clone());
-                    }
-                }
-            }
-
-            // Provide clearer error for legacy packages
-            if !legacy_packages.is_empty() {
-                warn(
-                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
-                );
-                warn(&format!(
-                    "Legacy packages ({}) are upgraded when you run 'nixy upgrade' without arguments.",
-                    legacy_packages.join(", ")
-                ));
-                return Ok(());
-            }
-
-            if !invalid.is_empty() {
-                return Err(Error::InvalidFlakeInputs(
-                    invalid.join(", "),
-                    available.join(" "),
-                ));
-            }
-
-            let inputs_to_update: Vec<String> =
-                flake_inputs_to_update.into_iter().cloned().collect();
-            info(&format!(
-                "Updating inputs: {}...",
-                inputs_to_update.join(", ")
-            ));
-            Nix::flake_update(&flake_dir, &inputs_to_update)?;
-        }
-    } else {
-        // No arguments: upgrade all resolved packages
-        if !state.resolved_packages.is_empty() {
-            let all_names: Vec<String> = state
-                .resolved_packages
+    // Verify the asset exists in the release
+    let asset_exists = latest.assets.iter().any(|a| a.name == asset_name);
+    if !asset_exists {
+        return Err(Error::SelfUpdate(format!(
+            "Asset '{}' not found for this platform. Available assets: {}",
+            asset_name,
+            latest
+                .assets
                 .iter()
-                .map(|p| p.name.clone())
-                .collect();
-            let all_refs: Vec<&String> = all_names.iter().collect();
-            upgrade_resolved_packages(&mut state, &all_refs)?;
-            state.save(&state_path)?;
-            regenerate_flake(&flake_dir, &state)?;
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+
+    // Construct browser_download_url directly
+    // The self_update library's download_url points to the API endpoint which requires
+    // special headers. browser_download_url is a direct download link that works without headers.
+    let download_url = format!(
+        "https://github.com/yusukeshib/nixy/releases/download/v{}/{}",
+        latest_version, asset_name
+    );
+
+    // Download binary to temp file
+    info("Downloading new version...");
+    let tmp_path = download_binary(&download_url)?;
+
+    // Ensure temp file is cleaned up even if installation fails
+    let _tmp_guard = TempFileGuard::new(tmp_path.clone());
+
+    // Replace current executable
+    info("Installing update...");
+    self_replace::self_replace(&tmp_path).map_err(|e| {
+        let err_str = e.to_string();
+        if err_str.contains("Permission denied") || err_str.contains("permission denied") {
+            Error::SelfUpdate(
+                "Permission denied. If nixy is installed in a system directory, try running with elevated privileges (e.g., sudo nixy upgrade)".to_string()
+            )
+        } else {
+            Error::SelfUpdate(err_str)
         }
+    })?;
 
-        // Also update all flake inputs (for legacy packages)
-        info("Updating all flake inputs...");
-        Nix::flake_update_all(&flake_dir)?;
-    }
-
-    info("Rebuilding environment...");
-
-    // Ensure parent directory exists
-    if let Some(parent) = config.env_link.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    Nix::build(&flake_dir, "default", &config.env_link)?;
-
-    if !inputs.is_empty() {
-        success(&format!("Upgraded: {}", inputs.join(", ")));
-    } else {
-        success("All packages upgraded");
-    }
-
+    success(&format!("Upgraded to {}", latest_version));
     Ok(())
 }
 
-/// Upgrade packages using the new nixy.json format
-fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> {
-    let mut nixy_config = NixyConfig::load(config)?;
-    let active_profile = nixy_config.active_profile.clone();
-    let flake_dir = get_flake_dir(config)?;
-    let flake_path = flake_dir.join("flake.nix");
-    let lock_file = flake_dir.join("flake.lock");
-
-    // Save original config for rollback BEFORE any mutations
-    let original_config = nixy_config.clone();
-
-    // Auto-regenerate flake.nix if missing
-    if !flake_path.exists() {
-        if let Some(profile) = nixy_config.get_active_profile() {
-            info("Regenerating flake.nix from nixy.json...");
-            let global_packages_dir = if config.global_packages_dir.exists() {
-                Some(config.global_packages_dir.as_path())
-            } else {
-                None
-            };
-            regenerate_flake_from_profile(&flake_dir, profile, global_packages_dir)?;
+fn get_asset_name() -> Result<String> {
+    let arch = std::env::consts::ARCH; // e.g., "x86_64", "aarch64"
+    let os = std::env::consts::OS; // e.g., "linux" or "macos" (mapped to "darwin" below)
+    let os_name = match os {
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => {
+            return Err(Error::SelfUpdate(format!(
+                "Upgrade is only supported on macOS and Linux (detected platform: '{}')",
+                other
+            )));
         }
-    }
-
-    let global_packages_dir = if config.global_packages_dir.exists() {
-        Some(config.global_packages_dir.as_path())
-    } else {
-        None
     };
-
-    // Track whether we modified the config (need rollback support)
-    let mut config_modified = false;
-
-    if !inputs.is_empty() {
-        // Get resolved package names (scope the borrow)
-        let resolved_names: Vec<String> = {
-            let profile = nixy_config
-                .get_active_profile()
-                .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-            profile
-                .resolved_packages
-                .iter()
-                .map(|p| p.name.clone())
-                .collect()
-        };
-
-        let (packages_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = inputs
-            .iter()
-            .partition(|input| resolved_names.iter().any(|n| n == *input));
-
-        // Upgrade resolved packages
-        if !packages_to_upgrade.is_empty() {
-            {
-                let profile = nixy_config
-                    .get_active_profile_mut()
-                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
-            }
-            nixy_config.save(config)?;
-            config_modified = true;
-            let profile_for_flake = nixy_config.get_active_profile().unwrap();
-            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
-        }
-
-        // Update flake inputs
-        if !flake_inputs_to_update.is_empty() {
-            if !lock_file.exists() {
-                return Err(Error::NoFlakeLock);
-            }
-
-            let available = Nix::get_flake_inputs(&lock_file)?;
-            let mut invalid = Vec::new();
-            let mut legacy_packages = Vec::new();
-
-            // Scope this borrow for checking packages
-            {
-                let profile = nixy_config
-                    .get_active_profile()
-                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                for input in &flake_inputs_to_update {
-                    if !available.contains(*input) {
-                        if profile.packages.contains(*input)
-                            || profile.custom_packages.iter().any(|p| &p.name == *input)
-                        {
-                            legacy_packages.push((*input).clone());
-                        } else {
-                            invalid.push((*input).clone());
-                        }
-                    }
-                }
-            }
-
-            if !legacy_packages.is_empty() {
-                warn(
-                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
-                );
-                warn(&format!(
-                    "Legacy packages ({}) are upgraded when you run 'nixy upgrade' without arguments.",
-                    legacy_packages.join(", ")
-                ));
-                return Ok(());
-            }
-
-            if !invalid.is_empty() {
-                return Err(Error::InvalidFlakeInputs(
-                    invalid.join(", "),
-                    available.join(" "),
-                ));
-            }
-
-            let inputs_to_update: Vec<String> =
-                flake_inputs_to_update.into_iter().cloned().collect();
-            info(&format!(
-                "Updating inputs: {}...",
-                inputs_to_update.join(", ")
-            ));
-            Nix::flake_update(&flake_dir, &inputs_to_update)?;
-        }
-    } else {
-        // No arguments: upgrade all resolved packages
-        // Get package names first (scope the borrow)
-        let all_names: Vec<String> = {
-            let profile = nixy_config
-                .get_active_profile()
-                .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-            profile
-                .resolved_packages
-                .iter()
-                .map(|p| p.name.clone())
-                .collect()
-        };
-
-        if !all_names.is_empty() {
-            let all_refs: Vec<&String> = all_names.iter().collect();
-            {
-                let profile = nixy_config
-                    .get_active_profile_mut()
-                    .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                upgrade_resolved_packages_in_profile(profile, &all_refs)?;
-            }
-            nixy_config.save(config)?;
-            config_modified = true;
-            let profile_for_flake = nixy_config.get_active_profile().unwrap();
-            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
-        }
-
-        info("Updating all flake inputs...");
-        Nix::flake_update_all(&flake_dir)?;
-    }
-
-    // Set up rollback context for Ctrl+C handling if we modified the config
-    if config_modified {
-        rollback::set_context(RollbackContext::nixy_config(
-            flake_dir.clone(),
-            config.nixy_json.clone(),
-            original_config.clone(),
-            global_packages_dir,
-        ));
-    }
-
-    info("Rebuilding environment...");
-
-    if let Some(parent) = config.env_link.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    if let Err(e) = Nix::build(&flake_dir, "default", &config.env_link) {
-        // Clear rollback context since we're handling the error here
-        rollback::clear_context();
-        // Build failed, revert config if we modified it
-        if config_modified {
-            original_config.save(config)?;
-            let original_profile = original_config.get_active_profile().unwrap();
-            let _ =
-                regenerate_flake_from_profile(&flake_dir, original_profile, global_packages_dir);
-            warn("Build failed. Reverted nixy.json and flake.nix.");
-        }
-        return Err(e);
-    }
-
-    // Clear rollback context on success
-    rollback::clear_context();
-
-    if !inputs.is_empty() {
-        success(&format!("Upgraded: {}", inputs.join(", ")));
-    } else {
-        success("All packages upgraded");
-    }
-
-    Ok(())
+    Ok(format!("nixy-{}-{}", arch, os_name))
 }
 
-/// Upgrade resolved packages by re-resolving them via Nixhub
-fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]) -> Result<()> {
-    let client = NixhubClient::new();
+fn download_binary(url: &str) -> Result<PathBuf> {
+    let tmp_dir = std::env::temp_dir();
+    // Use unique temp file name to avoid conflicts with concurrent runs
+    let pid = std::process::id();
+    let tmp_path = tmp_dir.join(format!("nixy-update-{}", pid));
 
-    for name in package_names {
-        if let Some(existing) = state.resolved_packages.iter().find(|p| &p.name == *name) {
-            // Determine version to resolve
-            let version = existing.version_spec.as_deref().unwrap_or("latest");
-            info(&format!("Resolving {}@{}...", name, version));
+    // Create temp file
+    let mut tmp_file = File::create(&tmp_path)?;
 
-            match client.resolve_for_current_system(name, version) {
-                Ok(resolved) => {
-                    if resolved.version != existing.resolved_version
-                        || resolved.commit_hash != existing.commit_hash
-                    {
-                        info(&format!(
-                            "  {} -> {} (commit {})",
-                            existing.resolved_version,
-                            resolved.version,
-                            &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
-                        ));
+    // Use self_update's download functionality
+    self_update::Download::from_url(url)
+        .download_to(&mut tmp_file)
+        .map_err(|e| Error::SelfUpdate(e.to_string()))?;
 
-                        // Update the package, preserving platform restrictions
-                        state.add_resolved_package(ResolvedNixpkgPackage {
-                            name: resolved.name,
-                            version_spec: existing.version_spec.clone(),
-                            resolved_version: resolved.version,
-                            attribute_path: resolved.attribute_path,
-                            commit_hash: resolved.commit_hash,
-                            platforms: existing.platforms.clone(),
-                        });
-                    } else {
-                        info(&format!("  {} is already at the latest version", name));
-                    }
-                }
-                Err(e) => {
-                    warn(&format!("  Failed to resolve {}: {}", name, e));
-                }
-            }
-        }
+    tmp_file.flush()?;
+    drop(tmp_file); // Explicitly close file before modifying permissions
+
+    // Make the file executable on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&tmp_path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&tmp_path, perms)?;
     }
 
-    Ok(())
+    Ok(tmp_path)
 }
 
-/// Upgrade resolved packages in a ProfileConfig
-fn upgrade_resolved_packages_in_profile(
-    profile: &mut ProfileConfig,
-    package_names: &[&String],
-) -> Result<()> {
-    let client = NixhubClient::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for name in package_names {
-        if let Some(existing) = profile.resolved_packages.iter().find(|p| &p.name == *name) {
-            let version = existing.version_spec.as_deref().unwrap_or("latest");
-            info(&format!("Resolving {}@{}...", name, version));
-
-            match client.resolve_for_current_system(name, version) {
-                Ok(resolved) => {
-                    if resolved.version != existing.resolved_version
-                        || resolved.commit_hash != existing.commit_hash
-                    {
-                        info(&format!(
-                            "  {} -> {} (commit {})",
-                            existing.resolved_version,
-                            resolved.version,
-                            &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
-                        ));
-
-                        profile.add_resolved_package(ResolvedNixpkgPackage {
-                            name: resolved.name,
-                            version_spec: existing.version_spec.clone(),
-                            resolved_version: resolved.version,
-                            attribute_path: resolved.attribute_path,
-                            commit_hash: resolved.commit_hash,
-                            platforms: existing.platforms.clone(),
-                        });
-                    } else {
-                        info(&format!("  {} is already at the latest version", name));
-                    }
-                }
-                Err(e) => {
-                    warn(&format!("  Failed to resolve {}: {}", name, e));
-                }
-            }
-        }
+    #[test]
+    fn test_get_asset_name_format() {
+        let result = get_asset_name();
+        assert!(result.is_ok());
+        let name = result.unwrap();
+        assert!(name.starts_with("nixy-"));
+        // Should contain arch and os
+        assert!(name.contains("-"));
     }
 
-    Ok(())
+    #[test]
+    fn test_temp_file_guard_cleanup() {
+        let tmp_dir = std::env::temp_dir();
+        let tmp_path = tmp_dir.join("nixy-test-guard");
+
+        // Create a test file
+        std::fs::write(&tmp_path, "test").unwrap();
+        assert!(tmp_path.exists());
+
+        // Guard should clean up on drop
+        {
+            let _guard = TempFileGuard::new(tmp_path.clone());
+        }
+
+        assert!(!tmp_path.exists());
+    }
 }

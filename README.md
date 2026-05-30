@@ -64,8 +64,9 @@ nixy install python@3.11.5  # Install exact version
 nixy list                   # See installed packages with versions
 nixy search python          # Find packages + available versions
 nixy uninstall nodejs       # Remove a package
-nixy upgrade                # Upgrade all within version constraints
-nixy upgrade nodejs         # Upgrade specific package
+nixy update nodejs          # Update a specific package
+nixy update --all           # Update all within version constraints
+nixy upgrade                # Upgrade nixy itself
 ```
 
 ## Commands
@@ -78,14 +79,15 @@ nixy upgrade nodejs         # Upgrade specific package
 | `nixy uninstall <pkg>` | Uninstall a package (alias: `remove`) |
 | `nixy list` | List installed packages with versions (alias: `ls`) |
 | `nixy search <query>` | Search for packages with version info |
-| `nixy upgrade [pkg...]` | Upgrade packages within version constraints |
+| `nixy update <pkg...>` | Update specific packages within version constraints |
+| `nixy update --all` | Update all packages and flake inputs |
 | `nixy sync` | Rebuild from flake.nix |
 | `nixy profile` | List profiles + interactive TUI selection |
 | `nixy profile <name>` | Switch to profile |
 | `nixy profile <name> -c` | Create and switch to profile |
 | `nixy profile <name> -d` | Delete profile (with confirmation) |
 | `nixy file <pkg>` | Show path to package source file in Nix store |
-| `nixy self-upgrade` | Upgrade nixy itself |
+| `nixy upgrade` | Upgrade nixy itself |
 
 ### Version Specification
 
@@ -98,7 +100,7 @@ nixy install nodejs@20.11     # Latest 20.11.x
 nixy install nodejs@20.11.0   # Exact version
 ```
 
-When you run `nixy upgrade nodejs`, it respects your version constraint:
+When you run `nixy update nodejs`, it respects your version constraint:
 - `nodejs` (no version) → upgrades to absolute latest
 - `nodejs@20` → upgrades to latest 20.x.x
 

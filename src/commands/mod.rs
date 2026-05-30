@@ -4,9 +4,9 @@ pub mod install;
 pub mod list;
 pub mod profile;
 pub mod search;
-pub mod self_upgrade;
 pub mod sync;
 pub mod uninstall;
+pub mod update;
 pub mod upgrade;
 use colored::Colorize;
 

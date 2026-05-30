@@ -60,8 +60,9 @@ nixy install python@3.11.5  # 厳密なバージョン
 nixy list                   # バージョン付きでパッケージを表示
 nixy search python          # パッケージ + バージョン一覧を検索
 nixy uninstall nodejs       # パッケージを削除
-nixy upgrade                # バージョン制約内でアップグレード
-nixy upgrade nodejs         # 特定のパッケージをアップグレード
+nixy update nodejs          # 特定のパッケージを更新
+nixy update --all           # バージョン制約内ですべて更新
+nixy upgrade                # nixy 自体をアップグレード
 ```
 
 ## コマンド
@@ -74,14 +75,15 @@ nixy upgrade nodejs         # 特定のパッケージをアップグレード
 | `nixy uninstall <pkg>` | パッケージをアンインストール（エイリアス: `remove`） |
 | `nixy list` | バージョン付きでパッケージを表示（エイリアス: `ls`） |
 | `nixy search <query>` | パッケージ + バージョン情報を検索 |
-| `nixy upgrade [pkg...]` | バージョン制約内でアップグレード |
+| `nixy update <pkg...>` | 特定のパッケージをバージョン制約内で更新 |
+| `nixy update --all` | すべてのパッケージと flake 入力を更新 |
 | `nixy sync` | flake.nix から再ビルド |
 | `nixy profile` | プロファイル一覧 + 対話的 TUI 選択 |
 | `nixy profile <name>` | プロファイルを切り替え |
 | `nixy profile <name> -c` | プロファイルを作成して切り替え |
 | `nixy profile <name> -d` | プロファイルを削除（確認あり） |
 | `nixy file <pkg>` | パッケージのソースファイルパスを表示 |
-| `nixy self-upgrade` | nixy 自体をアップグレード |
+| `nixy upgrade` | nixy 自体をアップグレード |
 
 ### バージョン指定
 
@@ -94,7 +96,7 @@ nixy install nodejs@20.11     # 最新の 20.11.x
 nixy install nodejs@20.11.0   # 厳密なバージョン
 ```
 
-`nixy upgrade nodejs` を実行すると、バージョン制約が尊重されます：
+`nixy update nodejs` を実行すると、バージョン制約が尊重されます：
 - `nodejs`（バージョンなし）→ 最新に更新
 - `nodejs@20` → 最新の 20.x.x に更新
 
