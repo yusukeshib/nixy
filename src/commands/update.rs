@@ -9,7 +9,7 @@ use crate::nixhub::NixhubClient;
 use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
 use crate::profile::get_flake_dir;
 use crate::rollback::{self, RollbackContext};
-use crate::state::{get_state_path, PackageState, ResolvedNixpkgPackage};
+use crate::state::{get_state_path, CustomPackage, PackageState, ResolvedNixpkgPackage};
 
 use super::{info, success, warn};
 
@@ -70,48 +70,31 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
             }
 
             let available = Nix::get_flake_inputs(&lock_file)?;
-            let mut invalid = Vec::new();
-            let mut legacy_packages = Vec::new();
+            let classified = classify_update_targets(
+                &flake_inputs_to_update,
+                &available,
+                &state.packages,
+                &state.custom_packages,
+            );
 
-            for input in &flake_inputs_to_update {
-                if !available.contains(*input) {
-                    // Check if this is a legacy or custom package name
-                    if state.packages.contains(*input)
-                        || state.custom_packages.iter().any(|p| &p.name == *input)
-                    {
-                        legacy_packages.push((*input).clone());
-                    } else {
-                        invalid.push((*input).clone());
-                    }
-                }
-            }
-
-            // Provide clearer error for legacy packages
-            if !legacy_packages.is_empty() {
-                warn(
-                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
-                );
-                warn(&format!(
-                    "Legacy packages ({}) are upgraded when you run 'nixy update --all'.",
-                    legacy_packages.join(", ")
-                ));
+            // Genuine legacy packages cannot be upgraded individually
+            if !classified.legacy.is_empty() {
+                warn_legacy_packages(&classified.legacy);
                 return Ok(());
             }
 
-            if !invalid.is_empty() {
+            if !classified.invalid.is_empty() {
                 return Err(Error::InvalidFlakeInputs(
-                    invalid.join(", "),
+                    classified.invalid.join(", "),
                     available.join(" "),
                 ));
             }
 
-            let inputs_to_update: Vec<String> =
-                flake_inputs_to_update.into_iter().cloned().collect();
             info(&format!(
                 "Updating inputs: {}...",
-                inputs_to_update.join(", ")
+                classified.inputs_to_update.join(", ")
             ));
-            Nix::flake_update(&flake_dir, &inputs_to_update)?;
+            Nix::flake_update(&flake_dir, &classified.inputs_to_update)?;
         }
     } else {
         // --all: upgrade all resolved packages
@@ -221,52 +204,35 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
             }
 
             let available = Nix::get_flake_inputs(&lock_file)?;
-            let mut invalid = Vec::new();
-            let mut legacy_packages = Vec::new();
-
-            // Scope this borrow for checking packages
-            {
+            let classified = {
                 let profile = nixy_config
                     .get_active_profile()
                     .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                for input in &flake_inputs_to_update {
-                    if !available.contains(*input) {
-                        if profile.packages.contains(*input)
-                            || profile.custom_packages.iter().any(|p| &p.name == *input)
-                        {
-                            legacy_packages.push((*input).clone());
-                        } else {
-                            invalid.push((*input).clone());
-                        }
-                    }
-                }
-            }
+                classify_update_targets(
+                    &flake_inputs_to_update,
+                    &available,
+                    &profile.packages,
+                    &profile.custom_packages,
+                )
+            };
 
-            if !legacy_packages.is_empty() {
-                warn(
-                    "Per-package upgrade is only supported for versioned packages (installed with @version).",
-                );
-                warn(&format!(
-                    "Legacy packages ({}) are upgraded when you run 'nixy update --all'.",
-                    legacy_packages.join(", ")
-                ));
+            if !classified.legacy.is_empty() {
+                warn_legacy_packages(&classified.legacy);
                 return Ok(());
             }
 
-            if !invalid.is_empty() {
+            if !classified.invalid.is_empty() {
                 return Err(Error::InvalidFlakeInputs(
-                    invalid.join(", "),
+                    classified.invalid.join(", "),
                     available.join(" "),
                 ));
             }
 
-            let inputs_to_update: Vec<String> =
-                flake_inputs_to_update.into_iter().cloned().collect();
             info(&format!(
                 "Updating inputs: {}...",
-                inputs_to_update.join(", ")
+                classified.inputs_to_update.join(", ")
             ));
-            Nix::flake_update(&flake_dir, &inputs_to_update)?;
+            Nix::flake_update(&flake_dir, &classified.inputs_to_update)?;
         }
     } else {
         // --all: upgrade all resolved packages
@@ -431,4 +397,159 @@ fn upgrade_resolved_packages_in_profile(
     }
 
     Ok(())
+}
+
+/// Result of classifying user-supplied `nixy update` targets.
+struct ClassifiedTargets {
+    /// Real flake input names to pass to `nix flake update`.
+    inputs_to_update: Vec<String>,
+    /// Genuine unversioned legacy (v1) packages that cannot be updated alone.
+    legacy: Vec<String>,
+    /// Targets that match no flake input, custom package, or legacy package.
+    invalid: Vec<String>,
+}
+
+/// Classify update targets (which may be flake input names OR package names)
+/// into the actual flake inputs to update, genuine legacy packages, and
+/// invalid targets.
+///
+/// A custom flake package is referenced by its package `name` (e.g. `pi-nix`)
+/// but its flake input is named differently (e.g. `github-lukasl-dev-pi-nix`).
+/// We map those names to their `input_name` so they can be updated individually.
+fn classify_update_targets(
+    targets: &[&String],
+    available_inputs: &[String],
+    legacy_packages: &[String],
+    custom_packages: &[CustomPackage],
+) -> ClassifiedTargets {
+    let mut inputs_to_update = Vec::new();
+    let mut legacy = Vec::new();
+    let mut invalid = Vec::new();
+
+    for target in targets {
+        if available_inputs.contains(*target) {
+            // Already a real flake input name.
+            inputs_to_update.push((*target).clone());
+        } else if let Some(pkg) = custom_packages.iter().find(|p| &p.name == *target) {
+            // Custom flake package referenced by package name: map it to its
+            // dedicated flake input so it can be updated individually.
+            if available_inputs.contains(&pkg.input_name) {
+                inputs_to_update.push(pkg.input_name.clone());
+            } else {
+                invalid.push((*target).clone());
+            }
+        } else if legacy_packages.contains(*target) {
+            // Genuine unversioned legacy (v1) package: shares the default nixpkgs
+            // input, so it has no dedicated input to update on its own.
+            legacy.push((*target).clone());
+        } else {
+            invalid.push((*target).clone());
+        }
+    }
+
+    ClassifiedTargets {
+        inputs_to_update,
+        legacy,
+        invalid,
+    }
+}
+
+/// Emit the warning shown when genuine legacy packages are targeted individually.
+fn warn_legacy_packages(legacy: &[String]) {
+    warn("Per-package upgrade is not supported for unversioned legacy packages (installed without @version).");
+    warn(&format!(
+        "These packages ({}) share the default nixpkgs input and are upgraded when you run 'nixy update --all'.",
+        legacy.join(", ")
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn custom(name: &str, input_name: &str) -> CustomPackage {
+        CustomPackage {
+            name: name.to_string(),
+            input_name: input_name.to_string(),
+            input_url: format!("github:owner/{}", name),
+            package_output: "packages".to_string(),
+            source_name: None,
+            platforms: None,
+        }
+    }
+
+    #[test]
+    fn custom_package_name_maps_to_its_flake_input() {
+        // Regression: `nixy update pi-nix` must map the package name to its
+        // flake input (github-lukasl-dev-pi-nix) instead of being mislabeled
+        // as a legacy package.
+        let available = vec![
+            "nixpkgs".to_string(),
+            "github-lukasl-dev-pi-nix".to_string(),
+        ];
+        let custom_packages = vec![custom("pi-nix", "github-lukasl-dev-pi-nix")];
+        let pi_nix = "pi-nix".to_string();
+        let targets = vec![&pi_nix];
+
+        let result = classify_update_targets(&targets, &available, &[], &custom_packages);
+
+        assert_eq!(result.inputs_to_update, vec!["github-lukasl-dev-pi-nix"]);
+        assert!(result.legacy.is_empty());
+        assert!(result.invalid.is_empty());
+    }
+
+    #[test]
+    fn direct_flake_input_name_is_passed_through() {
+        let available = vec!["nixpkgs".to_string()];
+        let nixpkgs = "nixpkgs".to_string();
+        let targets = vec![&nixpkgs];
+
+        let result = classify_update_targets(&targets, &available, &[], &[]);
+
+        assert_eq!(result.inputs_to_update, vec!["nixpkgs"]);
+        assert!(result.legacy.is_empty());
+        assert!(result.invalid.is_empty());
+    }
+
+    #[test]
+    fn genuine_legacy_package_is_reported_as_legacy() {
+        let available = vec!["nixpkgs".to_string()];
+        let legacy_packages = vec!["hello".to_string()];
+        let hello = "hello".to_string();
+        let targets = vec![&hello];
+
+        let result = classify_update_targets(&targets, &available, &legacy_packages, &[]);
+
+        assert!(result.inputs_to_update.is_empty());
+        assert_eq!(result.legacy, vec!["hello"]);
+        assert!(result.invalid.is_empty());
+    }
+
+    #[test]
+    fn custom_package_without_locked_input_is_invalid() {
+        // Custom package exists but its input is not yet in flake.lock.
+        let available = vec!["nixpkgs".to_string()];
+        let custom_packages = vec![custom("pi-nix", "github-lukasl-dev-pi-nix")];
+        let pi_nix = "pi-nix".to_string();
+        let targets = vec![&pi_nix];
+
+        let result = classify_update_targets(&targets, &available, &[], &custom_packages);
+
+        assert!(result.inputs_to_update.is_empty());
+        assert!(result.legacy.is_empty());
+        assert_eq!(result.invalid, vec!["pi-nix"]);
+    }
+
+    #[test]
+    fn unknown_target_is_invalid() {
+        let available = vec!["nixpkgs".to_string()];
+        let bogus = "does-not-exist".to_string();
+        let targets = vec![&bogus];
+
+        let result = classify_update_targets(&targets, &available, &[], &[]);
+
+        assert!(result.inputs_to_update.is_empty());
+        assert!(result.legacy.is_empty());
+        assert_eq!(result.invalid, vec!["does-not-exist"]);
+    }
 }
