@@ -2,17 +2,27 @@ use std::fs;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::flake::template::{regenerate_flake, regenerate_flake_from_profile};
+use crate::flake::template::{
+    local_path_input_names, regenerate_flake, regenerate_flake_from_profile,
+};
 use crate::nix::Nix;
 use crate::nixy_config::{nixy_json_exists, NixyConfig};
 use crate::profile::get_flake_dir;
 use crate::state::{get_state_path, PackageState};
 
-use super::{info, success};
+use super::{info, success, warn};
 
 pub fn run(config: &Config) -> Result<()> {
     let flake_dir = get_flake_dir(config)?;
     let flake_path = flake_dir.join("flake.nix");
+
+    // Packages directory used for local packages: the global one for the
+    // nixy.json format, the flake-local one for legacy state.
+    let packages_dir = if nixy_json_exists(config) {
+        config.global_packages_dir.clone()
+    } else {
+        flake_dir.join("packages")
+    };
 
     // When using nixy.json, always regenerate flake.nix to ensure it reflects
     // the current state (nixy.json is the source of truth)
@@ -38,6 +48,22 @@ pub fn run(config: &Config) -> Result<()> {
         "Syncing packages with {}...",
         flake_path.display()
     ));
+
+    // Re-lock local `path:` inputs before building. Their flake.lock entries
+    // pin a content hash (narHash), so any change to a local package
+    // directory makes the existing lock stale and `nix build` fails with a
+    // "NAR hash mismatch" error.
+    if flake_dir.join("flake.lock").exists() {
+        let local_inputs = local_path_input_names(&packages_dir);
+        if !local_inputs.is_empty() {
+            info("Refreshing local package inputs...");
+            if let Err(e) = Nix::flake_update(&flake_dir, &local_inputs) {
+                // Not fatal on its own: the build below will surface the real
+                // error if the lock is actually broken.
+                warn(&format!("Failed to refresh local package inputs: {}", e));
+            }
+        }
+    }
 
     // Build environment and create symlink
     info("Building nixy environment...");

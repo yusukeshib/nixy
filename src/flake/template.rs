@@ -528,6 +528,33 @@ fn collect_local_packages_with_paths(packages_dir: &Path) -> (Vec<LocalPackage>,
     collect_local_packages(packages_dir)
 }
 
+/// Collect the flake input names that are backed by local `path:` URLs.
+///
+/// These inputs are pinned by content hash (`narHash`) in `flake.lock`, so
+/// any edit to the local package directory makes the existing lock entry
+/// stale and `nix build` fails with a "NAR hash mismatch" error. Callers
+/// should re-lock these inputs (via `nix flake update <input>...`) before
+/// building.
+pub fn local_path_input_names(packages_dir: &Path) -> Vec<String> {
+    let (local_packages, local_flakes) = collect_local_packages(packages_dir);
+
+    // Local flake directories (packages/<name>/flake.nix) are always added
+    // as `path:` inputs named after the directory.
+    let mut names: Vec<String> = local_flakes.into_iter().map(|f| f.name).collect();
+
+    // Local .nix packages may declare their own input; only `path:` URLs are
+    // content-hash locked.
+    for pkg in &local_packages {
+        if let (Some(input_name), Some(input_url)) = (&pkg.input_name, &pkg.input_url) {
+            if input_url.starts_with("path:") && !names.contains(input_name) {
+                names.push(input_name.clone());
+            }
+        }
+    }
+
+    names
+}
+
 /// Regenerate flake.nix from state (legacy format)
 pub fn regenerate_flake(flake_dir: &Path, state: &PackageState) -> Result<()> {
     let flake_path = flake_dir.join("flake.nix");
@@ -1210,6 +1237,55 @@ mod tests {
             expected_path,
             builder.inputs
         );
+    }
+
+    #[test]
+    fn test_local_path_input_names() {
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let packages_dir = temp.path().join("packages");
+
+        // Missing packages dir -> no inputs
+        assert!(local_path_input_names(&packages_dir).is_empty());
+
+        // Local flake directory -> always a path: input named after the dir
+        fs::create_dir_all(packages_dir.join("my-flake")).unwrap();
+        fs::write(packages_dir.join("my-flake").join("flake.nix"), "{ }").unwrap();
+
+        // Local .nix package with a non-path input -> excluded
+        fs::write(
+            packages_dir.join("gh-pkg.nix"),
+            r#"
+{
+  pname = "gh-pkg";
+  inputs = {
+    gh-input.url = "github:user/repo";
+  };
+}
+"#,
+        )
+        .unwrap();
+
+        // Local .nix package with a path: input -> included
+        fs::write(
+            packages_dir.join("path-pkg.nix"),
+            r#"
+{
+  pname = "path-pkg";
+  inputs = {
+    path-input.url = "path:/some/where";
+  };
+}
+"#,
+        )
+        .unwrap();
+
+        let names = local_path_input_names(&packages_dir);
+        assert!(names.contains(&"my-flake".to_string()));
+        assert!(names.contains(&"path-input".to_string()));
+        assert!(!names.contains(&"gh-input".to_string()));
+        assert_eq!(names.len(), 2);
     }
 
     #[test]

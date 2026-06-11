@@ -6,7 +6,7 @@ use dialoguer::{Confirm, Select};
 use crate::cli::ProfileArgs;
 use crate::config::{Config, DEFAULT_PROFILE};
 use crate::error::{Error, Result};
-use crate::flake::template::regenerate_flake_from_profile;
+use crate::flake::template::{local_path_input_names, regenerate_flake_from_profile};
 use crate::nix::Nix;
 use crate::nixy_config::{nixy_json_exists, NixyConfig, ProfileConfig};
 use crate::profile::{
@@ -165,6 +165,21 @@ fn switch(config: &Config, name: &str, create: bool) -> Result<()> {
 
         // Use get_flake_dir to resolve symlinks consistently with sync/upgrade
         let flake_dir = get_flake_dir(config)?;
+
+        // Re-lock local `path:` inputs before building. Their flake.lock
+        // entries pin a content hash (narHash), so any change to a local
+        // package directory makes the existing lock stale and `nix build`
+        // fails with a "NAR hash mismatch" error.
+        if flake_dir.join("flake.lock").exists() {
+            let local_inputs = local_path_input_names(&config.global_packages_dir);
+            if !local_inputs.is_empty() {
+                info("Refreshing local package inputs...");
+                if let Err(e) = Nix::flake_update(&flake_dir, &local_inputs) {
+                    warn(&format!("Failed to refresh local package inputs: {}", e));
+                }
+            }
+        }
+
         match Nix::build(&flake_dir, "default", &config.env_link) {
             Ok(_) => success(&format!("Switched to profile '{}'", name)),
             Err(e) => {
