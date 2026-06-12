@@ -117,20 +117,13 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
 
     info(&format!("Uninstalling {}...", package));
 
-    // Note: We do NOT delete global package definitions from packages/ directory.
-    // The packages/ directory is shared across all profiles in the new format,
-    // so uninstalling from one profile must not delete the global package definition.
-    // Global cleanup, if desired, should be handled manually or by a dedicated command.
+    // Check for a local package definition in the shared packages/ directory.
+    // Local packages are auto-discovered into every profile's flake, so they may
+    // not appear in any profile's package list at all.
     let global_pkg_file = config.global_packages_dir.join(format!("{}.nix", package));
     let global_flake_dir = config.global_packages_dir.join(package);
-
-    if global_pkg_file.exists()
-        || (global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists())
-    {
-        warn(
-            "Note: Local package definition in packages/ was not removed (shared across profiles)",
-        );
-    }
+    let local_def_exists = global_pkg_file.exists()
+        || (global_flake_dir.exists() && global_flake_dir.join("flake.nix").exists());
 
     // Remove package from profile
     let profile = nixy_config
@@ -138,7 +131,34 @@ fn uninstall_with_nixy_config(config: &Config, package: &str) -> Result<()> {
         .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
     let removed_from_config = profile.remove_package(package);
 
-    if !removed_from_config {
+    if removed_from_config {
+        // Package was listed in the profile. We do NOT delete the global package
+        // definition from packages/ because it is shared across all profiles.
+        if local_def_exists {
+            warn(
+                "Note: Local package definition in packages/ was not removed (shared across profiles)",
+            );
+        }
+    } else if local_def_exists {
+        // Package exists only as an auto-discovered local definition. The only way
+        // to remove it is to delete the definition itself.
+        warn("Removing local package definition from packages/ (shared across profiles)");
+        if global_pkg_file.exists() {
+            info(&format!(
+                "Removing local package definition: {}",
+                global_pkg_file.display()
+            ));
+            fs::remove_file(&global_pkg_file)?;
+            git_rm(&config.global_packages_dir, &format!("{}.nix", package));
+        } else {
+            info(&format!(
+                "Removing local flake: {}",
+                global_flake_dir.display()
+            ));
+            fs::remove_dir_all(&global_flake_dir)?;
+            git_rm_recursive(&config.global_packages_dir, package);
+        }
+    } else {
         return Err(Error::PackageNotFound(package.to_string()));
     }
 
