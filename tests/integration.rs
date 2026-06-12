@@ -1846,3 +1846,108 @@ fn test_file_help() {
         stdout
     );
 }
+
+// =============================================================================
+// Uninstall local package (auto-discovered, not in profile) tests
+// =============================================================================
+
+#[test]
+fn test_uninstall_local_only_package_removes_definition() {
+    let env = TestEnv::new();
+
+    // New nixy.json format with an empty profile (package not listed)
+    let nixy_json_content = r#"{
+  "version": 3,
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "packages": [],
+      "resolved_packages": [],
+      "custom_packages": []
+    }
+  }
+}"#;
+    std::fs::create_dir_all(&env.config_dir).unwrap();
+    std::fs::write(env.config_dir.join("nixy.json"), nixy_json_content).unwrap();
+
+    // Create an auto-discovered local flake package in packages/
+    let local_flake_dir = env.config_dir.join("packages/my-local-flake");
+    std::fs::create_dir_all(&local_flake_dir).unwrap();
+    let flake_content = r#"{
+  description = "local flake package";
+  outputs = { self }: {
+    packages = { };
+  };
+}"#;
+    std::fs::write(local_flake_dir.join("flake.nix"), flake_content).unwrap();
+
+    let output = env
+        .cmd()
+        .args(["uninstall", "my-local-flake"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Must not fail with "package not found" - the local definition exists
+    assert!(
+        !stderr.contains("not found in nixpkgs"),
+        "Should not report package as not found: stderr={}",
+        stderr
+    );
+
+    // The local package definition must be removed
+    assert!(
+        !local_flake_dir.exists(),
+        "Local flake definition should be removed"
+    );
+}
+
+#[test]
+fn test_uninstall_local_only_nix_file_removes_definition() {
+    let env = TestEnv::new();
+
+    let nixy_json_content = r#"{
+  "version": 3,
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "packages": [],
+      "resolved_packages": [],
+      "custom_packages": []
+    }
+  }
+}"#;
+    std::fs::create_dir_all(&env.config_dir).unwrap();
+    std::fs::write(env.config_dir.join("nixy.json"), nixy_json_content).unwrap();
+
+    // Create an auto-discovered local .nix package in packages/
+    let packages_dir = env.config_dir.join("packages");
+    std::fs::create_dir_all(&packages_dir).unwrap();
+    let local_pkg_content = r#"{ lib, stdenv }:
+stdenv.mkDerivation {
+  pname = "my-local-pkg";
+  version = "1.0.0";
+  src = ./.;
+}"#;
+    let local_pkg_file = packages_dir.join("my-local-pkg.nix");
+    std::fs::write(&local_pkg_file, local_pkg_content).unwrap();
+
+    let output = env
+        .cmd()
+        .args(["uninstall", "my-local-pkg"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("not found in nixpkgs"),
+        "Should not report package as not found: stderr={}",
+        stderr
+    );
+    assert!(
+        !local_pkg_file.exists(),
+        "Local package definition should be removed"
+    );
+}
