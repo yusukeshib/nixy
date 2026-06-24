@@ -460,6 +460,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });

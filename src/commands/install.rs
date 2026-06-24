@@ -346,6 +346,11 @@ fn install_from_flake_url(
     // Save original state for rollback
     let original_state = state.clone();
 
+    // Pin the flake to its current revision so the version is reproducible
+    // across machines via the (repo-managed) state file. Best-effort: sources
+    // without a git revision (e.g. local paths) fall back to an unpinned URL.
+    let rev = resolve_pinned_rev(flake_url);
+
     // Add custom package to state
     let stored_source_name = if effective_source_name != pkg {
         Some(effective_source_name.to_string())
@@ -358,6 +363,7 @@ fn install_from_flake_url(
         input_url: flake_url.to_string(),
         package_output: pkg_output,
         source_name: stored_source_name,
+        rev,
         platforms,
     });
     state.save(&state_path)?;
@@ -429,6 +435,11 @@ fn install_from_flake_url_with_nixy_config(
     // Save original config for rollback BEFORE mutating
     let original_config = nixy_config.clone();
 
+    // Pin the flake to its current revision so the version is reproducible
+    // across machines via the (repo-managed) nixy.json. Best-effort: sources
+    // without a git revision (e.g. local paths) fall back to an unpinned URL.
+    let rev = resolve_pinned_rev(flake_url);
+
     // Add custom package to profile
     let stored_source_name = if effective_source_name != pkg {
         Some(effective_source_name.to_string())
@@ -445,6 +456,7 @@ fn install_from_flake_url_with_nixy_config(
             input_url: flake_url.to_string(),
             package_output: pkg_output,
             source_name: stored_source_name,
+            rev,
             platforms,
         });
     }
@@ -526,6 +538,24 @@ fn derive_package_name_from_url(url: &str) -> String {
 }
 
 /// Derive an input name from a flake URL
+/// Best-effort resolution of a flake URL to a pinned git revision.
+///
+/// Returns `Some(rev)` when the source has a locked revision (the common case
+/// for `github:` / `git+` flakes), or `None` when it cannot be resolved (e.g.
+/// local `path:` inputs), in which case the package stays unpinned.
+fn resolve_pinned_rev(flake_url: &str) -> Option<String> {
+    match Nix::resolve_flake_rev(flake_url) {
+        Ok(rev) => Some(rev),
+        Err(e) => {
+            warn(&format!(
+                "Could not pin '{}' to a revision ({}). Installing unpinned.",
+                flake_url, e
+            ));
+            None
+        }
+    }
+}
+
 fn derive_input_name_from_url(url: &str) -> String {
     // Try to extract owner-repo from URL
     let parts: Vec<&str> = url.split('/').collect();
