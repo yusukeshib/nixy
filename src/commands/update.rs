@@ -46,21 +46,38 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
 
     if !inputs.is_empty() {
         // Check if inputs are package names or flake input names
-        let resolved_names: Vec<&str> = state
+        let resolved_names: Vec<String> = state
             .resolved_packages
             .iter()
-            .map(|p| p.name.as_str())
+            .map(|p| p.name.clone())
+            .collect();
+        let custom_names: Vec<String> = state
+            .custom_packages
+            .iter()
+            .map(|p| p.name.clone())
             .collect();
 
-        let (packages_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = inputs
+        let (packages_to_upgrade, rest): (Vec<&String>, Vec<&String>) = inputs
             .iter()
-            .partition(|input| resolved_names.contains(&input.as_str()));
+            .partition(|input| resolved_names.iter().any(|n| n == *input));
+        let (custom_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = rest
+            .into_iter()
+            .partition(|input| custom_names.iter().any(|n| n == *input));
 
-        // Upgrade resolved packages
-        if !packages_to_upgrade.is_empty() {
-            upgrade_resolved_packages(&mut state, &packages_to_upgrade)?;
-            state.save(&state_path)?;
-            regenerate_flake(&flake_dir, &state)?;
+        // Upgrade resolved packages and re-pin custom flake packages
+        if !packages_to_upgrade.is_empty() || !custom_to_upgrade.is_empty() {
+            let mut changed = false;
+            if !packages_to_upgrade.is_empty() {
+                upgrade_resolved_packages(&mut state, &packages_to_upgrade)?;
+                changed = true;
+            }
+            if !custom_to_upgrade.is_empty() {
+                changed |= upgrade_custom_packages(&mut state.custom_packages, &custom_to_upgrade);
+            }
+            if changed {
+                state.save(&state_path)?;
+                regenerate_flake(&flake_dir, &state)?;
+            }
         }
 
         // Update flake inputs (for legacy packages or explicit input names)
@@ -97,17 +114,33 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
             Nix::flake_update(&flake_dir, &classified.inputs_to_update)?;
         }
     } else {
-        // --all: upgrade all resolved packages
-        if !state.resolved_packages.is_empty() {
-            let all_names: Vec<String> = state
-                .resolved_packages
-                .iter()
-                .map(|p| p.name.clone())
-                .collect();
-            let all_refs: Vec<&String> = all_names.iter().collect();
-            upgrade_resolved_packages(&mut state, &all_refs)?;
-            state.save(&state_path)?;
-            regenerate_flake(&flake_dir, &state)?;
+        // --all: upgrade all resolved packages and re-pin all custom packages
+        let all_resolved: Vec<String> = state
+            .resolved_packages
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        let all_custom: Vec<String> = state
+            .custom_packages
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+
+        if !all_resolved.is_empty() || !all_custom.is_empty() {
+            let mut changed = false;
+            if !all_resolved.is_empty() {
+                let refs: Vec<&String> = all_resolved.iter().collect();
+                upgrade_resolved_packages(&mut state, &refs)?;
+                changed = true;
+            }
+            if !all_custom.is_empty() {
+                let refs: Vec<&String> = all_custom.iter().collect();
+                changed |= upgrade_custom_packages(&mut state.custom_packages, &refs);
+            }
+            if changed {
+                state.save(&state_path)?;
+                regenerate_flake(&flake_dir, &state)?;
+            }
         }
 
         // Also update all flake inputs (for legacy packages)
@@ -167,34 +200,56 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
     let mut config_modified = false;
 
     if !inputs.is_empty() {
-        // Get resolved package names (scope the borrow)
-        let resolved_names: Vec<String> = {
+        // Get resolved + custom package names (scope the borrow)
+        let (resolved_names, custom_names): (Vec<String>, Vec<String>) = {
             let profile = nixy_config
                 .get_active_profile()
                 .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-            profile
-                .resolved_packages
-                .iter()
-                .map(|p| p.name.clone())
-                .collect()
+            (
+                profile
+                    .resolved_packages
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect(),
+                profile
+                    .custom_packages
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect(),
+            )
         };
 
-        let (packages_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = inputs
+        // Split targets: resolved nixpkgs packages, custom flake packages, and
+        // everything else (genuine flake input names / legacy packages).
+        let (packages_to_upgrade, rest): (Vec<&String>, Vec<&String>) = inputs
             .iter()
             .partition(|input| resolved_names.iter().any(|n| n == *input));
+        let (custom_to_upgrade, flake_inputs_to_update): (Vec<&String>, Vec<&String>) = rest
+            .into_iter()
+            .partition(|input| custom_names.iter().any(|n| n == *input));
 
-        // Upgrade resolved packages
-        if !packages_to_upgrade.is_empty() {
+        // Upgrade resolved (nixpkgs) packages and re-pin custom flake packages.
+        if !packages_to_upgrade.is_empty() || !custom_to_upgrade.is_empty() {
+            let mut changed = false;
             {
                 let profile = nixy_config
                     .get_active_profile_mut()
                     .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
+                if !packages_to_upgrade.is_empty() {
+                    upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
+                    changed = true;
+                }
+                if !custom_to_upgrade.is_empty() {
+                    changed |=
+                        upgrade_custom_packages(&mut profile.custom_packages, &custom_to_upgrade);
+                }
             }
-            nixy_config.save(config)?;
-            config_modified = true;
-            let profile_for_flake = nixy_config.get_active_profile().unwrap();
-            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+            if changed {
+                nixy_config.save(config)?;
+                config_modified = true;
+                let profile_for_flake = nixy_config.get_active_profile().unwrap();
+                regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+            }
         }
 
         // Update flake inputs
@@ -235,31 +290,48 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
             Nix::flake_update(&flake_dir, &classified.inputs_to_update)?;
         }
     } else {
-        // --all: upgrade all resolved packages
+        // --all: upgrade all resolved packages and re-pin all custom packages.
         // Get package names first (scope the borrow)
-        let all_names: Vec<String> = {
+        let (all_resolved, all_custom): (Vec<String>, Vec<String>) = {
             let profile = nixy_config
                 .get_active_profile()
                 .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-            profile
-                .resolved_packages
-                .iter()
-                .map(|p| p.name.clone())
-                .collect()
+            (
+                profile
+                    .resolved_packages
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect(),
+                profile
+                    .custom_packages
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect(),
+            )
         };
 
-        if !all_names.is_empty() {
-            let all_refs: Vec<&String> = all_names.iter().collect();
+        if !all_resolved.is_empty() || !all_custom.is_empty() {
+            let mut changed = false;
             {
                 let profile = nixy_config
                     .get_active_profile_mut()
                     .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
-                upgrade_resolved_packages_in_profile(profile, &all_refs)?;
+                if !all_resolved.is_empty() {
+                    let refs: Vec<&String> = all_resolved.iter().collect();
+                    upgrade_resolved_packages_in_profile(profile, &refs)?;
+                    changed = true;
+                }
+                if !all_custom.is_empty() {
+                    let refs: Vec<&String> = all_custom.iter().collect();
+                    changed |= upgrade_custom_packages(&mut profile.custom_packages, &refs);
+                }
             }
-            nixy_config.save(config)?;
-            config_modified = true;
-            let profile_for_flake = nixy_config.get_active_profile().unwrap();
-            regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+            if changed {
+                nixy_config.save(config)?;
+                config_modified = true;
+                let profile_for_flake = nixy_config.get_active_profile().unwrap();
+                regenerate_flake_from_profile(&flake_dir, profile_for_flake, global_packages_dir)?;
+            }
         }
 
         info("Updating all flake inputs...");
@@ -399,6 +471,41 @@ fn upgrade_resolved_packages_in_profile(
     Ok(())
 }
 
+/// Truncate a git revision for display.
+fn short_rev(rev: &str) -> &str {
+    &rev[..8.min(rev.len())]
+}
+
+/// Re-resolve the pinned revision of custom flake packages to the latest commit
+/// on their tracked ref, updating them in place. Returns `true` if any
+/// package's `rev` changed (so the caller knows to regenerate/rebuild).
+///
+/// Packages whose source has no git revision, or that fail to resolve, are left
+/// untouched (a warning is printed).
+fn upgrade_custom_packages(custom_packages: &mut [CustomPackage], names: &[&String]) -> bool {
+    let mut changed = false;
+    for name in names {
+        let Some(pkg) = custom_packages.iter_mut().find(|p| &p.name == *name) else {
+            continue;
+        };
+        info(&format!("Resolving latest revision for {}...", name));
+        match Nix::resolve_flake_rev(&pkg.input_url) {
+            Ok(rev) => {
+                if pkg.rev.as_deref() == Some(rev.as_str()) {
+                    info(&format!("  {} is already at the latest revision", name));
+                } else {
+                    let from = pkg.rev.as_deref().map(short_rev).unwrap_or("unpinned");
+                    info(&format!("  {} -> {}", from, short_rev(&rev)));
+                    pkg.rev = Some(rev);
+                    changed = true;
+                }
+            }
+            Err(e) => warn(&format!("  Failed to resolve {}: {}", name, e)),
+        }
+    }
+    changed
+}
+
 /// Result of classifying user-supplied `nixy update` targets.
 struct ClassifiedTargets {
     /// Real flake input names to pass to `nix flake update`.
@@ -473,6 +580,7 @@ mod tests {
             input_name: input_name.to_string(),
             input_url: format!("github:owner/{}", name),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         }

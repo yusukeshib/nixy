@@ -28,7 +28,7 @@ pub fn run(config: &Config, args: FileArgs) -> Result<()> {
         .find(|p| p.name == args.package)
     {
         // Custom package: prefetch the flake and return flake.nix path
-        let store_path = Nix::flake_prefetch(&custom.input_url)?;
+        let store_path = Nix::flake_prefetch(&custom.locked_input_url())?;
         store_path.join("flake.nix")
     } else if let Some(resolved) = state
         .resolved_packages
@@ -70,7 +70,7 @@ fn run_with_nixy_config(config: &Config, args: FileArgs) -> Result<()> {
         .find(|p| p.name == args.package)
     {
         // Custom package: prefetch the flake and return flake.nix path
-        let store_path = Nix::flake_prefetch(&custom.input_url)?;
+        let store_path = Nix::flake_prefetch(&custom.locked_input_url())?;
         store_path.join("flake.nix")
     } else if let Some(resolved) = profile
         .resolved_packages

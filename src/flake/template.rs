@@ -268,7 +268,8 @@ impl FlakeBuilder {
             if self.seen_inputs.insert(pkg.input_name.clone()) {
                 self.inputs.push_str(&format!(
                     "    {}.url = \"{}\";\n",
-                    pkg.input_name, pkg.input_url
+                    pkg.input_name,
+                    pkg.locked_input_url()
                 ));
             }
 
@@ -628,6 +629,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -644,6 +646,27 @@ mod tests {
 
         // Should have neovim in paths
         assert!(flake.contains("neovim"));
+    }
+
+    #[test]
+    fn test_custom_package_with_rev_pins_input_url() {
+        let mut state = PackageState::default();
+        state.add_custom_package(CustomPackage {
+            name: "box".to_string(),
+            input_name: "github-yusukeshib-box".to_string(),
+            input_url: "github:yusukeshib/box".to_string(),
+            package_output: "packages".to_string(),
+            rev: Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string()),
+            source_name: None,
+            platforms: None,
+        });
+
+        let flake = generate_flake(&state, None);
+
+        // The input URL must be pinned to the stored revision.
+        assert!(flake.contains(
+            "github-yusukeshib-box.url = \"github:yusukeshib/box?rev=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\""
+        ));
     }
 
     #[test]
@@ -698,6 +721,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -717,6 +741,7 @@ mod tests {
             input_name: "nixpkgs-unstable".to_string(),
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -725,6 +750,7 @@ mod tests {
             input_name: "nixpkgs-unstable".to_string(),
             input_url: "github:NixOS/nixpkgs/nixos-unstable".to_string(),
             package_output: "legacyPackages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -746,6 +772,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -974,6 +1001,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: Some(vec![
                 "x86_64-linux".to_string(),
@@ -1104,6 +1132,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: Some(vec![
                 "x86_64-linux".to_string(),
@@ -1121,6 +1150,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -1153,6 +1183,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: Some(vec!["x86_64-linux".to_string()]),
         });

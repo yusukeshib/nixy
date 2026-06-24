@@ -264,6 +264,42 @@ impl Nix {
             .ok_or_else(|| Error::NixCommand("Missing storePath in flake prefetch output".into()))
     }
 
+    /// Resolve a flake URL to its locked git revision via `nix flake metadata`.
+    ///
+    /// Used to pin custom flake packages to a concrete commit so the version is
+    /// reproducible across machines through nixy.json. Returns an error for
+    /// flake sources that have no git revision (e.g. local `path:` inputs).
+    pub fn resolve_flake_rev(url: &str) -> Result<String> {
+        let output = Command::new("nix")
+            .args(NIX_FLAGS)
+            .args(["flake", "metadata", "--json", url])
+            .output()
+            .map_err(|e| Error::NixCommand(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::NixCommand(format!(
+                "Failed to read flake metadata for '{}': {}",
+                url,
+                stderr.trim()
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).map_err(|e| Error::NixCommand(e.to_string()))?;
+
+        json["locked"]["rev"]
+            .as_str()
+            .map(String::from)
+            .ok_or_else(|| {
+                Error::NixCommand(format!(
+                    "Flake '{}' has no locked git revision (not a git source?)",
+                    url
+                ))
+            })
+    }
+
     /// Get package source path via meta.position
     /// Returns the file path (without line number) from the position attribute
     pub fn get_package_source_path(commit: &str, attr: &str, system: &str) -> Result<PathBuf> {

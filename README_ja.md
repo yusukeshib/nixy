@@ -241,6 +241,14 @@ nixy install path:./my-flake
 
 `packages/` ディレクトリ内のファイルは自動検出されます。
 
+**マシン間での再現性:** カスタム flake パッケージは、nixpkgs パッケージが
+コミットに固定されるのと同様に、インストール時に特定の git リビジョン（`rev`）へ
+`nixy.json` 内で固定されます。この固定情報は `flake.lock` だけでなくリポジトリ管理
+される `nixy.json` に保存されるため、`nixy sync` を実行すれば別のマシンでも全く同じ
+リビジョンを再現できます。`nixy update <pkg>`（または `nixy update --all`）で固定先を
+最新コミットへ更新できます。git リビジョンを持たないソース（例: `path:` flake）は
+固定されません。
+
 </details>
 
 <details>

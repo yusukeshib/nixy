@@ -246,6 +246,14 @@ nixy install path:./my-flake
 
 Files in `packages/` directory are auto-discovered.
 
+**Reproducible across machines:** custom flake packages are pinned to a specific
+git revision (`rev`) in `nixy.json` at install time, just like nixpkgs packages
+are pinned to a commit. Because the pin lives in the repo-managed `nixy.json`
+(not only in `flake.lock`), `nixy sync` reproduces the exact same revision on
+another machine. Run `nixy update <pkg>` (or `nixy update --all`) to advance the
+pin to the latest commit. Sources without a git revision (e.g. `path:` flakes)
+stay unpinned.
+
 </details>
 
 <details>

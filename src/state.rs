@@ -43,6 +43,12 @@ pub struct CustomPackage {
     pub package_output: String, // e.g., "packages" or "legacyPackages"
     #[serde(default)]
     pub source_name: Option<String>, // The actual package name in the source flake (for aliases)
+    /// Pinned git revision for the flake input. When set, the generated flake
+    /// input URL is locked to this rev so the version is reproducible across
+    /// machines via nixy.json (which is repo-managed), independent of flake.lock.
+    /// `None` keeps the legacy behavior of tracking the URL's default ref.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
     /// Platform restrictions (e.g., ["x86_64-darwin", "aarch64-darwin"])
     /// None means all platforms
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,6 +59,25 @@ impl CustomPackage {
     /// Get the source package name (falls back to name if not set)
     pub fn source_package_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Flake input URL with the pinned `rev` applied (if any).
+    ///
+    /// The rev is appended as a `rev=` query parameter, which is valid for all
+    /// flake URL types (`github:`, `git+https:`, etc.). When `rev` is `None` or
+    /// empty, the original URL is returned unchanged.
+    pub fn locked_input_url(&self) -> String {
+        match self.rev.as_deref() {
+            Some(rev) if !rev.is_empty() => {
+                let sep = if self.input_url.contains('?') {
+                    '&'
+                } else {
+                    '?'
+                };
+                format!("{}{}rev={}", self.input_url, sep, rev)
+            }
+            _ => self.input_url.clone(),
+        }
     }
 }
 
@@ -319,6 +344,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         };
@@ -336,6 +362,7 @@ mod tests {
             input_name: "neovim-old".to_string(),
             input_url: "github:old/overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         };
@@ -346,6 +373,7 @@ mod tests {
             input_name: "neovim-new".to_string(),
             input_url: "github:new/overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         };
@@ -353,6 +381,45 @@ mod tests {
 
         assert_eq!(state.custom_packages.len(), 1);
         assert_eq!(state.custom_packages[0].input_name, "neovim-new");
+    }
+
+    fn custom_pkg(input_url: &str, rev: Option<&str>) -> CustomPackage {
+        CustomPackage {
+            name: "box".to_string(),
+            input_name: "github-yusukeshib-box".to_string(),
+            input_url: input_url.to_string(),
+            package_output: "packages".to_string(),
+            rev: rev.map(String::from),
+            source_name: None,
+            platforms: None,
+        }
+    }
+
+    #[test]
+    fn test_locked_input_url_unpinned() {
+        let pkg = custom_pkg("github:yusukeshib/box", None);
+        assert_eq!(pkg.locked_input_url(), "github:yusukeshib/box");
+    }
+
+    #[test]
+    fn test_locked_input_url_empty_rev_is_unpinned() {
+        let pkg = custom_pkg("github:yusukeshib/box", Some(""));
+        assert_eq!(pkg.locked_input_url(), "github:yusukeshib/box");
+    }
+
+    #[test]
+    fn test_locked_input_url_appends_rev() {
+        let pkg = custom_pkg("github:yusukeshib/box", Some("abc123"));
+        assert_eq!(pkg.locked_input_url(), "github:yusukeshib/box?rev=abc123");
+    }
+
+    #[test]
+    fn test_locked_input_url_appends_rev_with_existing_query() {
+        let pkg = custom_pkg("github:yusukeshib/box?ref=main", Some("abc123"));
+        assert_eq!(
+            pkg.locked_input_url(),
+            "github:yusukeshib/box?ref=main&rev=abc123"
+        );
     }
 
     #[test]
@@ -374,6 +441,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         };
@@ -398,6 +466,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
@@ -418,6 +487,7 @@ mod tests {
             input_name: "neovim-nightly".to_string(),
             input_url: "github:nix-community/neovim-nightly-overlay".to_string(),
             package_output: "packages".to_string(),
+            rev: None,
             source_name: None,
             platforms: None,
         });
