@@ -66,18 +66,52 @@ impl CustomPackage {
     /// The rev is appended as a `rev=` query parameter, which is valid for all
     /// flake URL types (`github:`, `git+https:`, etc.). When `rev` is `None` or
     /// empty, the original URL is returned unchanged.
+    ///
+    /// For the `github:`/`gitlab:`/`sourcehut:` shorthands a ref/rev can also be
+    /// encoded as a third path segment (`github:owner/repo/REF`). Nix rejects a
+    /// URL that carries both a path ref and a `?rev=` query (it tries to read a
+    /// `<ref>/flake.nix` path), so any such path ref is stripped before the
+    /// `rev=` query is appended.
     pub fn locked_input_url(&self) -> String {
         match self.rev.as_deref() {
             Some(rev) if !rev.is_empty() => {
-                let sep = if self.input_url.contains('?') {
-                    '&'
-                } else {
-                    '?'
-                };
-                format!("{}{}rev={}", self.input_url, sep, rev)
+                let base = strip_shorthand_path_ref(&self.input_url);
+                let sep = if base.contains('?') { '&' } else { '?' };
+                format!("{}{}rev={}", base, sep, rev)
             }
             _ => self.input_url.clone(),
         }
+    }
+}
+
+/// Strip a path-encoded ref/rev from a `github:`/`gitlab:`/`sourcehut:`
+/// shorthand flake URL.
+///
+/// These shorthands accept an optional ref/rev as a third path segment
+/// (`github:owner/repo/REF`). That form cannot be combined with a `?rev=`
+/// query, so when we are about to pin a `rev` we reduce the URL back to
+/// `scheme:owner/repo` (preserving any query string). Non-shorthand URLs and
+/// URLs without a path ref are returned unchanged.
+fn strip_shorthand_path_ref(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return url.to_string();
+    };
+    if !matches!(scheme, "github" | "gitlab" | "sourcehut") {
+        return url.to_string();
+    }
+    let (path, query) = match rest.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (rest, None),
+    };
+    let segments: Vec<&str> = path.split('/').collect();
+    let trimmed = if segments.len() >= 3 {
+        segments[..2].join("/")
+    } else {
+        path.to_string()
+    };
+    match query {
+        Some(q) => format!("{scheme}:{trimmed}?{q}"),
+        None => format!("{scheme}:{trimmed}"),
     }
 }
 
@@ -419,6 +453,32 @@ mod tests {
         assert_eq!(
             pkg.locked_input_url(),
             "github:yusukeshib/box?ref=main&rev=abc123"
+        );
+    }
+
+    #[test]
+    fn test_locked_input_url_strips_path_ref() {
+        // `github:owner/repo/REF` + `?rev=` is rejected by Nix, so the path ref
+        // must be dropped before pinning the rev.
+        let pkg = custom_pkg("github:NixOS/nixpkgs/nixpkgs-unstable", Some("deadbeef"));
+        assert_eq!(pkg.locked_input_url(), "github:NixOS/nixpkgs?rev=deadbeef");
+    }
+
+    #[test]
+    fn test_locked_input_url_unpinned_keeps_path_ref() {
+        let pkg = custom_pkg("github:NixOS/nixpkgs/nixpkgs-unstable", None);
+        assert_eq!(
+            pkg.locked_input_url(),
+            "github:NixOS/nixpkgs/nixpkgs-unstable"
+        );
+    }
+
+    #[test]
+    fn test_locked_input_url_non_shorthand_unchanged() {
+        let pkg = custom_pkg("git+https://example.com/repo.git", Some("abc123"));
+        assert_eq!(
+            pkg.locked_input_url(),
+            "git+https://example.com/repo.git?rev=abc123"
         );
     }
 
