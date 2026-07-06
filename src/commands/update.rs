@@ -85,9 +85,6 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
                 total_updated += u;
                 total_unchanged += unch;
             }
-            if total_updated == 0 {
-                info(&format!("  {} already up to date", total_unchanged));
-            }
             if changed {
                 state.save(&state_path)?;
                 regenerate_flake(&flake_dir, &state)?;
@@ -158,9 +155,6 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
                 total_updated += u;
                 total_unchanged += unch;
             }
-            if total_updated == 0 {
-                info(&format!("  {} already up to date", total_unchanged));
-            }
             if changed {
                 state.save(&state_path)?;
                 regenerate_flake(&flake_dir, &state)?;
@@ -183,13 +177,11 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
 
     if !inputs.is_empty() {
         success(&format!("Updated: {}", inputs.join(", ")));
-    } else if total_updated > 0 {
+    } else {
         success(&format!(
             "{} updated, {} already up to date",
             total_updated, total_unchanged
         ));
-    } else {
-        success("All packages up to date");
     }
 
     Ok(())
@@ -283,9 +275,6 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
                     nixy_total_unchanged += unch;
                 }
             }
-            if nixy_total_updated == 0 {
-                info(&format!("  {} already up to date", nixy_total_unchanged));
-            }
             if changed {
                 nixy_config.save(config)?;
                 config_modified = true;
@@ -375,9 +364,6 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
                     nixy_total_unchanged += unch;
                 }
             }
-            if nixy_total_updated == 0 {
-                info(&format!("  {} already up to date", nixy_total_unchanged));
-            }
             if changed {
                 nixy_config.save(config)?;
                 config_modified = true;
@@ -425,13 +411,11 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
 
     if !inputs.is_empty() {
         success(&format!("Updated: {}", inputs.join(", ")));
-    } else if nixy_total_updated > 0 {
+    } else {
         success(&format!(
             "{} updated, {} already up to date",
             nixy_total_updated, nixy_total_unchanged
         ));
-    } else {
-        success("All packages up to date");
     }
 
     Ok(())
@@ -457,10 +441,10 @@ fn upgrade_resolved_packages(
                     if resolved.version != existing.resolved_version
                         || resolved.commit_hash != existing.commit_hash
                     {
-                        info(&format!(
+                        println!(
                             "  {} {} -> {}",
                             name, existing.resolved_version, resolved.version,
-                        ));
+                        );
                         updated += 1;
 
                         // Update the package, preserving platform restrictions
@@ -505,10 +489,10 @@ fn upgrade_resolved_packages_in_profile(
                     if resolved.version != existing.resolved_version
                         || resolved.commit_hash != existing.commit_hash
                     {
-                        info(&format!(
+                        println!(
                             "  {} {} -> {}",
                             name, existing.resolved_version, resolved.version,
-                        ));
+                        );
                         updated += 1;
 
                         profile.add_resolved_package(ResolvedNixpkgPackage {
@@ -562,7 +546,7 @@ fn upgrade_custom_packages(
                     unchanged += 1;
                 } else {
                     let from = pkg.rev.as_deref().map(short_rev).unwrap_or("unpinned");
-                    info(&format!("  {} {} -> {}", name, from, short_rev(&rev)));
+                    println!("  {} {} -> {}", name, from, short_rev(&rev));
                     pkg.rev = Some(rev);
                     changed = true;
                     updated += 1;
