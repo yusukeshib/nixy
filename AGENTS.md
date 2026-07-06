@@ -72,7 +72,7 @@ cargo test
 All tests must pass before committing.
 
 ### 6. Update Version
-- Bump version in `Cargo.toml`
+- Bump version in **both** `Cargo.toml` and `flake.nix` (always update both together)
 - Use semantic versioning (MAJOR.MINOR.PATCH)
 
 ### 7. Commit, Push, and Create PR
