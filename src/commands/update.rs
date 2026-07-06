@@ -44,6 +44,9 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
         regenerate_flake(&flake_dir, &state)?;
     }
 
+    let mut total_updated = 0usize;
+    let mut total_unchanged = 0usize;
+
     if !inputs.is_empty() {
         // Check if inputs are package names or flake input names
         let resolved_names: Vec<String> = state
@@ -66,13 +69,24 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
 
         // Upgrade resolved packages and re-pin custom flake packages
         if !packages_to_upgrade.is_empty() || !custom_to_upgrade.is_empty() {
+            let total = packages_to_upgrade.len() + custom_to_upgrade.len();
+            info(&format!("Checking {} package(s)...", total));
             let mut changed = false;
             if !packages_to_upgrade.is_empty() {
-                upgrade_resolved_packages(&mut state, &packages_to_upgrade)?;
-                changed = true;
+                let (u, unch) = upgrade_resolved_packages(&mut state, &packages_to_upgrade)?;
+                total_updated += u;
+                total_unchanged += unch;
+                changed = u > 0;
             }
             if !custom_to_upgrade.is_empty() {
-                changed |= upgrade_custom_packages(&mut state.custom_packages, &custom_to_upgrade);
+                let (c, u, unch) =
+                    upgrade_custom_packages(&mut state.custom_packages, &custom_to_upgrade);
+                changed |= c;
+                total_updated += u;
+                total_unchanged += unch;
+            }
+            if total_updated == 0 {
+                info(&format!("  {} already up to date", total_unchanged));
             }
             if changed {
                 state.save(&state_path)?;
@@ -127,15 +141,25 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
             .collect();
 
         if !all_resolved.is_empty() || !all_custom.is_empty() {
+            let total = all_resolved.len() + all_custom.len();
+            info(&format!("Checking {} package(s)...", total));
             let mut changed = false;
             if !all_resolved.is_empty() {
                 let refs: Vec<&String> = all_resolved.iter().collect();
-                upgrade_resolved_packages(&mut state, &refs)?;
-                changed = true;
+                let (u, unch) = upgrade_resolved_packages(&mut state, &refs)?;
+                total_updated += u;
+                total_unchanged += unch;
+                changed = u > 0;
             }
             if !all_custom.is_empty() {
                 let refs: Vec<&String> = all_custom.iter().collect();
-                changed |= upgrade_custom_packages(&mut state.custom_packages, &refs);
+                let (c, u, unch) = upgrade_custom_packages(&mut state.custom_packages, &refs);
+                changed |= c;
+                total_updated += u;
+                total_unchanged += unch;
+            }
+            if total_updated == 0 {
+                info(&format!("  {} already up to date", total_unchanged));
             }
             if changed {
                 state.save(&state_path)?;
@@ -144,8 +168,8 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
         }
 
         // Also update all flake inputs (for legacy packages)
-        info("Updating all flake inputs...");
-        Nix::flake_update_all(&flake_dir)?;
+        info("Updating flake inputs...");
+        Nix::flake_update_all(&flake_dir)?
     }
 
     info("Rebuilding environment...");
@@ -159,8 +183,13 @@ pub fn run(config: &Config, args: UpdateArgs) -> Result<()> {
 
     if !inputs.is_empty() {
         success(&format!("Updated: {}", inputs.join(", ")));
+    } else if total_updated > 0 {
+        success(&format!(
+            "{} updated, {} already up to date",
+            total_updated, total_unchanged
+        ));
     } else {
-        success("All packages updated");
+        success("All packages up to date");
     }
 
     Ok(())
@@ -198,6 +227,8 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
 
     // Track whether we modified the config (need rollback support)
     let mut config_modified = false;
+    let mut nixy_total_updated = 0usize;
+    let mut nixy_total_unchanged = 0usize;
 
     if !inputs.is_empty() {
         // Get resolved + custom package names (scope the borrow)
@@ -230,19 +261,30 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
 
         // Upgrade resolved (nixpkgs) packages and re-pin custom flake packages.
         if !packages_to_upgrade.is_empty() || !custom_to_upgrade.is_empty() {
+            let total = packages_to_upgrade.len() + custom_to_upgrade.len();
+            info(&format!("Checking {} package(s)...", total));
             let mut changed = false;
             {
                 let profile = nixy_config
                     .get_active_profile_mut()
                     .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
                 if !packages_to_upgrade.is_empty() {
-                    upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
-                    changed = true;
+                    let (u, unch) =
+                        upgrade_resolved_packages_in_profile(profile, &packages_to_upgrade)?;
+                    nixy_total_updated += u;
+                    nixy_total_unchanged += unch;
+                    changed = u > 0;
                 }
                 if !custom_to_upgrade.is_empty() {
-                    changed |=
+                    let (c, u, unch) =
                         upgrade_custom_packages(&mut profile.custom_packages, &custom_to_upgrade);
+                    changed |= c;
+                    nixy_total_updated += u;
+                    nixy_total_unchanged += unch;
                 }
+            }
+            if nixy_total_updated == 0 {
+                info(&format!("  {} already up to date", nixy_total_unchanged));
             }
             if changed {
                 nixy_config.save(config)?;
@@ -311,6 +353,8 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
         };
 
         if !all_resolved.is_empty() || !all_custom.is_empty() {
+            let total = all_resolved.len() + all_custom.len();
+            info(&format!("Checking {} package(s)...", total));
             let mut changed = false;
             {
                 let profile = nixy_config
@@ -318,13 +362,21 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
                     .ok_or_else(|| Error::ProfileNotFound(active_profile.clone()))?;
                 if !all_resolved.is_empty() {
                     let refs: Vec<&String> = all_resolved.iter().collect();
-                    upgrade_resolved_packages_in_profile(profile, &refs)?;
-                    changed = true;
+                    let (u, unch) = upgrade_resolved_packages_in_profile(profile, &refs)?;
+                    nixy_total_updated += u;
+                    nixy_total_unchanged += unch;
+                    changed = u > 0;
                 }
                 if !all_custom.is_empty() {
                     let refs: Vec<&String> = all_custom.iter().collect();
-                    changed |= upgrade_custom_packages(&mut profile.custom_packages, &refs);
+                    let (c, u, unch) = upgrade_custom_packages(&mut profile.custom_packages, &refs);
+                    changed |= c;
+                    nixy_total_updated += u;
+                    nixy_total_unchanged += unch;
                 }
+            }
+            if nixy_total_updated == 0 {
+                info(&format!("  {} already up to date", nixy_total_unchanged));
             }
             if changed {
                 nixy_config.save(config)?;
@@ -334,7 +386,7 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
             }
         }
 
-        info("Updating all flake inputs...");
+        info("Updating flake inputs...");
         Nix::flake_update_all(&flake_dir)?;
     }
 
@@ -373,22 +425,32 @@ fn upgrade_with_nixy_config(config: &Config, inputs: Vec<String>) -> Result<()> 
 
     if !inputs.is_empty() {
         success(&format!("Updated: {}", inputs.join(", ")));
+    } else if nixy_total_updated > 0 {
+        success(&format!(
+            "{} updated, {} already up to date",
+            nixy_total_updated, nixy_total_unchanged
+        ));
     } else {
-        success("All packages updated");
+        success("All packages up to date");
     }
 
     Ok(())
 }
 
 /// Upgrade resolved packages by re-resolving them via Nixhub
-fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]) -> Result<()> {
+/// Returns (updated_count, unchanged_count)
+fn upgrade_resolved_packages(
+    state: &mut PackageState,
+    package_names: &[&String],
+) -> Result<(usize, usize)> {
     let client = NixhubClient::new();
+    let mut updated = 0;
+    let mut unchanged = 0;
 
     for name in package_names {
         if let Some(existing) = state.resolved_packages.iter().find(|p| &p.name == *name) {
             // Determine version to resolve
             let version = existing.version_spec.as_deref().unwrap_or("latest");
-            info(&format!("Resolving {}@{}...", name, version));
 
             match client.resolve_for_current_system(name, version) {
                 Ok(resolved) => {
@@ -396,11 +458,10 @@ fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]
                         || resolved.commit_hash != existing.commit_hash
                     {
                         info(&format!(
-                            "  {} -> {} (commit {})",
-                            existing.resolved_version,
-                            resolved.version,
-                            &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
+                            "  {} {} -> {}",
+                            name, existing.resolved_version, resolved.version,
                         ));
+                        updated += 1;
 
                         // Update the package, preserving platform restrictions
                         state.add_resolved_package(ResolvedNixpkgPackage {
@@ -412,7 +473,7 @@ fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]
                             platforms: existing.platforms.clone(),
                         });
                     } else {
-                        info(&format!("  {} is already at the latest version", name));
+                        unchanged += 1;
                     }
                 }
                 Err(e) => {
@@ -422,20 +483,22 @@ fn upgrade_resolved_packages(state: &mut PackageState, package_names: &[&String]
         }
     }
 
-    Ok(())
+    Ok((updated, unchanged))
 }
 
 /// Upgrade resolved packages in a ProfileConfig
+/// Returns (updated_count, unchanged_count)
 fn upgrade_resolved_packages_in_profile(
     profile: &mut ProfileConfig,
     package_names: &[&String],
-) -> Result<()> {
+) -> Result<(usize, usize)> {
     let client = NixhubClient::new();
+    let mut updated = 0;
+    let mut unchanged = 0;
 
     for name in package_names {
         if let Some(existing) = profile.resolved_packages.iter().find(|p| &p.name == *name) {
             let version = existing.version_spec.as_deref().unwrap_or("latest");
-            info(&format!("Resolving {}@{}...", name, version));
 
             match client.resolve_for_current_system(name, version) {
                 Ok(resolved) => {
@@ -443,11 +506,10 @@ fn upgrade_resolved_packages_in_profile(
                         || resolved.commit_hash != existing.commit_hash
                     {
                         info(&format!(
-                            "  {} -> {} (commit {})",
-                            existing.resolved_version,
-                            resolved.version,
-                            &resolved.commit_hash[..8.min(resolved.commit_hash.len())]
+                            "  {} {} -> {}",
+                            name, existing.resolved_version, resolved.version,
                         ));
+                        updated += 1;
 
                         profile.add_resolved_package(ResolvedNixpkgPackage {
                             name: resolved.name,
@@ -458,7 +520,7 @@ fn upgrade_resolved_packages_in_profile(
                             platforms: existing.platforms.clone(),
                         });
                     } else {
-                        info(&format!("  {} is already at the latest version", name));
+                        unchanged += 1;
                     }
                 }
                 Err(e) => {
@@ -468,7 +530,7 @@ fn upgrade_resolved_packages_in_profile(
         }
     }
 
-    Ok(())
+    Ok((updated, unchanged))
 }
 
 /// Truncate a git revision for display.
@@ -482,28 +544,34 @@ fn short_rev(rev: &str) -> &str {
 ///
 /// Packages whose source has no git revision, or that fail to resolve, are left
 /// untouched (a warning is printed).
-fn upgrade_custom_packages(custom_packages: &mut [CustomPackage], names: &[&String]) -> bool {
+/// Returns (changed, updated_count, unchanged_count)
+fn upgrade_custom_packages(
+    custom_packages: &mut [CustomPackage],
+    names: &[&String],
+) -> (bool, usize, usize) {
     let mut changed = false;
+    let mut updated = 0;
+    let mut unchanged = 0;
     for name in names {
         let Some(pkg) = custom_packages.iter_mut().find(|p| &p.name == *name) else {
             continue;
         };
-        info(&format!("Resolving latest revision for {}...", name));
         match Nix::resolve_flake_rev(&pkg.input_url) {
             Ok(rev) => {
                 if pkg.rev.as_deref() == Some(rev.as_str()) {
-                    info(&format!("  {} is already at the latest revision", name));
+                    unchanged += 1;
                 } else {
                     let from = pkg.rev.as_deref().map(short_rev).unwrap_or("unpinned");
-                    info(&format!("  {} -> {}", from, short_rev(&rev)));
+                    info(&format!("  {} {} -> {}", name, from, short_rev(&rev)));
                     pkg.rev = Some(rev);
                     changed = true;
+                    updated += 1;
                 }
             }
             Err(e) => warn(&format!("  Failed to resolve {}: {}", name, e)),
         }
     }
-    changed
+    (changed, updated, unchanged)
 }
 
 /// Result of classifying user-supplied `nixy update` targets.
